@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: ros2_medkit Documentation
+    url: https://selfpatch.github.io/ros2_medkit/
+    about: Check the ros2_medkit documentation for usage guidance
+  - name: ros2_medkit Issues
+    url: https://github.com/selfpatch/ros2_medkit/issues
+    about: For issues with ros2_medkit itself (not the demos)
