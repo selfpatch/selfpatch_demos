@@ -1,0 +1,21 @@
+services:
+  turtlebot3-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: turtlebot3_medkit_demo
+    environment:
+      - DISPLAY=${DISPLAY}
+      - TURTLEBOT3_MODEL=burger
+      - ROS_DOMAIN_ID=30
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    ports:
+      - "8080:8080"
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /root/demo_ws/install/setup.bash &&
+               export TURTLEBOT3_MODEL=burger &&
+               ros2 launch turtlebot3_medkit_demo demo.launch.py"
