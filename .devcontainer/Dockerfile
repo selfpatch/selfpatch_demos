@@ -35,6 +35,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y \
     clang-format \
     graphviz \
     plantuml \
+    shellcheck \
+    yamllint \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
