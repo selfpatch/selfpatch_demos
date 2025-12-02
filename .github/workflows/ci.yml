@@ -12,3 +12,34 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Check for trailing whitespace
+        run: |
+          ! git grep -I --line-number --perl-regexp '\s+$' -- \
+            '*.md' '*.py' '*.yaml' '*.yml' || \
+          (echo "Found trailing whitespace in the files above" && exit 1)
+
+      - name: Check shell scripts with shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          find . -name "*.sh" -o -name "*.bash" -type f | xargs shellcheck
+
+      - name: Validate YAML files
+        run: |
+          sudo apt-get update && sudo apt-get install -y yamllint
+          YAMLLINT_CONFIG="{extends: relaxed, rules: {line-length: {max: 120}}}"
+          find . -name "*.yaml" -o -name "*.yml" | xargs yamllint -d "$YAMLLINT_CONFIG"
+
+  docker-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build TurtleBot3 demo image
+        run: |
+          cd demos/turtlebot3_integration
+          docker build -t turtlebot3-medkit-demo:test -f Dockerfile .

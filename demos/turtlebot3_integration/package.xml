@@ -3,7 +3,7 @@
 <package format="3">
   <name>turtlebot3_medkit_demo</name>
   <version>0.1.0</version>
-  <description>TurtleBot3 + ros2_medkit integration demo</description>
+  <description>TurtleBot3 + ros2_medkit integration demo with Nav2 navigation</description>
   <maintainer email="demo@example.com">Demo Maintainer</maintainer>
   <license>Apache-2.0</license>
 
@@ -12,6 +12,15 @@
   <exec_depend>ros2launch</exec_depend>
   <exec_depend>turtlebot3_gazebo</exec_depend>
   <exec_depend>ros2_medkit_gateway</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_bt_navigator</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_planner</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
