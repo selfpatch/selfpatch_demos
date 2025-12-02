@@ -43,7 +43,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y \
 # Add ROS 2 repository and install ROS 2 Jazzy
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
     | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) main" \
+    echo "deb [signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) main" \
     > /etc/apt/sources.list.d/ros2.list
 
 RUN apt-get update && apt-get install -y \

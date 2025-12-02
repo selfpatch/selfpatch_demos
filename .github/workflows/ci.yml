@@ -22,13 +22,13 @@ jobs:
       - name: Check shell scripts with shellcheck
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          find . -name "*.sh" -o -name "*.bash" -type f | xargs shellcheck
+          find . \( -name "*.sh" -o -name "*.bash" \) -type f | xargs shellcheck
 
       - name: Validate YAML files
         run: |
           sudo apt-get update && sudo apt-get install -y yamllint
           YAMLLINT_CONFIG="{extends: relaxed, rules: {line-length: {max: 120}}}"
-          find . -name "*.yaml" -o -name "*.yml" | xargs yamllint -d "$YAMLLINT_CONFIG"
+          find . \( -name "*.yaml" -o -name "*.yml" \) -type f | xargs yamllint -d "$YAMLLINT_CONFIG"
 
   docker-build:
     runs-on: ubuntu-24.04

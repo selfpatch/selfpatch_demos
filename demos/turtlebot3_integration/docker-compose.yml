@@ -66,5 +66,3 @@ services:
     container_name: sovd_web_ui
     ports:
       - "3000:80"
-    depends_on:
-      - turtlebot3-demo

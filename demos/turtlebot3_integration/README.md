@@ -196,8 +196,7 @@ These appear as **components** in the ros2_medkit REST API, organized into **are
 ```text
 demos/turtlebot3_integration/
 ├── Dockerfile                  # ROS 2 Jazzy + TurtleBot3 + Nav2 + ros2_medkit
-├── docker-compose.yml          # Standard (CPU) configuration
-├── docker-compose.nvidia.yml   # NVIDIA GPU configuration
+├── docker-compose.yml          # Docker Compose (CPU & GPU via profiles)
 ├── run-demo.sh                 # One-click demo launcher
 ├── config/
 │   ├── medkit_params.yaml      # ros2_medkit gateway config
