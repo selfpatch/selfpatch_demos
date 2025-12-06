@@ -37,13 +37,50 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Select compose profile
-if [[ "${1:-}" == "--nvidia" ]]; then
-    echo "Using NVIDIA GPU acceleration"
-    COMPOSE_ARGS="--profile nvidia"
-else
+# Parse arguments
+COMPOSE_ARGS=""
+BUILD_ARGS=""
+
+usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --nvidia     Use NVIDIA GPU acceleration"
+    echo "  --no-cache   Build Docker images without cache"
+    echo "  -h, --help   Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0                      # CPU-only mode"
+    echo "  $0 --nvidia             # With GPU acceleration"
+    echo "  $0 --no-cache           # Rebuild without cache"
+    echo "  $0 --nvidia --no-cache  # Both options"
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --nvidia)
+            echo "Using NVIDIA GPU acceleration"
+            COMPOSE_ARGS="--profile nvidia"
+            ;;
+        --no-cache)
+            echo "Building without cache"
+            BUILD_ARGS="--no-cache"
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+if [[ -z "$COMPOSE_ARGS" ]]; then
     echo "Using CPU-only mode (use --nvidia flag for GPU acceleration)"
-    COMPOSE_ARGS=""
 fi
 
 # Build and run
@@ -60,8 +97,10 @@ echo ""
 
 if docker compose version &> /dev/null; then
     # shellcheck disable=SC2086
-    docker compose ${COMPOSE_ARGS} up --build
+    docker compose ${COMPOSE_ARGS} build ${BUILD_ARGS} && \
+    docker compose ${COMPOSE_ARGS} up
 else
     # shellcheck disable=SC2086
-    docker-compose ${COMPOSE_ARGS} up --build
+    docker-compose ${COMPOSE_ARGS} build ${BUILD_ARGS} && \
+    docker-compose ${COMPOSE_ARGS} up
 fi

@@ -148,7 +148,18 @@ curl -X POST http://localhost:8080/api/v1/topics/publish ...
 
 ## What You'll See
 
-When TurtleBot3 simulation starts with Nav2, ros2_medkit will discover nodes such as:
+When TurtleBot3 simulation starts with Nav2, ros2_medkit will discover nodes organized into **areas** based on their ROS 2 namespaces:
+
+### Areas (Namespaces)
+
+| Area | Namespace | Description |
+|------|-----------|-------------|
+| `root` | `/` | TurtleBot3, Nav2, and Gazebo nodes |
+| `diagnostics` | `/diagnostics` | ros2_medkit gateway |
+
+### Components
+
+**Root** (`/`) - Main robot system:
 
 - `turtlebot3_node` - Main robot interface
 - `robot_state_publisher` - TF tree publisher
@@ -157,9 +168,15 @@ When TurtleBot3 simulation starts with Nav2, ros2_medkit will discover nodes suc
 - `bt_navigator` - Behavior Tree Navigator
 - `controller_server` - Path following controller
 - `planner_server` - Global path planner
-- Various sensor and lifecycle nodes
+- `velocity_smoother` - Velocity command smoother
+- Various lifecycle and manager nodes
 
-These appear as **components** in the ros2_medkit REST API, organized into **areas** based on their ROS 2 namespaces.
+**Diagnostics** (`/diagnostics`):
+
+- `ros2_medkit_gateway` - REST API gateway
+
+This demonstrates ros2_medkit's ability to discover ROS 2 nodes and organize them into areas.
+For a more hierarchical demo with multiple areas, see the [ros2_medkit demo nodes](https://github.com/selfpatch/ros2_medkit/tree/main/src/ros2_medkit_gateway#demo-nodes) which use namespaces like `/powertrain`, `/chassis`, and `/body`.
 
 ## Architecture
 
