@@ -40,12 +40,13 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create workspace and clone ros2_medkit
-# TODO: Replace with proper ROS 2 package dependency once ros2_medkit is released
+# Clone ros2_medkit from GitHub
 WORKDIR ${COLCON_WS}/src
-RUN git clone https://github.com/selfpatch/ros2_medkit.git
+RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
+    mv ros2_medkit/src/ros2_medkit_gateway . && \
+    rm -rf ros2_medkit
 
-# Copy demo package
+# Copy demo package from local context (this repo)
 COPY package.xml CMakeLists.txt ${COLCON_WS}/src/turtlebot3_medkit_demo/
 COPY config/ ${COLCON_WS}/src/turtlebot3_medkit_demo/config/
 COPY launch/ ${COLCON_WS}/src/turtlebot3_medkit_demo/launch/

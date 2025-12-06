@@ -58,8 +58,6 @@ services:
                ros2 launch turtlebot3_medkit_demo demo.launch.py"
 
   sovd-web-ui:
-    # TODO: Replace with Docker Hub image once sovd_web_ui is published
-    # For now, we clone and build from GitHub
     build:
       context: https://github.com/selfpatch/sovd_web_ui.git
       dockerfile: Dockerfile

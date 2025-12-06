@@ -1,11 +1,20 @@
 # ros2_medkit gateway configuration for TurtleBot3 demo
-ros2_medkit_gateway:
-  ros__parameters:
-    server.host: "0.0.0.0"
-    server.port: 8080
-    refresh_interval_ms: 2000
-    cors.allowed_origins: ["*"]
-    cors.allowed_methods: ["GET", "PUT", "POST", "OPTIONS"]
-    cors.allowed_headers: ["Content-Type", "Accept"]
-    cors.allow_credentials: false
-    cors.max_age_seconds: 86400
+# Node runs under /diagnostics namespace, so we need to match that here
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      server:
+        # Bind to all interfaces for Docker networking
+        host: "0.0.0.0"
+        port: 8080
+
+      refresh_interval_ms: 2000
+
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: ["GET", "PUT", "POST", "OPTIONS"]
+        allowed_headers: ["Content-Type", "Accept"]
+        allow_credentials: false
+        max_age_seconds: 86400
+
+      max_parallel_topic_samples: 10
