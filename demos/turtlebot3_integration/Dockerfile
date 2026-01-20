@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y \
     ros-jazzy-ament-cmake-gtest \
     ros-jazzy-ament-cmake-pytest \
     ros-jazzy-launch-testing-ament-cmake \
+    ros-jazzy-test-msgs \
     python3-colcon-common-extensions \
     python3-requests \
     nlohmann-json3-dev \
@@ -42,8 +43,11 @@ RUN apt-get update && apt-get install -y \
 
 # Clone ros2_medkit from GitHub
 WORKDIR ${COLCON_WS}/src
-RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
-    mv ros2_medkit/src/ros2_medkit_gateway . && \
+RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_medkit.git && \
+    mv ros2_medkit/src/ros2_medkit_gateway \
+       ros2_medkit/src/ros2_medkit_msgs \
+       ros2_medkit/src/ros2_medkit_serialization \
+       ros2_medkit/src/dynamic_message_introspection . && \
     rm -rf ros2_medkit
 
 # Copy demo package from local context (this repo)
