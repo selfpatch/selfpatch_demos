@@ -32,7 +32,7 @@ echo_error() {
 
 wait_for_gateway() {
     echo "Waiting for gateway to be ready..."
-    for i in {1..30}; do
+    for _ in {1..30}; do
         if curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
             echo_success "Gateway is ready!"
             return 0
