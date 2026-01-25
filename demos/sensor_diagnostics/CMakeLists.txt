@@ -13,6 +13,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
+find_package(ros2_medkit_msgs REQUIRED)
 
 # LiDAR simulator node
 add_executable(lidar_sim_node src/lidar_sim_node.cpp)
@@ -52,6 +53,7 @@ ament_target_dependencies(anomaly_detector_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
+  ros2_medkit_msgs
 )
 
 # Install executables

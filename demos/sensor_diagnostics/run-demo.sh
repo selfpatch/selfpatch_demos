@@ -57,10 +57,10 @@ echo_step "2. Listing All Areas (Namespaces)"
 curl -s "${API_BASE}/areas" | jq '.'
 
 echo_step "3. Listing All Components"
-curl -s "${API_BASE}/components" | jq '.[] | {id: .id, name: .name, area: .area}'
+curl -s "${API_BASE}/components" | jq '.items[] | {id: .id, name: .name, area: .area}'
 
 echo_step "4. Listing All Apps (ROS 2 Nodes)"
-curl -s "${API_BASE}/apps" | jq '.[] | {id: .id, name: .name, namespace: .namespace}'
+curl -s "${API_BASE}/apps" | jq '.items[] | {id: .id, name: .name, namespace: .namespace}'
 
 echo_step "5. Reading LiDAR Data"
 echo "Getting latest scan from LiDAR simulator..."
@@ -90,7 +90,7 @@ curl -s "${API_BASE}/apps/gps_sim/data/fix" | jq '{
 
 echo_step "8. Listing LiDAR Configurations"
 echo "These parameters can be modified at runtime to inject faults..."
-curl -s "${API_BASE}/apps/lidar_sim/configurations" | jq '.[] | {name: .name, value: .value, type: .type}'
+curl -s "${API_BASE}/apps/lidar_sim/configurations" | jq '.items[] | {name: .name, value: .value, type: .type}'
 
 echo_step "9. Checking Current Faults"
 curl -s "${API_BASE}/faults" | jq '.'

@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     python3-requests \
     nlohmann-json3-dev \
     libcpp-httplib-dev \
+    libsqlite3-dev \
     git \
     curl \
     jq \
@@ -31,6 +32,7 @@ RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_m
     mv ros2_medkit/src/ros2_medkit_gateway . && \
     mv ros2_medkit/src/ros2_medkit_serialization . && \
     mv ros2_medkit/src/ros2_medkit_msgs . && \
+    mv ros2_medkit/src/ros2_medkit_fault_manager . && \
     mv ros2_medkit/src/dynamic_message_introspection/dynmsg . && \
     rm -rf ros2_medkit
 
@@ -46,7 +48,7 @@ WORKDIR ${COLCON_WS}
 RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y \
-      --skip-keys='ament_cmake_clang_format ament_cmake_clang_tidy test_msgs example_interfaces ros2_medkit_fault_manager' && \
+      --skip-keys='ament_cmake_clang_format ament_cmake_clang_tidy test_msgs example_interfaces sqlite3' && \
     colcon build --symlink-install --cmake-args -DBUILD_TESTING=OFF"
 
 # Setup environment

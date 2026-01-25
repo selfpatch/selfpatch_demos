@@ -92,5 +92,16 @@ def generate_launch_description():
                     {"manifest.path": manifest_file},
                 ],
             ),
+            # ===== Fault Manager (under /fault_manager namespace) =====
+            # Note: Gateway expects services at /fault_manager/*, so we use root namespace
+            # and node name "fault_manager" to get /fault_manager/get_faults etc.
+            Node(
+                package="ros2_medkit_fault_manager",
+                executable="fault_manager_node",
+                name="fault_manager",
+                namespace="",  # Root namespace so services are at /fault_manager/*
+                output="screen",
+                parameters=[{"use_sim_time": use_sim_time}],
+            ),
         ]
     )
