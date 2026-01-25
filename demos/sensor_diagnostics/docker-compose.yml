@@ -1,0 +1,48 @@
+services:
+  # Main demo service - runs all sensor nodes + gateway
+  sensor-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sensor_diagnostics_demo
+    environment:
+      - ROS_DOMAIN_ID=40
+    ports:
+      - "8080:8080"
+    stdin_open: true
+    tty: true
+    # Default command launches the full demo
+    # Override with: docker compose run sensor-demo bash
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /root/demo_ws/install/setup.bash &&
+               ros2 launch sensor_diagnostics_demo demo.launch.py"
+
+  # Web UI for visualization (optional)
+  sovd-web-ui:
+    image: ghcr.io/selfpatch/sovd_web_ui:latest
+    container_name: sovd_web_ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - sensor-demo
+
+  # For CI testing - headless mode with quick exit
+  sensor-demo-ci:
+    profiles: ["ci"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sensor_diagnostics_demo_ci
+    environment:
+      - ROS_DOMAIN_ID=40
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /root/demo_ws/install/setup.bash &&
+               ros2 launch sensor_diagnostics_demo demo.launch.py &
+               sleep 10 &&
+               curl -sf http://localhost:8080/api/v1/health &&
+               curl -sf http://localhost:8080/api/v1/apps | jq '.[] | .name' &&
+               echo 'CI validation passed!'"
