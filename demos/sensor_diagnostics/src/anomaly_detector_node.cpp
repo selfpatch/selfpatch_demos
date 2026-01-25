@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /// @file anomaly_detector_node.cpp
-/// @brief Monitors sensor streams and reports detected anomalies as faults
+/// @brief Monitors IMU and GPS sensors and reports detected anomalies as faults
 ///
-/// Subscribes to sensor topics and diagnostics, detects anomalies,
-/// and reports faults to the FaultManager service.
+/// This node implements the MODERN fault reporting path:
+/// - Subscribes to IMU and GPS topics
+/// - Detects anomalies (NaN values, out-of-range, timeouts)
+/// - Reports faults directly to FaultManager via ReportFault service
+///
+/// Note: LiDAR and Camera use the LEGACY path (diagnostics → diagnostic_bridge → FaultManager)
 
 #include <chrono>
 #include <cmath>
@@ -19,7 +23,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "ros2_medkit_msgs/srv/report_fault.hpp"
 #include "sensor_msgs/msg/imu.hpp"
-#include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 
 namespace sensor_diagnostics
@@ -34,18 +37,14 @@ public:
     // Declare parameters for thresholds
     this->declare_parameter("rate_timeout_sec", 5.0);
     this->declare_parameter("max_nan_ratio", 0.1);
-    this->declare_parameter("lidar_rate_min", 5.0);
     this->declare_parameter("imu_rate_min", 50.0);
     this->declare_parameter("gps_rate_min", 0.5);
 
     rate_timeout_sec_ = this->get_parameter("rate_timeout_sec").as_double();
     max_nan_ratio_ = this->get_parameter("max_nan_ratio").as_double();
 
-    // Create subscribers - topics are in /sensors namespace with simple names
-    lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-      "/sensors/scan", 10,
-      std::bind(&AnomalyDetectorNode::lidar_callback, this, std::placeholders::_1));
-
+    // Create subscribers for MODERN path sensors (IMU, GPS)
+    // Note: LiDAR and Camera use LEGACY path via /diagnostics → diagnostic_bridge
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
       "/sensors/imu", 10,
       std::bind(&AnomalyDetectorNode::imu_callback, this, std::placeholders::_1));
@@ -54,11 +53,11 @@ public:
       "/sensors/fix", 10,
       std::bind(&AnomalyDetectorNode::gps_callback, this, std::placeholders::_1));
 
-    // Create publisher for detected faults (legacy diagnostic topic)
+    // Create publisher for detected faults (supplementary diagnostic topic)
     fault_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
       "detected_faults", 10);
 
-    // Create service client for FaultManager
+    // Create service client for FaultManager (MODERN path)
     report_fault_client_ = this->create_client<ros2_medkit_msgs::srv::ReportFault>(
       "/fault_manager/report_fault");
 
@@ -72,42 +71,10 @@ public:
       std::chrono::seconds(2),
       std::bind(&AnomalyDetectorNode::clear_passed_faults, this));
 
-    RCLCPP_INFO(this->get_logger(), "Anomaly detector started");
+    RCLCPP_INFO(this->get_logger(), "Anomaly detector started (modern path: IMU, GPS)");
   }
 
 private:
-  void lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
-  {
-    sensor_timestamps_["lidar"] = this->now();
-    lidar_msg_count_++;
-
-    // Check for NaN values
-    int nan_count = 0;
-    for (const auto & range : msg->ranges) {
-      if (std::isnan(range)) {
-        nan_count++;
-      }
-    }
-
-    double nan_ratio = static_cast<double>(nan_count) / static_cast<double>(msg->ranges.size());
-    if (nan_ratio > max_nan_ratio_) {
-      report_fault("lidar_sim", "SENSOR_NAN",
-        "LiDAR has " + std::to_string(static_cast<int>(nan_ratio * 100)) + "% NaN values");
-    }
-
-    // Check for all-zero ranges (sensor malfunction)
-    bool all_min = true;
-    for (const auto & range : msg->ranges) {
-      if (!std::isnan(range) && range > msg->range_min + 0.01) {
-        all_min = false;
-        break;
-      }
-    }
-    if (all_min && !msg->ranges.empty()) {
-      report_fault("lidar_sim", "SENSOR_MALFUNCTION", "LiDAR returns all minimum range values");
-    }
-  }
-
   void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
   {
     sensor_timestamps_["imu"] = this->now();
@@ -168,31 +135,21 @@ private:
   {
     auto now = this->now();
 
-    // Check for sensor timeouts
-    check_timeout("lidar", now);
+    // Check for sensor timeouts (modern path sensors only)
     check_timeout("imu", now);
     check_timeout("gps", now);
 
     // Calculate and log rates
     double elapsed = 1.0;  // 1 second timer
-    double lidar_rate = (lidar_msg_count_ - last_lidar_count_) / elapsed;
     double imu_rate = (imu_msg_count_ - last_imu_count_) / elapsed;
     double gps_rate = (gps_msg_count_ - last_gps_count_) / elapsed;
 
-    last_lidar_count_ = lidar_msg_count_;
     last_imu_count_ = imu_msg_count_;
     last_gps_count_ = gps_msg_count_;
 
     // Check for degraded rates
-    double lidar_rate_min = this->get_parameter("lidar_rate_min").as_double();
     double imu_rate_min = this->get_parameter("imu_rate_min").as_double();
     double gps_rate_min = this->get_parameter("gps_rate_min").as_double();
-
-    if (lidar_rate > 0 && lidar_rate < lidar_rate_min) {
-      report_fault("lidar_sim", "RATE_DEGRADED",
-        "LiDAR rate: " + std::to_string(lidar_rate) + " Hz (min: " +
-        std::to_string(lidar_rate_min) + ")");
-    }
 
     if (imu_rate > 0 && imu_rate < imu_rate_min) {
       report_fault("imu_sim", "RATE_DEGRADED",
@@ -292,8 +249,7 @@ private:
     // This is handled implicitly by the health check timer
   }
 
-  // Subscribers
-  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr lidar_sub_;
+  // Subscribers (modern path: IMU, GPS only)
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gps_sub_;
 
@@ -314,10 +270,8 @@ private:
   // State tracking
   std::map<std::string, rclcpp::Time> sensor_timestamps_;
   std::set<std::string> active_faults_;
-  uint64_t lidar_msg_count_{0};
   uint64_t imu_msg_count_{0};
   uint64_t gps_msg_count_{0};
-  uint64_t last_lidar_count_{0};
   uint64_t last_imu_count_{0};
   uint64_t last_gps_count_{0};
 };

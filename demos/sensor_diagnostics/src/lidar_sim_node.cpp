@@ -6,6 +6,8 @@
 ///
 /// This node publishes simulated LaserScan messages with realistic patterns
 /// and supports runtime fault injection via ROS 2 parameters.
+/// Diagnostics are published to /diagnostics for the legacy fault reporting path
+/// via ros2_medkit_diagnostic_bridge.
 
 #include <chrono>
 #include <cmath>
@@ -15,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "diagnostic_msgs/msg/diagnostic_status.hpp"
 #include "diagnostic_msgs/msg/key_value.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -51,8 +54,9 @@ public:
 
     // Create publisher
     scan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("scan", 10);
-    diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticStatus>(
-      "diagnostics", 10);
+    // Publish to absolute /diagnostics topic for legacy fault reporting via diagnostic_bridge
+    diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
+      "/diagnostics", 10);
 
     // Calculate publish period from rate
     double rate = this->get_parameter("scan_rate").as_double();
@@ -213,8 +217,12 @@ private:
 
   void publish_diagnostics(const std::string & status, const std::string & message)
   {
+    auto diag_array = diagnostic_msgs::msg::DiagnosticArray();
+    diag_array.header.stamp = this->now();
+
     auto diag = diagnostic_msgs::msg::DiagnosticStatus();
     diag.name = "lidar_sim";
+    diag.hardware_id = "lidar_sensor";
 
     if (status == "OK") {
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
@@ -244,12 +252,13 @@ private:
     kv.value = std::to_string(failure_probability_);
     diag.values.push_back(kv);
 
-    diag_pub_->publish(diag);
+    diag_array.status.push_back(diag);
+    diag_pub_->publish(diag_array);
   }
 
   // Publishers
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
-  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticStatus>::SharedPtr diag_pub_;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_pub_;
 
   // Timer
   rclcpp::TimerBase::SharedPtr timer_;

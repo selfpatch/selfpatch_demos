@@ -6,6 +6,8 @@
 ///
 /// Publishes simulated Image and CameraInfo messages
 /// and supports runtime fault injection via ROS 2 parameters.
+/// Diagnostics are published to /diagnostics for the legacy fault reporting path
+/// via ros2_medkit_diagnostic_bridge.
 
 #include <chrono>
 #include <cmath>
@@ -13,6 +15,7 @@
 #include <random>
 #include <vector>
 
+#include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "diagnostic_msgs/msg/diagnostic_status.hpp"
 #include "diagnostic_msgs/msg/key_value.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -46,8 +49,9 @@ public:
     // Create publishers
     image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("image_raw", 10);
     info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("camera_info", 10);
-    diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticStatus>(
-      "diagnostics", 10);
+    // Publish to absolute /diagnostics topic for legacy fault reporting via diagnostic_bridge
+    diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
+      "/diagnostics", 10);
 
     // Create timer
     double rate = this->get_parameter("rate").as_double();
@@ -195,8 +199,12 @@ private:
 
   void publish_diagnostics(const std::string & status, const std::string & message)
   {
+    auto diag_array = diagnostic_msgs::msg::DiagnosticArray();
+    diag_array.header.stamp = this->now();
+
     auto diag = diagnostic_msgs::msg::DiagnosticStatus();
     diag.name = "camera_sim";
+    diag.hardware_id = "camera_sensor";
 
     if (status == "OK") {
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
@@ -225,13 +233,14 @@ private:
     kv.value = std::to_string(noise_level_);
     diag.values.push_back(kv);
 
-    diag_pub_->publish(diag);
+    diag_array.status.push_back(diag);
+    diag_pub_->publish(diag_array);
   }
 
   // Publishers
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr info_pub_;
-  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticStatus>::SharedPtr diag_pub_;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_pub_;
 
   // Timer
   rclcpp::TimerBase::SharedPtr timer_;
