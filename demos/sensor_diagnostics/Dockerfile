@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     ros-jazzy-ament-lint-common \
     ros-jazzy-ament-cmake-gtest \
     ros-jazzy-yaml-cpp-vendor \
+    ros-jazzy-example-interfaces \
     python3-colcon-common-extensions \
     python3-requests \
     nlohmann-json3-dev \
@@ -26,7 +27,7 @@ RUN apt-get update && apt-get install -y \
 
 # Clone ros2_medkit from GitHub (gateway + dependencies)
 WORKDIR ${COLCON_WS}/src
-RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
+RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_medkit.git && \
     mv ros2_medkit/src/ros2_medkit_gateway . && \
     mv ros2_medkit/src/ros2_medkit_serialization . && \
     mv ros2_medkit/src/ros2_medkit_msgs . && \
@@ -40,12 +41,13 @@ COPY src/ ${COLCON_WS}/src/sensor_diagnostics_demo/src/
 COPY config/ ${COLCON_WS}/src/sensor_diagnostics_demo/config/
 COPY launch/ ${COLCON_WS}/src/sensor_diagnostics_demo/launch/
 
-# Build all packages
+# Build all packages (skip test dependencies that aren't in ros-base)
 WORKDIR ${COLCON_WS}
 RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y && \
-    colcon build --symlink-install"
+    rosdep install --from-paths src --ignore-src -r -y \
+      --skip-keys='ament_cmake_clang_format ament_cmake_clang_tidy test_msgs example_interfaces ros2_medkit_fault_manager' && \
+    colcon build --symlink-install --cmake-args -DBUILD_TESTING=OFF"
 
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
