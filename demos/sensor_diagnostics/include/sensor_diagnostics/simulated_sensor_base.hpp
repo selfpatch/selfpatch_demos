@@ -1,6 +1,14 @@
 // Copyright 2025 selfpatch
 // SPDX-License-Identifier: Apache-2.0
 
+/// @file simulated_sensor_base.hpp
+/// @brief Base class for simulated sensors with fault injection
+///
+/// NOTE: This header provides a reusable base class for simulated sensors.
+/// Currently, sensor nodes implement fault injection directly for simplicity.
+/// This base class is retained for future refactoring when sensors need to
+/// share common fault injection logic.
+
 #pragma once
 
 #include <random>

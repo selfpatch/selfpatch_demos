@@ -47,8 +47,15 @@ public:
     diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticStatus>(
       "diagnostics", 10);
 
-    // Create timer
+    // Create timer (with rate validation)
     double rate = this->get_parameter("rate").as_double();
+    if (rate <= 0.0) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Parameter 'rate' must be positive; using default 100.0 Hz instead of %.3f",
+        rate);
+      rate = 100.0;
+    }
     auto period = std::chrono::duration<double>(1.0 / rate);
     timer_ = this->create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),

@@ -9,6 +9,7 @@
 /// Diagnostics are published to /diagnostics for the legacy fault reporting path
 /// via ros2_medkit_diagnostic_bridge.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -58,8 +59,16 @@ public:
     diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
       "/diagnostics", 10);
 
-    // Calculate publish period from rate
+    // Calculate publish period from rate (with validation)
     double rate = this->get_parameter("scan_rate").as_double();
+    if (rate <= 0.0) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Invalid scan_rate parameter value (%f Hz). Using default 10.0 Hz instead.",
+        rate);
+      rate = 10.0;
+      this->set_parameters({rclcpp::Parameter("scan_rate", rate)});
+    }
     auto period = std::chrono::duration<double>(1.0 / rate);
 
     // Create timer

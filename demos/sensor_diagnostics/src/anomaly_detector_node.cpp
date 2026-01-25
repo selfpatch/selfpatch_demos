@@ -36,12 +36,10 @@ public:
   {
     // Declare parameters for thresholds
     this->declare_parameter("rate_timeout_sec", 5.0);
-    this->declare_parameter("max_nan_ratio", 0.1);
     this->declare_parameter("imu_rate_min", 50.0);
     this->declare_parameter("gps_rate_min", 0.5);
 
     rate_timeout_sec_ = this->get_parameter("rate_timeout_sec").as_double();
-    max_nan_ratio_ = this->get_parameter("max_nan_ratio").as_double();
 
     // Create subscribers for MODERN path sensors (IMU, GPS)
     // Note: LiDAR and Camera use LEGACY path via /diagnostics → diagnostic_bridge
@@ -65,11 +63,6 @@ public:
     timer_ = this->create_wall_timer(
       std::chrono::seconds(1),
       std::bind(&AnomalyDetectorNode::check_sensor_health, this));
-
-    // Timer for clearing passed faults (sensors recovered)
-    clear_timer_ = this->create_wall_timer(
-      std::chrono::seconds(2),
-      std::bind(&AnomalyDetectorNode::clear_passed_faults, this));
 
     RCLCPP_INFO(this->get_logger(), "Anomaly detector started (modern path: IMU, GPS)");
   }
@@ -225,29 +218,8 @@ private:
     }
   }
 
-  void report_passed(const std::string & source, const std::string & code)
-  {
-    std::string fault_key = source + ":" + code;
-    active_faults_.erase(fault_key);
-
-    if (report_fault_client_->service_is_ready()) {
-      auto request = std::make_shared<ros2_medkit_msgs::srv::ReportFault::Request>();
-      request->fault_code = code;
-      request->event_type = ros2_medkit_msgs::srv::ReportFault::Request::EVENT_PASSED;
-      request->severity = 0;
-      request->description = "";
-      request->source_id = "/processing/anomaly_detector/" + source;
-
-      report_fault_client_->async_send_request(request);
-      RCLCPP_INFO(this->get_logger(), "[%s] FAULT CLEARED: %s", source.c_str(), code.c_str());
-    }
-  }
-
-  void clear_passed_faults()
-  {
-    // Clear faults for sensors that haven't reported issues recently
-    // This is handled implicitly by the health check timer
-  }
+  // Note: report_passed() can be used to clear faults when sensors recover.
+  // Currently fault clearing is handled by restore-normal.sh script via REST API.
 
   // Subscribers (modern path: IMU, GPS only)
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
@@ -259,13 +231,11 @@ private:
   // Service client for FaultManager
   rclcpp::Client<ros2_medkit_msgs::srv::ReportFault>::SharedPtr report_fault_client_;
 
-  // Timers
+  // Timer
   rclcpp::TimerBase::SharedPtr timer_;
-  rclcpp::TimerBase::SharedPtr clear_timer_;
 
   // Parameters
   double rate_timeout_sec_;
-  double max_nan_ratio_;
 
   // State tracking
   std::map<std::string, rclcpp::Time> sensor_timestamps_;
