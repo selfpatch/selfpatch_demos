@@ -39,6 +39,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Build Sensor Diagnostics demo image
+        run: |
+          cd demos/sensor_diagnostics
+          docker build -t sensor-diagnostics-demo:test -f Dockerfile .
+
       - name: Build TurtleBot3 demo image
         run: |
           cd demos/turtlebot3_integration
