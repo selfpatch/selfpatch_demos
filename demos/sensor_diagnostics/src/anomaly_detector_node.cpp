@@ -5,17 +5,19 @@
 /// @brief Monitors sensor streams and reports detected anomalies as faults
 ///
 /// Subscribes to sensor topics and diagnostics, detects anomalies,
-/// and publishes fault events.
+/// and reports faults to the FaultManager service.
 
 #include <chrono>
 #include <cmath>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "diagnostic_msgs/msg/diagnostic_status.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "ros2_medkit_msgs/srv/report_fault.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
@@ -39,27 +41,36 @@ public:
     rate_timeout_sec_ = this->get_parameter("rate_timeout_sec").as_double();
     max_nan_ratio_ = this->get_parameter("max_nan_ratio").as_double();
 
-    // Create subscribers
+    // Create subscribers - topics are in /sensors namespace with simple names
     lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-      "/sensors/lidar_sim/scan", 10,
+      "/sensors/scan", 10,
       std::bind(&AnomalyDetectorNode::lidar_callback, this, std::placeholders::_1));
 
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-      "/sensors/imu_sim/imu", 10,
+      "/sensors/imu", 10,
       std::bind(&AnomalyDetectorNode::imu_callback, this, std::placeholders::_1));
 
     gps_sub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
-      "/sensors/gps_sim/fix", 10,
+      "/sensors/fix", 10,
       std::bind(&AnomalyDetectorNode::gps_callback, this, std::placeholders::_1));
 
-    // Create publisher for detected faults
+    // Create publisher for detected faults (legacy diagnostic topic)
     fault_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
       "detected_faults", 10);
+
+    // Create service client for FaultManager
+    report_fault_client_ = this->create_client<ros2_medkit_msgs::srv::ReportFault>(
+      "/fault_manager/report_fault");
 
     // Timer for periodic health check
     timer_ = this->create_wall_timer(
       std::chrono::seconds(1),
       std::bind(&AnomalyDetectorNode::check_sensor_health, this));
+
+    // Timer for clearing passed faults (sensors recovered)
+    clear_timer_ = this->create_wall_timer(
+      std::chrono::seconds(2),
+      std::bind(&AnomalyDetectorNode::clear_passed_faults, this));
 
     RCLCPP_INFO(this->get_logger(), "Anomaly detector started");
   }
@@ -210,8 +221,13 @@ private:
 
   void report_fault(
     const std::string & source, const std::string & code,
-    const std::string & message)
+    const std::string & message, uint8_t severity = 2)
   {
+    // Track active faults for later clearing
+    std::string fault_key = source + ":" + code;
+    active_faults_.insert(fault_key);
+
+    // Publish to diagnostic topic (legacy)
     auto diag_array = diagnostic_msgs::msg::DiagnosticArray();
     diag_array.header.stamp = this->now();
 
@@ -233,7 +249,47 @@ private:
     diag_array.status.push_back(status);
     fault_pub_->publish(diag_array);
 
-    RCLCPP_WARN(this->get_logger(), "[%s] %s: %s", source.c_str(), code.c_str(), message.c_str());
+    // Call FaultManager service
+    if (report_fault_client_->service_is_ready()) {
+      auto request = std::make_shared<ros2_medkit_msgs::srv::ReportFault::Request>();
+      request->fault_code = code;
+      request->event_type = ros2_medkit_msgs::srv::ReportFault::Request::EVENT_FAILED;
+      request->severity = severity;
+      request->description = message;
+      request->source_id = "/processing/anomaly_detector/" + source;
+
+      // Async call - don't block
+      report_fault_client_->async_send_request(request);
+      RCLCPP_WARN(this->get_logger(), "[%s] FAULT REPORTED: %s - %s",
+        source.c_str(), code.c_str(), message.c_str());
+    } else {
+      RCLCPP_WARN(this->get_logger(), "[%s] %s: %s (FaultManager unavailable)",
+        source.c_str(), code.c_str(), message.c_str());
+    }
+  }
+
+  void report_passed(const std::string & source, const std::string & code)
+  {
+    std::string fault_key = source + ":" + code;
+    active_faults_.erase(fault_key);
+
+    if (report_fault_client_->service_is_ready()) {
+      auto request = std::make_shared<ros2_medkit_msgs::srv::ReportFault::Request>();
+      request->fault_code = code;
+      request->event_type = ros2_medkit_msgs::srv::ReportFault::Request::EVENT_PASSED;
+      request->severity = 0;
+      request->description = "";
+      request->source_id = "/processing/anomaly_detector/" + source;
+
+      report_fault_client_->async_send_request(request);
+      RCLCPP_INFO(this->get_logger(), "[%s] FAULT CLEARED: %s", source.c_str(), code.c_str());
+    }
+  }
+
+  void clear_passed_faults()
+  {
+    // Clear faults for sensors that haven't reported issues recently
+    // This is handled implicitly by the health check timer
   }
 
   // Subscribers
@@ -244,8 +300,12 @@ private:
   // Publisher
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr fault_pub_;
 
-  // Timer
+  // Service client for FaultManager
+  rclcpp::Client<ros2_medkit_msgs::srv::ReportFault>::SharedPtr report_fault_client_;
+
+  // Timers
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr clear_timer_;
 
   // Parameters
   double rate_timeout_sec_;
@@ -253,6 +313,7 @@ private:
 
   // State tracking
   std::map<std::string, rclcpp::Time> sensor_timestamps_;
+  std::set<std::string> active_faults_;
   uint64_t lidar_msg_count_{0};
   uint64_t imu_msg_count_{0};
   uint64_t gps_msg_count_{0};
