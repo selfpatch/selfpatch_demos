@@ -49,12 +49,19 @@ curl -s -X PUT "${API_BASE}/apps/camera_sim/configurations/inject_black_frames" 
   -H "Content-Type: application/json" -d '{"value": false}'
 
 # Clear all faults from FaultManager
+# Legacy path faults (via diagnostic_bridge) - reported BY diagnostic_bridge
+# The fault_code is the name from DiagnosticStatus.name (e.g., LIDAR_SIM, CAMERA_SIM)
 echo ""
 echo "Clearing all faults from FaultManager..."
-curl -s -X DELETE "${API_BASE}/apps/lidar_sim/faults" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/camera_sim/faults" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/imu_sim/faults" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/gps_sim/faults" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/diagnostic_bridge/faults/LIDAR_SIM" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/diagnostic_bridge/faults/CAMERA_SIM" > /dev/null 2>&1
+
+# Modern path faults (via anomaly_detector direct service call)
+curl -s -X DELETE "${API_BASE}/apps/anomaly_detector/faults/SENSOR_TIMEOUT" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/anomaly_detector/faults/SENSOR_NAN" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/anomaly_detector/faults/SENSOR_OUT_OF_RANGE" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/anomaly_detector/faults/RATE_DEGRADED" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/anomaly_detector/faults/NO_FIX" > /dev/null 2>&1
 
 echo ""
 echo "✓ Normal operation restored! All fault injections and faults cleared."
