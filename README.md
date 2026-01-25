@@ -17,7 +17,19 @@ progressing toward more advanced use cases.
 
 | Demo | Description | Status |
 |------|-------------|--------|
-| [TurtleBot3 Integration](demos/turtlebot3_integration/) | Basic ros2_medkit integration with TurtleBot3 and Nav2 | 🚧 In Progress |
+| [Sensor Diagnostics](demos/sensor_diagnostics/) | Lightweight sensor diagnostics demo (no Gazebo required) | ✅ Ready |
+| [TurtleBot3 Integration](demos/turtlebot3_integration/) | Full ros2_medkit integration with TurtleBot3 and Nav2 | 🚧 In Progress |
+
+### Quick Start (Sensor Diagnostics)
+
+The sensor diagnostics demo is the fastest way to try ros2_medkit:
+
+```bash
+cd demos/sensor_diagnostics
+docker compose up
+# Open http://localhost:3000 for the Web UI
+# Run ./run-demo.sh for an interactive walkthrough
+```
 
 ## Getting Started
 
