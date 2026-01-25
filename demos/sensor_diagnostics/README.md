@@ -176,7 +176,7 @@ curl http://localhost:8080/api/v1/faults | jq
 | `SENSOR_TIMEOUT` | No messages published | `failure_probability: 1.0` |
 | `SENSOR_NAN` | Invalid readings | `inject_nan: true` |
 | `HIGH_NOISE` | Degraded accuracy | `noise_stddev: 0.5` |
-| `DRIFT_DETECTED` | Gradual sensor drift | `drift_rate: 0.1` |
+| `DRIFTING` | Gradual sensor drift | `drift_rate: 0.1` |
 | `BLACK_FRAME` | Camera black frames | `inject_black_frames: true` |
 
 ## Scripts

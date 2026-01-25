@@ -9,6 +9,7 @@
 /// Diagnostics are published to /diagnostics for the legacy fault reporting path
 /// via ros2_medkit_diagnostic_bridge.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -53,8 +54,15 @@ public:
     diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
       "/diagnostics", 10);
 
-    // Create timer
+    // Create timer (with rate validation)
     double rate = this->get_parameter("rate").as_double();
+    if (rate <= 0.0) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Parameter 'rate' must be > 0.0 Hz, but got %.3f. Falling back to 30.0 Hz.", rate);
+      rate = 30.0;
+      this->set_parameters({rclcpp::Parameter("rate", rate)});
+    }
     auto period = std::chrono::duration<double>(1.0 / rate);
     timer_ = this->create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),

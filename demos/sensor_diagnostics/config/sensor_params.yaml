@@ -50,7 +50,6 @@ processing:
   anomaly_detector:
     ros__parameters:
       rate_timeout_sec: 5.0     # seconds before timeout fault
-      max_nan_ratio: 0.1        # max NaN values before fault
-      lidar_rate_min: 5.0       # Hz
-      imu_rate_min: 50.0        # Hz
-      gps_rate_min: 0.5         # Hz
+      imu_rate_min: 50.0        # Hz (anomaly detector monitors IMU via modern path)
+      gps_rate_min: 0.5         # Hz (anomaly detector monitors GPS via modern path)
+      # Note: LiDAR and Camera use legacy path via diagnostic_bridge

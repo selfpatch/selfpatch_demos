@@ -51,8 +51,15 @@ public:
     diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticStatus>(
       "diagnostics", 10);
 
-    // Create timer
+    // Create timer (with rate validation)
     double rate = this->get_parameter("rate").as_double();
+    if (rate <= 0.0) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Invalid GPS publish rate (%f Hz) configured; using default of 1.0 Hz instead.",
+        rate);
+      rate = 1.0;
+    }
     auto period = std::chrono::duration<double>(1.0 / rate);
     timer_ = this->create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
