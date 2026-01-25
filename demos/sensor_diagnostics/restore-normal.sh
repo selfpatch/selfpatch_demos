@@ -48,5 +48,14 @@ curl -s -X PUT "${API_BASE}/apps/camera_sim/configurations/failure_probability" 
 curl -s -X PUT "${API_BASE}/apps/camera_sim/configurations/inject_black_frames" \
   -H "Content-Type: application/json" -d '{"value": false}'
 
+# Clear all faults from FaultManager
 echo ""
-echo "✓ Normal operation restored! All fault injections cleared."
+echo "Clearing all faults from FaultManager..."
+curl -s -X DELETE "${API_BASE}/apps/lidar_sim/faults" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/camera_sim/faults" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/imu_sim/faults" > /dev/null 2>&1
+curl -s -X DELETE "${API_BASE}/apps/gps_sim/faults" > /dev/null 2>&1
+
+echo ""
+echo "✓ Normal operation restored! All fault injections and faults cleared."
+echo "  Verify with: curl ${API_BASE}/faults | jq"
