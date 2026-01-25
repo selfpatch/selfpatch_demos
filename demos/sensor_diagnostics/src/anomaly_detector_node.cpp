@@ -208,8 +208,21 @@ private:
       request->description = message;
       request->source_id = "/processing/anomaly_detector/" + source;
 
-      // Async call - don't block
-      report_fault_client_->async_send_request(request);
+      // Async call with callback to ensure request is processed
+      auto future = report_fault_client_->async_send_request(request,
+        [this, code, source](rclcpp::Client<ros2_medkit_msgs::srv::ReportFault>::SharedFuture response) {
+          try {
+            auto result = response.get();
+            if (!result->accepted) {
+              RCLCPP_ERROR(this->get_logger(), "[%s] Fault %s rejected by FaultManager",
+                source.c_str(), code.c_str());
+            }
+          } catch (const std::exception & e) {
+            RCLCPP_ERROR(this->get_logger(), "[%s] Service call failed: %s",
+              source.c_str(), e.what());
+          }
+        });
+      (void)future;  // Suppress unused warning - callback handles response
       RCLCPP_WARN(this->get_logger(), "[%s] FAULT REPORTED: %s - %s",
         source.c_str(), code.c_str(), message.c_str());
     } else {
