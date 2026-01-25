@@ -1,0 +1,67 @@
+# SOVD Manifest for Sensor Diagnostics Demo
+# Defines the entity hierarchy for ros2_medkit gateway
+manifest_version: "1.0"
+
+metadata:
+  name: "sensor-diagnostics"
+  description: "Simulated sensors for diagnostics demo (no Gazebo required)"
+  version: "0.1.0"
+
+areas:
+  - id: sensors
+    name: "Sensors"
+    description: "Simulated sensor nodes"
+    namespace: /sensors
+
+  - id: processing
+    name: "Processing"
+    description: "Data processing and anomaly detection"
+    namespace: /processing
+
+  - id: diagnostics
+    name: "Diagnostics"
+    description: "ros2_medkit gateway and monitoring"
+    namespace: /diagnostics
+
+components:
+  - id: lidar-unit
+    name: "LiDAR Unit"
+    description: "Simulated 2D LiDAR sensor with configurable fault injection"
+    area: sensors
+    apps:
+      - lidar_sim
+
+  - id: imu-unit
+    name: "IMU Unit"
+    description: "Simulated 9-DOF IMU sensor"
+    area: sensors
+    apps:
+      - imu_sim
+
+  - id: gps-unit
+    name: "GPS Unit"
+    description: "Simulated GPS receiver"
+    area: sensors
+    apps:
+      - gps_sim
+
+  - id: camera-unit
+    name: "Camera Unit"
+    description: "Simulated RGB camera"
+    area: sensors
+    apps:
+      - camera_sim
+
+  - id: compute-unit
+    name: "Compute Unit"
+    description: "Data processing and anomaly detection"
+    area: processing
+    apps:
+      - anomaly_detector
+
+  - id: gateway
+    name: "SOVD Gateway"
+    description: "ros2_medkit REST API gateway"
+    area: diagnostics
+    apps:
+      - ros2_medkit_gateway
