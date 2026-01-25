@@ -1,0 +1,56 @@
+# Default sensor parameters for the diagnostics demo
+# All sensors run in the /sensors namespace
+
+sensors:
+  lidar_sim:
+    ros__parameters:
+      scan_rate: 10.0           # Hz
+      range_min: 0.12           # meters
+      range_max: 3.5            # meters
+      angle_min: -3.14159       # radians
+      angle_max: 3.14159        # radians
+      num_readings: 360         # number of laser beams
+      noise_stddev: 0.01        # meters (normal sensor)
+      failure_probability: 0.0  # no failures by default
+      inject_nan: false
+      drift_rate: 0.0           # no drift by default
+
+  imu_sim:
+    ros__parameters:
+      rate: 100.0               # Hz
+      accel_noise_stddev: 0.01  # m/s^2
+      gyro_noise_stddev: 0.001  # rad/s
+      failure_probability: 0.0
+      inject_nan: false
+      drift_rate: 0.0           # rad/s
+
+  gps_sim:
+    ros__parameters:
+      rate: 1.0                 # Hz (typical GPS rate)
+      base_latitude: 52.2297    # Warsaw, Poland
+      base_longitude: 21.0122
+      base_altitude: 100.0      # meters
+      position_noise_stddev: 2.0   # meters (typical GPS accuracy)
+      altitude_noise_stddev: 5.0   # meters
+      failure_probability: 0.0
+      inject_nan: false
+      drift_rate: 0.0           # meters/second
+
+  camera_sim:
+    ros__parameters:
+      rate: 30.0                # Hz
+      width: 640                # pixels
+      height: 480               # pixels
+      noise_level: 0.0          # 0.0 - 1.0
+      failure_probability: 0.0
+      inject_black_frames: false
+      brightness: 128           # 0-255
+
+processing:
+  anomaly_detector:
+    ros__parameters:
+      rate_timeout_sec: 5.0     # seconds before timeout fault
+      max_nan_ratio: 0.1        # max NaN values before fault
+      lidar_rate_min: 5.0       # Hz
+      imu_rate_min: 50.0        # Hz
+      gps_rate_min: 0.5         # Hz

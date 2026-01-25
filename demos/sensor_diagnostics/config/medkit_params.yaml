@@ -1,0 +1,24 @@
+# ros2_medkit gateway configuration for Sensor Diagnostics Demo
+# Gateway runs under /diagnostics namespace
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      server:
+        host: "0.0.0.0"
+        port: 8080
+
+      refresh_interval_ms: 1000
+
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
+        allowed_headers: ["Content-Type", "Accept"]
+        allow_credentials: false
+        max_age_seconds: 86400
+
+      max_parallel_topic_samples: 10
+
+      # Manifest-based discovery
+      manifest:
+        enabled: true
+        path: ""  # Will be set via launch argument
