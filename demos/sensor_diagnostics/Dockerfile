@@ -40,7 +40,6 @@ RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_m
 
 # Copy demo package
 COPY package.xml CMakeLists.txt ${COLCON_WS}/src/sensor_diagnostics_demo/
-COPY include/ ${COLCON_WS}/src/sensor_diagnostics_demo/include/
 COPY src/ ${COLCON_WS}/src/sensor_diagnostics_demo/src/
 COPY config/ ${COLCON_WS}/src/sensor_diagnostics_demo/config/
 COPY launch/ ${COLCON_WS}/src/sensor_diagnostics_demo/launch/
