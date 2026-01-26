@@ -83,6 +83,8 @@ Sensor Node → publishes DiagnosticArray → /diagnostics topic
   - `ERROR (2)` → ERROR severity fault
   - `STALE (3)` → CRITICAL severity fault
 
+> **Note:** This demo's sensors use only `OK` and `ERROR` levels for clear fault demonstration. All non-OK conditions report as `ERROR` to ensure reliable fault detection through the diagnostic bridge.
+
 ### Modern Path (Direct ReportFault Service)
 
 Direct ros2_medkit integration used by **IMU** and **GPS** sensors:
