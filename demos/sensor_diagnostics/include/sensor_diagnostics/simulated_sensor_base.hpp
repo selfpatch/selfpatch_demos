@@ -1,4 +1,4 @@
-// Copyright 2025 selfpatch
+// Copyright 2026 selfpatch
 // SPDX-License-Identifier: Apache-2.0
 
 /// @file simulated_sensor_base.hpp

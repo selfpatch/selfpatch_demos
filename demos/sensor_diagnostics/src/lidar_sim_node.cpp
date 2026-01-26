@@ -1,4 +1,4 @@
-// Copyright 2025 selfpatch
+// Copyright 2026 selfpatch
 // SPDX-License-Identifier: Apache-2.0
 
 /// @file lidar_sim_node.cpp
@@ -91,6 +91,14 @@ private:
     angle_min_ = this->get_parameter("angle_min").as_double();
     angle_max_ = this->get_parameter("angle_max").as_double();
     num_readings_ = this->get_parameter("num_readings").as_int();
+    if (num_readings_ <= 0) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Invalid num_readings parameter (%d). Using default 360.",
+        num_readings_);
+      num_readings_ = 360;
+      this->set_parameters({rclcpp::Parameter("num_readings", num_readings_)});
+    }
     noise_stddev_ = this->get_parameter("noise_stddev").as_double();
     failure_probability_ = this->get_parameter("failure_probability").as_double();
     inject_nan_ = this->get_parameter("inject_nan").as_bool();
@@ -121,8 +129,17 @@ private:
         drift_rate_ = param.as_double();
         RCLCPP_INFO(this->get_logger(), "Drift rate changed to %.4f", drift_rate_);
       } else if (param.get_name() == "scan_rate") {
-        // Update timer with new rate
+        // Update timer with new rate (with validation)
         double rate = param.as_double();
+        if (rate <= 0.0) {
+          RCLCPP_WARN(
+            this->get_logger(),
+            "Invalid scan_rate parameter value (%f Hz). Rejecting change.",
+            rate);
+          result.successful = false;
+          result.reason = "scan_rate must be positive";
+          return result;
+        }
         auto period = std::chrono::duration<double>(1.0 / rate);
         timer_ = this->create_wall_timer(
           std::chrono::duration_cast<std::chrono::nanoseconds>(period),
