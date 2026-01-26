@@ -43,13 +43,13 @@ public:
 
     // Create subscribers for MODERN path sensors (IMU, GPS)
     // Note: LiDAR and Camera use LEGACY path via /diagnostics → diagnostic_bridge
-    // Topics use absolute paths matching sensor namespace (/sensors/imu_sim/imu, /sensors/gps_sim/fix)
+    // Topics match sensor namespace: /sensors/imu, /sensors/fix
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-      "/sensors/imu_sim/imu", 10,
+      "/sensors/imu", 10,
       std::bind(&AnomalyDetectorNode::imu_callback, this, std::placeholders::_1));
 
     gps_sub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
-      "/sensors/gps_sim/fix", 10,
+      "/sensors/fix", 10,
       std::bind(&AnomalyDetectorNode::gps_callback, this, std::placeholders::_1));
 
     // Create publisher for detected faults (supplementary diagnostic topic)

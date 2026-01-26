@@ -105,7 +105,9 @@ private:
           inject_nan_ ? "enabled" : "disabled");
       } else if (param.get_name() == "drift_rate") {
         drift_rate_ = param.as_double();
-        RCLCPP_INFO(this->get_logger(), "Drift rate changed to %.4f", drift_rate_);
+        // Reset start time for demo mode - drift accumulates from parameter change
+        start_time_ = this->now();
+        RCLCPP_INFO(this->get_logger(), "Drift rate changed to %.4f (timer reset)", drift_rate_);
       }
     }
 
@@ -157,8 +159,8 @@ private:
         (i % 4 == 0) ? accel_noise_stddev_ * accel_noise_stddev_ : 0.0;
     }
 
-    // Inject NaN if configured
-    if (inject_nan_ && uniform_dist_(rng_) < 0.05) {
+    // Inject NaN if configured (100% rate for clear fault demonstration)
+    if (inject_nan_) {
       msg.linear_acceleration.x = std::numeric_limits<double>::quiet_NaN();
       publish_diagnostics("NAN_VALUES", "NaN values detected in acceleration");
     } else if (drift_offset > 0.1) {
@@ -183,9 +185,8 @@ private:
 
     if (status == "OK") {
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
-    } else if (status == "HIGH_NOISE" || status == "DRIFTING") {
-      diag.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
     } else {
+      // All non-OK statuses are ERROR level for clear fault reporting
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
     }
 
