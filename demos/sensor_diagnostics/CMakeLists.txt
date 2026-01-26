@@ -21,6 +21,7 @@ ament_target_dependencies(lidar_sim_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
+  rcl_interfaces
 )
 
 # IMU simulator node
@@ -45,6 +46,7 @@ ament_target_dependencies(camera_sim_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
+  rcl_interfaces
 )
 
 # Anomaly detector node

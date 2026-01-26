@@ -1,4 +1,4 @@
-// Copyright 2025 selfpatch
+// Copyright 2026 selfpatch
 // SPDX-License-Identifier: Apache-2.0
 
 /// @file anomaly_detector_node.cpp
@@ -43,12 +43,13 @@ public:
 
     // Create subscribers for MODERN path sensors (IMU, GPS)
     // Note: LiDAR and Camera use LEGACY path via /diagnostics → diagnostic_bridge
+    // Topics use absolute paths matching sensor namespace (/sensors/imu_sim/imu, /sensors/gps_sim/fix)
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-      "/sensors/imu", 10,
+      "/sensors/imu_sim/imu", 10,
       std::bind(&AnomalyDetectorNode::imu_callback, this, std::placeholders::_1));
 
     gps_sub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
-      "/sensors/fix", 10,
+      "/sensors/gps_sim/fix", 10,
       std::bind(&AnomalyDetectorNode::gps_callback, this, std::placeholders::_1));
 
     // Create publisher for detected faults (supplementary diagnostic topic)
@@ -173,8 +174,11 @@ private:
     const std::string & source, const std::string & code,
     const std::string & message, uint8_t severity = 2)
   {
-    // Track active faults for later clearing
+    // Skip if already reported (avoid spamming FaultManager)
     std::string fault_key = source + ":" + code;
+    if (active_faults_.count(fault_key)) {
+      return;
+    }
     active_faults_.insert(fault_key);
 
     // Publish to diagnostic topic (legacy)

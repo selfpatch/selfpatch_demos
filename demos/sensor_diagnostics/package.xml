@@ -19,6 +19,8 @@
 
   <exec_depend>ros2launch</exec_depend>
   <exec_depend>ros2_medkit_gateway</exec_depend>
+  <exec_depend>ros2_medkit_diagnostic_bridge</exec_depend>
+  <exec_depend>ros2_medkit_fault_manager</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

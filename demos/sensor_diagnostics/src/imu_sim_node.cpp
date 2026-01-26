@@ -1,4 +1,4 @@
-// Copyright 2025 selfpatch
+// Copyright 2026 selfpatch
 // SPDX-License-Identifier: Apache-2.0
 
 /// @file imu_sim_node.cpp
@@ -13,6 +13,7 @@
 #include <memory>
 #include <random>
 
+#include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "diagnostic_msgs/msg/diagnostic_status.hpp"
 #include "diagnostic_msgs/msg/key_value.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -44,8 +45,9 @@ public:
 
     // Create publishers
     imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("imu", 10);
-    diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticStatus>(
-      "diagnostics", 10);
+    // Publish to absolute /diagnostics topic for legacy fault reporting via diagnostic_bridge
+    diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
+      "/diagnostics", 10);
 
     // Create timer (with rate validation)
     double rate = this->get_parameter("rate").as_double();
@@ -172,8 +174,12 @@ private:
 
   void publish_diagnostics(const std::string & status, const std::string & message)
   {
+    auto diag_array = diagnostic_msgs::msg::DiagnosticArray();
+    diag_array.header.stamp = this->now();
+
     auto diag = diagnostic_msgs::msg::DiagnosticStatus();
     diag.name = "imu_sim";
+    diag.hardware_id = "imu_sensor";
 
     if (status == "OK") {
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
@@ -194,12 +200,13 @@ private:
     kv.value = std::to_string(msg_count_);
     diag.values.push_back(kv);
 
-    diag_pub_->publish(diag);
+    diag_array.status.push_back(diag);
+    diag_pub_->publish(diag_array);
   }
 
   // Publishers
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
-  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticStatus>::SharedPtr diag_pub_;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_pub_;
 
   // Timer
   rclcpp::TimerBase::SharedPtr timer_;

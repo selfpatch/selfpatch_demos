@@ -44,5 +44,5 @@ services:
                ros2 launch sensor_diagnostics_demo demo.launch.py &
                sleep 10 &&
                curl -sf http://localhost:8080/api/v1/health &&
-               curl -sf http://localhost:8080/api/v1/apps | jq '.[] | .name' &&
+               curl -sf http://localhost:8080/api/v1/apps | jq '.items[] | .id' &&
                echo 'CI validation passed!'"

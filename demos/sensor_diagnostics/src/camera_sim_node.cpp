@@ -1,4 +1,4 @@
-// Copyright 2025 selfpatch
+// Copyright 2026 selfpatch
 // SPDX-License-Identifier: Apache-2.0
 
 /// @file camera_sim_node.cpp
@@ -33,7 +33,6 @@ public:
   CameraSimNode()
   : Node("camera_sim"),
     rng_(std::random_device{}()),
-    normal_dist_(0.0, 1.0),
     uniform_dist_(0.0, 1.0)
   {
     // Declare parameters
@@ -258,7 +257,6 @@ private:
 
   // Random number generation
   std::mt19937 rng_;
-  std::normal_distribution<double> normal_dist_;
   std::uniform_real_distribution<double> uniform_dist_;
 
   // Parameters
