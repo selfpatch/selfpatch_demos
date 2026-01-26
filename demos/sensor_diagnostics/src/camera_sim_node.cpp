@@ -215,9 +215,8 @@ private:
 
     if (status == "OK") {
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
-    } else if (status == "HIGH_NOISE" || status == "LOW_BRIGHTNESS" || status == "OVEREXPOSED") {
-      diag.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
     } else {
+      // All non-OK statuses are ERROR level for clear fault reporting
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
     }
 

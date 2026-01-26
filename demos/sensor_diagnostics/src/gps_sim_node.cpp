@@ -116,7 +116,9 @@ private:
           inject_nan_ ? "enabled" : "disabled");
       } else if (param.get_name() == "drift_rate") {
         drift_rate_ = param.as_double();
-        RCLCPP_INFO(this->get_logger(), "Drift rate changed to %.4f", drift_rate_);
+        // Reset start time for demo mode - drift accumulates from parameter change
+        start_time_ = this->now();
+        RCLCPP_INFO(this->get_logger(), "Drift rate changed to %.4f (timer reset)", drift_rate_);
       }
     }
 
@@ -174,8 +176,8 @@ private:
     msg.position_covariance[4] = position_noise_stddev_ * position_noise_stddev_;
     msg.position_covariance[8] = altitude_noise_stddev_ * altitude_noise_stddev_;
 
-    // Inject NaN if configured
-    if (inject_nan_ && uniform_dist_(rng_) < 0.05) {
+    // Inject NaN if configured (100% rate for clear fault demonstration)
+    if (inject_nan_) {
       msg.latitude = std::numeric_limits<double>::quiet_NaN();
       publish_diagnostics("NAN_VALUES", "Invalid GPS coordinates");
     } else if (drift_offset > 5.0) {
@@ -201,9 +203,8 @@ private:
 
     if (status == "OK") {
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
-    } else if (status == "LOW_ACCURACY" || status == "DRIFTING") {
-      diag.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
     } else {
+      // All non-OK statuses are ERROR level for clear fault reporting
       diag.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
     }
 
