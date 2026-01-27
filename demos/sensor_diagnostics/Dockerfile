@@ -1,8 +1,4 @@
 # Sensor Diagnostics Demo
-# Lightweight ROS 2 image without Gazebo - fast build and startup
-# Image size: ~500MB vs ~4GB for TurtleBot3 demo
-# Startup time: ~5s vs ~60s
-
 FROM ros:jazzy-ros-base
 
 ENV DEBIAN_FRONTEND=noninteractive

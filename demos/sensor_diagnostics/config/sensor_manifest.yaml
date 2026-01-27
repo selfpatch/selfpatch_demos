@@ -7,6 +7,13 @@ metadata:
   description: "Simulated sensors for diagnostics demo (no Gazebo required)"
   version: "0.1.0"
 
+config:
+  unmanifested_nodes: warn
+  inherit_runtime_resources: true
+
+# =============================================================================
+# AREAS - Functional groupings
+# =============================================================================
 areas:
   - id: sensors
     name: "Sensors"
@@ -23,45 +30,176 @@ areas:
     description: "ros2_medkit gateway and monitoring"
     namespace: /diagnostics
 
+  - id: bridge
+    name: "Bridge"
+    description: "Legacy diagnostics bridge"
+    namespace: /bridge
+
+# =============================================================================
+# COMPONENTS - Hardware/logical units
+# =============================================================================
 components:
   - id: lidar-unit
     name: "LiDAR Unit"
+    type: "sensor"
     description: "Simulated 2D LiDAR sensor with configurable fault injection"
     area: sensors
-    apps:
-      - lidar_sim
 
   - id: imu-unit
     name: "IMU Unit"
+    type: "sensor"
     description: "Simulated 9-DOF IMU sensor"
     area: sensors
-    apps:
-      - imu_sim
 
   - id: gps-unit
     name: "GPS Unit"
+    type: "sensor"
     description: "Simulated GPS receiver"
     area: sensors
-    apps:
-      - gps_sim
 
   - id: camera-unit
     name: "Camera Unit"
+    type: "sensor"
     description: "Simulated RGB camera"
     area: sensors
-    apps:
-      - camera_sim
 
   - id: compute-unit
     name: "Compute Unit"
+    type: "controller"
     description: "Data processing and anomaly detection"
     area: processing
-    apps:
-      - anomaly_detector
 
   - id: gateway
     name: "SOVD Gateway"
+    type: "controller"
     description: "ros2_medkit REST API gateway"
     area: diagnostics
-    apps:
-      - ros2_medkit_gateway
+
+  - id: fault-manager
+    name: "Fault Manager"
+    type: "controller"
+    description: "ros2_medkit fault management service"
+    area: diagnostics
+
+  - id: diagnostic-bridge-unit
+    name: "Diagnostic Bridge"
+    type: "controller"
+    description: "Bridges legacy /diagnostics topic to fault manager"
+    area: bridge
+
+# =============================================================================
+# APPS - ROS 2 nodes with runtime binding
+# =============================================================================
+apps:
+  # === Sensor Apps ===
+  - id: lidar-sim
+    name: "LiDAR Simulator"
+    category: "sensor"
+    is_located_on: lidar-unit
+    description: "Publishes simulated LaserScan data with fault injection support"
+    tags:
+      - fault-reporter
+    ros_binding:
+      node_name: lidar_sim
+      namespace: /sensors
+
+  - id: imu-sim
+    name: "IMU Simulator"
+    category: "sensor"
+    is_located_on: imu-unit
+    description: "Publishes simulated IMU data"
+    ros_binding:
+      node_name: imu_sim
+      namespace: /sensors
+
+  - id: gps-sim
+    name: "GPS Simulator"
+    category: "sensor"
+    is_located_on: gps-unit
+    description: "Publishes simulated NavSatFix data"
+    ros_binding:
+      node_name: gps_sim
+      namespace: /sensors
+
+  - id: camera-sim
+    name: "Camera Simulator"
+    category: "sensor"
+    is_located_on: camera-unit
+    description: "Publishes simulated camera images"
+    tags:
+      - fault-reporter
+    ros_binding:
+      node_name: camera_sim
+      namespace: /sensors
+
+  # === Processing Apps ===
+  - id: anomaly-detector
+    name: "Anomaly Detector"
+    category: "processing"
+    is_located_on: compute-unit
+    description: "Detects anomalies in sensor data and reports faults"
+    depends_on:
+      - lidar-sim
+      - imu-sim
+      - gps-sim
+    ros_binding:
+      node_name: anomaly_detector
+      namespace: /processing
+
+  # === Diagnostics Apps ===
+  - id: medkit-gateway
+    name: "ros2_medkit Gateway"
+    category: "gateway"
+    is_located_on: gateway
+    description: "REST API gateway for SOVD protocol"
+    ros_binding:
+      node_name: ros2_medkit_gateway
+      namespace: /diagnostics
+
+  - id: medkit-fault-manager
+    name: "Fault Manager"
+    category: "diagnostics"
+    is_located_on: fault-manager
+    description: "Manages and stores fault information"
+    ros_binding:
+      node_name: fault_manager
+      namespace: /
+
+  - id: diagnostic-bridge
+    name: "Diagnostic Bridge"
+    category: "diagnostics"
+    is_located_on: diagnostic-bridge-unit
+    description: "Bridges /diagnostics topic (DiagnosticArray) to fault_manager"
+    ros_binding:
+      node_name: diagnostic_bridge
+      namespace: /bridge
+
+# =============================================================================
+# FUNCTIONS - High-level capabilities
+# =============================================================================
+functions:
+  - id: sensor-monitoring
+    name: "Sensor Monitoring"
+    category: "monitoring"
+    description: "Monitor all simulated sensors"
+    hosted_by:
+      - lidar-sim
+      - imu-sim
+      - gps-sim
+      - camera-sim
+
+  - id: anomaly-detection
+    name: "Anomaly Detection"
+    category: "diagnostics"
+    description: "Detect and report sensor anomalies"
+    hosted_by:
+      - anomaly-detector
+
+  - id: fault-management
+    name: "Fault Management"
+    category: "diagnostics"
+    description: "Collect and expose fault information via SOVD API"
+    hosted_by:
+      - medkit-gateway
+      - medkit-fault-manager
+      - diagnostic-bridge
