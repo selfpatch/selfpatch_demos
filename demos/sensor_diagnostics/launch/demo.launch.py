@@ -119,7 +119,7 @@ def generate_launch_description():
                 parameters=[
                     medkit_params_file,
                     {"use_sim_time": use_sim_time},
-                    {"manifest.path": manifest_file},
+                    {"manifest_path": manifest_file},
                 ],
             ),
             # ===== Fault Manager (at root namespace) =====
