@@ -9,6 +9,7 @@ services:
       - DISPLAY=${DISPLAY}
       - TURTLEBOT3_MODEL=burger
       - ROS_DOMAIN_ID=30
+      - HEADLESS=${HEADLESS:-false}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
     ports:
@@ -19,7 +20,7 @@ services:
       bash -c "source /opt/ros/jazzy/setup.bash &&
                source /root/demo_ws/install/setup.bash &&
                export TURTLEBOT3_MODEL=burger &&
-               ros2 launch turtlebot3_medkit_demo demo.launch.py"
+               ros2 launch turtlebot3_medkit_demo demo.launch.py headless:=$${HEADLESS}"
 
   # NVIDIA GPU accelerated version
   # Use with: docker compose --profile nvidia up
@@ -36,6 +37,7 @@ services:
       - DISPLAY=${DISPLAY}
       - TURTLEBOT3_MODEL=burger
       - ROS_DOMAIN_ID=30
+      - HEADLESS=${HEADLESS:-false}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
     volumes:
@@ -55,12 +57,12 @@ services:
       bash -c "source /opt/ros/jazzy/setup.bash &&
                source /root/demo_ws/install/setup.bash &&
                export TURTLEBOT3_MODEL=burger &&
-               ros2 launch turtlebot3_medkit_demo demo.launch.py"
+               ros2 launch turtlebot3_medkit_demo demo.launch.py headless:=$${HEADLESS}"
 
   sovd-web-ui:
-    build:
-      context: https://github.com/selfpatch/sovd_web_ui.git
-      dockerfile: Dockerfile
+    image: ghcr.io/selfpatch/sovd_web_ui:latest
     container_name: sovd_web_ui
     ports:
       - "3000:80"
+    depends_on:
+      - turtlebot3-demo

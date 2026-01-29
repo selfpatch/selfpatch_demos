@@ -8,13 +8,22 @@ diagnostics:
         host: "0.0.0.0"
         port: 8080
 
-      refresh_interval_ms: 2000
+      refresh_interval_ms: 10000  # 10 seconds (default), reduces log spam
 
       cors:
         allowed_origins: ["*"]
-        allowed_methods: ["GET", "PUT", "POST", "OPTIONS"]
+        allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
         allowed_headers: ["Content-Type", "Accept"]
         allow_credentials: false
         max_age_seconds: 86400
 
       max_parallel_topic_samples: 10
+
+      # Discovery configuration
+      discovery_mode: "hybrid"  # runtime_only, manifest_only, or hybrid
+      manifest_path: ""  # Will be set via launch argument
+      manifest_strict_validation: true
+
+      discovery:
+        runtime:
+          create_synthetic_components: false  # Manifest defines components

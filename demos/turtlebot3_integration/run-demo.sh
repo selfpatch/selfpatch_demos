@@ -40,6 +40,7 @@ trap cleanup EXIT
 # Parse arguments
 COMPOSE_ARGS=""
 BUILD_ARGS=""
+HEADLESS_MODE="false"
 
 usage() {
     echo "Usage: $0 [OPTIONS]"
@@ -47,13 +48,17 @@ usage() {
     echo "Options:"
     echo "  --nvidia     Use NVIDIA GPU acceleration"
     echo "  --no-cache   Build Docker images without cache"
+    echo "  --headless   Run without Gazebo GUI (default: GUI enabled)"
     echo "  -h, --help   Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                      # CPU-only mode"
-    echo "  $0 --nvidia             # With GPU acceleration"
+    echo "  $0                      # With Gazebo GUI (default)"
+    echo "  $0 --headless           # Headless mode (no GUI)"
+    echo "  $0 --nvidia             # GPU acceleration + GUI"
     echo "  $0 --no-cache           # Rebuild without cache"
-    echo "  $0 --nvidia --no-cache  # Both options"
+    echo ""
+    echo "Environment variables:"
+    echo "  HEADLESS=true|false    Control GUI mode (default: false)"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -65,6 +70,10 @@ while [[ $# -gt 0 ]]; do
         --no-cache)
             echo "Building without cache"
             BUILD_ARGS="--no-cache"
+            ;;
+        --headless)
+            echo "Running in headless mode (no GUI)"
+            HEADLESS_MODE="true"
             ;;
         -h|--help)
             usage
@@ -82,6 +91,10 @@ done
 if [[ -z "$COMPOSE_ARGS" ]]; then
     echo "Using CPU-only mode (use --nvidia flag for GPU acceleration)"
 fi
+
+# Export HEADLESS mode for docker-compose
+export HEADLESS=$HEADLESS_MODE
+echo "Gazebo mode: $([ "$HEADLESS_MODE" = "true" ] && echo "headless (no GUI)" || echo "GUI enabled")"
 
 # Build and run
 echo "   Building and starting demo..."
