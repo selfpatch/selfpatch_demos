@@ -37,6 +37,8 @@ RUN apt-get update && apt-get install -y \
     python3-requests \
     nlohmann-json3-dev \
     libcpp-httplib-dev \
+    sqlite3 \
+    libsqlite3-dev \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -47,6 +49,9 @@ RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_m
     mv ros2_medkit/src/ros2_medkit_gateway \
        ros2_medkit/src/ros2_medkit_msgs \
        ros2_medkit/src/ros2_medkit_serialization \
+       ros2_medkit/src/ros2_medkit_fault_manager \
+       ros2_medkit/src/ros2_medkit_fault_reporter \
+       ros2_medkit/src/ros2_medkit_diagnostic_bridge \
        ros2_medkit/src/dynamic_message_introspection . && \
     rm -rf ros2_medkit
 

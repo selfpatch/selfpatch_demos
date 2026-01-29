@@ -1,0 +1,215 @@
+# SOVD Manifest for TurtleBot3 + Nav2 Integration Demo
+# Defines the entity hierarchy for ros2_medkit gateway
+manifest_version: "1.0"
+
+metadata:
+  name: "turtlebot3-nav2-demo"
+  description: "TurtleBot3 simulation with Nav2 navigation and ros2_medkit diagnostics"
+  version: "0.1.0"
+
+config:
+  unmanifested_nodes: warn
+  inherit_runtime_resources: true
+
+# =============================================================================
+# AREAS - Functional groupings by namespace
+# =============================================================================
+areas:
+  - id: robot
+    name: "Robot"
+    description: "TurtleBot3 robot hardware and drivers"
+    namespace: /
+
+  - id: navigation
+    name: "Navigation"
+    description: "Nav2 navigation stack"
+    namespace: /
+
+  - id: diagnostics
+    name: "Diagnostics"
+    description: "ros2_medkit gateway and fault management"
+    namespace: /diagnostics
+
+  - id: bridge
+    name: "Bridge"
+    description: "Legacy diagnostics bridge"
+    namespace: /bridge
+
+# =============================================================================
+# COMPONENTS - Hardware/logical units
+# =============================================================================
+components:
+  - id: turtlebot3-base
+    name: "TurtleBot3 Base"
+    type: "platform"
+    description: "TurtleBot3 Burger mobile robot platform"
+    area: robot
+
+  - id: lidar-sensor
+    name: "LiDAR Sensor"
+    type: "sensor"
+    description: "360° 2D LiDAR scanner"
+    area: robot
+
+  - id: nav2-stack
+    name: "Nav2 Stack"
+    type: "controller"
+    description: "Navigation 2 autonomous navigation stack"
+    area: navigation
+
+  - id: gateway
+    name: "SOVD Gateway"
+    type: "controller"
+    description: "ros2_medkit REST API gateway"
+    area: diagnostics
+
+  - id: fault-manager
+    name: "Fault Manager"
+    type: "controller"
+    description: "ros2_medkit fault management service"
+    area: diagnostics
+
+  - id: diagnostic-bridge-unit
+    name: "Diagnostic Bridge"
+    type: "controller"
+    description: "Bridges legacy /diagnostics topic to fault manager"
+    area: bridge
+
+# =============================================================================
+# APPS - ROS 2 nodes with runtime binding
+# =============================================================================
+apps:
+  # === Robot Apps ===
+  - id: turtlebot3-node
+    name: "TurtleBot3 Node"
+    category: "driver"
+    is_located_on: turtlebot3-base
+    description: "Main TurtleBot3 hardware interface"
+    ros_binding:
+      node_name: turtlebot3_node
+      namespace: /
+
+  - id: robot-state-publisher
+    name: "Robot State Publisher"
+    category: "driver"
+    is_located_on: turtlebot3-base
+    description: "Publishes robot TF tree"
+    ros_binding:
+      node_name: robot_state_publisher
+      namespace: /
+
+  - id: gazebo
+    name: "Gazebo Simulator"
+    category: "simulation"
+    is_located_on: turtlebot3-base
+    description: "Gazebo physics simulation"
+    ros_binding:
+      node_name: gazebo
+      namespace: /
+
+  # === Navigation Apps ===
+  - id: amcl
+    name: "AMCL Localization"
+    category: "localization"
+    is_located_on: nav2-stack
+    description: "Adaptive Monte Carlo Localization"
+    depends_on:
+      - turtlebot3-node
+    ros_binding:
+      node_name: amcl
+      namespace: /
+
+  - id: bt-navigator
+    name: "BT Navigator"
+    category: "navigation"
+    is_located_on: nav2-stack
+    description: "Behavior Tree Navigator"
+    ros_binding:
+      node_name: bt_navigator
+      namespace: /
+
+  - id: controller-server
+    name: "Controller Server"
+    category: "navigation"
+    is_located_on: nav2-stack
+    description: "Path following controller"
+    ros_binding:
+      node_name: controller_server
+      namespace: /
+
+  - id: planner-server
+    name: "Planner Server"
+    category: "navigation"
+    is_located_on: nav2-stack
+    description: "Global path planner"
+    ros_binding:
+      node_name: planner_server
+      namespace: /
+
+  - id: velocity-smoother
+    name: "Velocity Smoother"
+    category: "navigation"
+    is_located_on: nav2-stack
+    description: "Velocity command smoother"
+    ros_binding:
+      node_name: velocity_smoother
+      namespace: /
+
+  # === Diagnostics Apps ===
+  - id: medkit-gateway
+    name: "ros2_medkit Gateway"
+    category: "gateway"
+    is_located_on: gateway
+    description: "REST API gateway for SOVD protocol"
+    ros_binding:
+      node_name: ros2_medkit_gateway
+      namespace: /diagnostics
+
+  - id: medkit-fault-manager
+    name: "Fault Manager"
+    category: "diagnostics"
+    is_located_on: fault-manager
+    description: "Manages and stores fault information"
+    ros_binding:
+      node_name: fault_manager
+      namespace: /
+
+  - id: diagnostic-bridge
+    name: "Diagnostic Bridge"
+    category: "diagnostics"
+    is_located_on: diagnostic-bridge-unit
+    description: "Bridges /diagnostics topic (DiagnosticArray) to fault_manager"
+    ros_binding:
+      node_name: diagnostic_bridge
+      namespace: /bridge
+
+# =============================================================================
+# FUNCTIONS - High-level capabilities
+# =============================================================================
+functions:
+  - id: autonomous-navigation
+    name: "Autonomous Navigation"
+    category: "mobility"
+    description: "Navigate to goal positions autonomously"
+    hosted_by:
+      - amcl
+      - bt-navigator
+      - controller-server
+      - planner-server
+
+  - id: robot-control
+    name: "Robot Control"
+    category: "mobility"
+    description: "Basic robot movement and velocity control"
+    hosted_by:
+      - turtlebot3-node
+      - velocity-smoother
+
+  - id: fault-management
+    name: "Fault Management"
+    category: "diagnostics"
+    description: "Collect and expose fault information via SOVD API"
+    hosted_by:
+      - medkit-gateway
+      - medkit-fault-manager
+      - diagnostic-bridge

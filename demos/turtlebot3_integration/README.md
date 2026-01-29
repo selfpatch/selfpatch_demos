@@ -1,11 +1,11 @@
 # TurtleBot3 Integration Demo with Nav2 Navigation
 
 This demo shows how to integrate ros2_medkit with TurtleBot3 and Nav2 navigation stack
-to provide modern diagnostics and control for a mobile robot system via REST API.
+to provide SOVD-compliant diagnostics, fault management, and control for a mobile robot system via REST API.
 
 ## Status
 
-✅ **Demo Ready** - Full navigation demo with Web UI
+✅ **Demo Ready** - Full navigation demo with Web UI and fault management
 
 ## Overview
 
@@ -13,10 +13,11 @@ This demo demonstrates:
 
 - Launching TurtleBot3 simulation in Gazebo with turtlebot3_world
 - Running Nav2 navigation stack (AMCL, planner, controller)
-- Running ros2_medkit gateway alongside the robot
-- Discovering TurtleBot3 nodes through REST API
-- Querying and publishing to ROS2 topics via HTTP
-- **NEW:** Controlling the robot via sovd_web_ui
+- Running ros2_medkit gateway with **manifest-based discovery**
+- Fault management via **diagnostic_bridge** (legacy /diagnostics support)
+- Querying robot data via **REST API**
+- Entity hierarchy: Areas → Components → Apps → Functions
+- Controlling the robot via sovd_web_ui
 
 ## Prerequisites
 
@@ -40,13 +41,33 @@ That's it! The script will:
 3. Launch TurtleBot3 simulation + Nav2 + ros2_medkit gateway
 4. Launch sovd_web_ui at <http://localhost:3000>
 
+**Note:** By default, the demo runs with **Gazebo GUI** for visualization. Requires X11 display.
+
+### Running Headless (Server Only)
+
+For CI/CD or remote servers without display:
+
+```bash
+HEADLESS=true docker compose up
+# or:
+./run-demo.sh --headless
+```
+
+### Running with GUI (Default)
+
+With Gazebo visualization:
+
+```bash
+docker compose up
+# or:
+./run-demo.sh
+```
+
 ### 2. Access the Web UI
 
 The Web UI is automatically started by docker-compose and available at <http://localhost:3000>.
 
 Connect to the gateway using `http://localhost:8080/api/v1` in the connection dialog.
-
-**Note:** The first build will take longer as it clones and builds sovd_web_ui from GitHub.
 
 ### With NVIDIA GPU
 
@@ -72,8 +93,8 @@ docker compose --profile nvidia up --build
 ### Via Web UI
 
 1. Connect to the gateway in sovd_web_ui
-2. In the "ROS2 Topics" panel on the right, select `/cmd_vel`
-3. Enter velocity command JSON:
+2. Find entity with `/cmd_vel` data
+3. Enter velocity command JSON (or use form with fields from schema):
 
    ```json
    {"linear": {"x": 0.2}, "angular": {"z": 0.0}}
@@ -84,23 +105,15 @@ docker compose --profile nvidia up --build
 ### Via Command Line
 
 ```bash
-# Send velocity command (moves robot forward)
-curl -X POST http://localhost:8080/api/v1/topics/publish \
+# Send velocity command using Apps data endpoint (moves robot forward)
+curl -X PUT http://localhost:8080/api/v1/apps/turtlebot3_node/data/cmd_vel \
   -H "Content-Type: application/json" \
-  -d '{
-    "topic": "/cmd_vel",
-    "type": "geometry_msgs/msg/Twist",
-    "data": {"linear": {"x": 0.2, "y": 0.0, "z": 0.0}, "angular": {"x": 0.0, "y": 0.0, "z": 0.0}}
-  }'
+  -d '{"linear": {"x": 0.2, "y": 0.0, "z": 0.0}, "angular": {"x": 0.0, "y": 0.0, "z": 0.0}}'
 
 # Stop the robot
-curl -X POST http://localhost:8080/api/v1/topics/publish \
+curl -X PUT http://localhost:8080/api/v1/apps/turtlebot3_node/data/cmd_vel \
   -H "Content-Type: application/json" \
-  -d '{
-    "topic": "/cmd_vel",
-    "type": "geometry_msgs/msg/Twist",
-    "data": {"linear": {"x": 0.0}, "angular": {"z": 0.0}}
-  }'
+  -d '{"linear": {"x": 0.0}, "angular": {"z": 0.0}}'
 ```
 
 ### Via ROS2 CLI (inside container)
@@ -117,74 +130,227 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
 
 ## REST API Endpoints
 
-### Discovery
+### Discovery (SOVD Entity Hierarchy)
 
 ```bash
 # Check gateway health
 curl http://localhost:8080/api/v1/health
 
-# List discovered areas
-curl http://localhost:8080/api/v1/areas
+# List discovered areas (namespace groupings)
+curl http://localhost:8080/api/v1/areas | jq '.items[] | {id, name}'
 
-# List all discovered components (nodes)
-curl http://localhost:8080/api/v1/components
+# List all components (hardware/logical units)
+curl http://localhost:8080/api/v1/components | jq '.items[] | {id, name, area}'
+
+# List all apps (ROS 2 nodes)
+curl http://localhost:8080/api/v1/apps | jq '.items[] | {id, name, namespace}'
+
+# Get specific app details
+curl http://localhost:8080/api/v1/apps/amcl | jq
 ```
 
-### Topics
+### Data Access (via Apps)
 
 ```bash
-# List all topics
-curl http://localhost:8080/api/v1/topics
+# Get LiDAR scan data
+curl http://localhost:8080/api/v1/apps/turtlebot3_node/data/scan | jq '{
+  angle_min: .angle_min,
+  angle_max: .angle_max,
+  sample_ranges: .ranges[:5]
+}'
 
-# Get topic details (URL-encode topic name: / -> %2F)
-curl http://localhost:8080/api/v1/topics/%2Fcmd_vel
+# Get odometry data
+curl http://localhost:8080/api/v1/apps/turtlebot3_node/data/odom | jq '{
+  position: .pose.pose.position,
+  orientation: .pose.pose.orientation
+}'
 
-# Get topic without sample
-curl "http://localhost:8080/api/v1/topics/%2Fcmd_vel?sample=false"
+# List all data topics for an app
+curl http://localhost:8080/api/v1/apps/turtlebot3_node/data | jq
+```
 
-# Publish to topic (see examples above)
-curl -X POST http://localhost:8080/api/v1/topics/publish ...
+### Fault Management
+
+```bash
+# List all active faults
+curl http://localhost:8080/api/v1/faults | jq
+
+# Get faults for a specific area
+curl http://localhost:8080/api/v1/areas/robot/faults | jq
+
+# Clear a specific fault
+curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic_bridge/faults/TURTLEBOT3_NODE
+```
+
+### Operations (Service Calls)
+
+```bash
+# List available operations for an app
+curl http://localhost:8080/api/v1/apps/amcl/operations | jq
+
+# Execute an operation (service call)
+curl -X POST http://localhost:8080/api/v1/apps/amcl/operations/reinitialize_global_localization/executions \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### Configurations (Parameters)
+
+```bash
+# List node parameters
+curl http://localhost:8080/api/v1/apps/amcl/configurations | jq
+
+# Get a specific parameter
+curl http://localhost:8080/api/v1/apps/amcl/configurations/max_particles | jq
+
+# Update a parameter
+curl -X PUT http://localhost:8080/api/v1/apps/amcl/configurations/max_particles \
+  -H "Content-Type: application/json" \
+  -d '{"value": 3000}'
 ```
 
 ## What You'll See
 
-When TurtleBot3 simulation starts with Nav2, ros2_medkit will discover nodes organized into **areas** based on their ROS 2 namespaces:
+When TurtleBot3 simulation starts with Nav2, ros2_medkit will discover nodes organized into the **SOVD entity hierarchy** defined by the manifest:
 
-### Areas (Namespaces)
+### Entity Hierarchy
 
-| Area | Namespace | Description |
-|------|-----------|-------------|
-| `root` | `/` | TurtleBot3, Nav2, and Gazebo nodes |
-| `diagnostics` | `/diagnostics` | ros2_medkit gateway |
+```
+TurtleBot3 Demo (manifest-based discovery)
+├── Areas (namespace groupings)
+│   ├── robot         → TurtleBot3 hardware
+│   ├── navigation    → Nav2 stack
+│   ├── diagnostics   → ros2_medkit gateway
+│   └── bridge        → Diagnostic bridge
+├── Components (hardware/logical units)
+│   ├── turtlebot3-base  → Robot platform (area: robot)
+│   ├── lidar-sensor     → LiDAR scanner (area: robot)
+│   ├── nav2-stack       → Navigation (area: navigation)
+│   ├── gateway          → REST API (area: diagnostics)
+│   ├── fault-manager    → Fault aggregation (area: diagnostics)
+│   └── diagnostic-bridge-unit → Legacy support (area: bridge)
+├── Apps (ROS 2 nodes)
+│   ├── turtlebot3-node      → component: turtlebot3-base
+│   ├── robot-state-publisher → component: turtlebot3-base
+│   ├── amcl                  → component: nav2-stack
+│   ├── bt-navigator          → component: nav2-stack
+│   ├── controller-server     → component: nav2-stack
+│   ├── planner-server        → component: nav2-stack
+│   ├── medkit-gateway        → component: gateway
+│   ├── medkit-fault-manager  → component: fault-manager
+│   └── diagnostic-bridge     → component: diagnostic-bridge-unit
+└── Functions (high-level capabilities)
+    ├── autonomous-navigation → hosted by: amcl, bt-navigator, ...
+    ├── robot-control         → hosted by: turtlebot3-node, velocity-smoother
+    └── fault-management      → hosted by: gateway, fault-manager, bridge
+```
 
-### Components
+### Fault Reporting
 
-**Root** (`/`) - Main robot system:
+This demo uses the **legacy fault reporting path** via diagnostic_bridge:
 
-- `turtlebot3_node` - Main robot interface
-- `robot_state_publisher` - TF tree publisher
-- `gazebo` - Simulation engine
-- `amcl` - Adaptive Monte Carlo Localization
-- `bt_navigator` - Behavior Tree Navigator
-- `controller_server` - Path following controller
-- `planner_server` - Global path planner
-- `velocity_smoother` - Velocity command smoother
-- Various lifecycle and manager nodes
+```
+Nav2/TurtleBot3 nodes → /diagnostics topic (DiagnosticArray)
+                              ↓
+        diagnostic_bridge subscribes and converts
+                              ↓
+        FaultManager receives via ReportFault service
+                              ↓
+        Gateway exposes via GET /api/v1/faults
+```
 
-**Diagnostics** (`/diagnostics`):
+| Source | Fault Reporter | Example Faults |
+|--------|----------------|----------------|
+| AMCL | diagnostic_bridge | Localization degraded |
+| Nav2 Controller | diagnostic_bridge | Path following errors |
+| TurtleBot3 | diagnostic_bridge | Motor/sensor issues |
 
-- `ros2_medkit_gateway` - REST API gateway
+## Fault Injection Scenarios
 
-This demonstrates ros2_medkit's ability to discover ROS 2 nodes and organize them into areas.
-For a more hierarchical demo with multiple areas, see the [ros2_medkit demo nodes](https://github.com/selfpatch/ros2_medkit/tree/main/src/ros2_medkit_gateway#demo-nodes) which use namespaces like `/powertrain`, `/chassis`, and `/body`.
+This demo includes scripts to inject various fault conditions for testing fault management:
+
+### Available Fault Scenarios
+
+| Script | Fault Type | Description | Expected Faults |
+|--------|-----------|-------------|-----------------|
+| `inject-nav-failure.sh` | Navigation | Send goal to unreachable location | BT_NAVIGATOR, PLANNER_SERVER |
+| `inject-localization-failure.sh` | Localization | Reset AMCL with high uncertainty | AMCL |
+| `inject-controller-failure.sh` | Controller | Set very restrictive velocity limits | VELOCITY_SMOOTHER, CONTROLLER_SERVER |
+| `inject-collision.sh` | Collision | Navigate toward obstacles | COLLISION_MONITOR |
+| `restore-normal.sh` | Recovery | Restore defaults and clear faults | - |
+
+### Fault Injection Examples
+
+#### 1. Navigation Failure
+
+```bash
+# Send robot to unreachable goal (outside map bounds)
+./inject-nav-failure.sh
+
+# Check resulting faults
+curl http://localhost:8080/api/v1/faults | jq '.items[] | {code, severity, message}'
+```
+
+#### 2. Localization Failure
+
+```bash
+# Reinitialize AMCL global localization (causes high uncertainty)
+./inject-localization-failure.sh
+
+# Watch localization recover
+curl http://localhost:8080/api/v1/apps/amcl/data/particlecloud | jq '.poses | length'
+```
+
+#### 3. Controller Restriction
+
+```bash
+# Set very low velocity limits (robot moves extremely slowly)
+./inject-controller-failure.sh
+
+# Try sending a navigation goal - robot will struggle to follow path
+./send-nav-goal.sh 2.0 0.5
+```
+
+#### 4. Collision Scenario
+
+```bash
+# Trigger collision avoidance
+./inject-collision.sh
+
+# Monitor collision warnings
+curl http://localhost:8080/api/v1/faults | jq
+```
+
+#### Restore Normal Operation
+
+```bash
+# Clear all faults and restore default parameters
+./restore-normal.sh
+```
+
+### Fault Monitoring via API
+
+```bash
+# List all active faults
+curl http://localhost:8080/api/v1/faults | jq
+
+# Get faults for navigation area
+curl http://localhost:8080/api/v1/areas/navigation/faults | jq
+
+# Clear specific fault
+curl -X DELETE http://localhost:8080/api/v1/faults/{fault_id}
+
+# Clear all faults
+curl -X DELETE http://localhost:8080/api/v1/faults
+```
 
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────┐
 │                       Docker Container                               │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                   Gazebo Simulation                            │   │
+│  ┌───────────────────────────────────────────────────────────────┐   │
+│  │                   Gazebo Simulation                           │   │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌────────┐ ┌───────────┐  │   │
 │  │  │ TurtleBot3  │  │ robot_state  │  │ LIDAR  │ │   Nav2    │  │   │
 │  │  │    Node     │  │  publisher   │  │ sensor │ │ (AMCL,    │  │   │
@@ -194,18 +360,27 @@ For a more hierarchical demo with multiple areas, see the [ros2_medkit demo node
 │  │                    ROS 2 Topics ◄────────────────────┘        │   │
 │  └──────────────────────────┼────────────────────────────────────┘   │
 │                             │                                        │
-│               ┌─────────────┴─────────────┐                         │
-│               │   ros2_medkit Gateway     │                         │
-│               │   (REST Server :8080)     │                         │
-│               └─────────────┬─────────────┘                         │
-└─────────────────────────────┼────────────────────────────────────────┘
-                              │
-                       HTTP REST API
-                              │
-         ┌────────────────────┼────────────────────┐
-         ▼                    ▼                    ▼
-   sovd_web_ui          curl/browser        External tools
-  (localhost:3000)
+│           ┌─────────────────┼─────────────────┐                      │
+│           │                 │                 │                      │
+│           ▼                 ▼                 ▼                      │
+│  ┌────────────────┐  ┌─────────────┐  ┌──────────────────┐           │
+│  │ /diagnostics   │  │ fault_      │  │ ros2_medkit      │           │
+│  │ topic          │  │ manager     │  │ Gateway          │           │
+│  └───────┬────────┘  └──────▲──────┘  │ (REST :8080)     │           │
+│          │                  │         └────────┬─────────┘           │
+│          ▼                  │                  │                     │
+│  ┌────────────────┐         │                  │                     │
+│  │ diagnostic_    ├─────────┘                  │                     │
+│  │ bridge         │                            │                     │
+│  └────────────────┘                            │                     │
+└────────────────────────────────────────────────┼─────────────────────┘
+                                                 │
+                                          HTTP REST API
+                                                 │
+         ┌───────────────────────────────────────┼────────────────────┐
+         ▼                    ▼                  ▼                    ▼
+   sovd_web_ui          curl/browser      External tools        MCP Server
+  (localhost:3000)                                          (ros2_medkit_mcp)
 ```
 
 ## File Structure
@@ -215,13 +390,36 @@ demos/turtlebot3_integration/
 ├── Dockerfile                  # ROS 2 Jazzy + TurtleBot3 + Nav2 + ros2_medkit
 ├── docker-compose.yml          # Docker Compose (CPU & GPU via profiles)
 ├── run-demo.sh                 # One-click demo launcher
+├── send-nav-goal.sh            # Send navigation goal via SOVD API
+├── check-entities.sh           # Explore SOVD entity hierarchy
+├── check-faults.sh             # View active faults
+├── inject-nav-failure.sh       # Inject navigation failure scenario
+├── inject-localization-failure.sh  # Inject AMCL localization issues
+├── inject-controller-failure.sh    # Inject controller velocity limits
+├── inject-collision.sh         # Inject collision warning scenario
+├── restore-normal.sh           # Restore normal operation
 ├── config/
-│   ├── medkit_params.yaml      # ros2_medkit gateway config
-│   ├── nav2_params.yaml        # Nav2 navigation parameters
-│   └── turtlebot3_world.yaml   # Map configuration
+│   ├── medkit_params.yaml           # ros2_medkit gateway config
+│   ├── turtlebot3_manifest.yaml     # SOVD manifest (entity hierarchy)
+│   ├── nav2_params.yaml             # Nav2 navigation parameters
+│   └── turtlebot3_world.yaml        # Map configuration
 └── launch/
     └── demo.launch.py          # ROS 2 launch file
 ```
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| `run-demo.sh` | Start the full demo (Docker) |
+| `send-nav-goal.sh [x] [y] [yaw]` | Send navigation goal via SOVD API |
+| `check-entities.sh` | Explore SOVD entity hierarchy |
+| `check-faults.sh` | View active faults from gateway |
+| `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |
+| `inject-localization-failure.sh` | Inject localization failure (AMCL reset) |
+| `inject-controller-failure.sh` | Inject controller failure (velocity limits) |
+| `inject-collision.sh` | Inject collision warning scenario |
+| `restore-normal.sh` | Restore normal operation and clear faults |
 
 ## Manual Setup (Alternative)
 
