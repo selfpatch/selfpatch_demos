@@ -4,7 +4,7 @@
   <name>sensor_diagnostics_demo</name>
   <version>0.1.0</version>
   <description>Lightweight sensor diagnostics demo for ros2_medkit (no Gazebo required)</description>
-  <maintainer email="demo@example.com">Demo Maintainer</maintainer>
+  <maintainer email="bartoszburda93@gmail.com">bburda</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

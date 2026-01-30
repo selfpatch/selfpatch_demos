@@ -4,7 +4,7 @@
   <name>turtlebot3_medkit_demo</name>
   <version>0.1.0</version>
   <description>TurtleBot3 + ros2_medkit integration demo with Nav2 navigation</description>
-  <maintainer email="demo@example.com">Demo Maintainer</maintainer>
+  <maintainer email="bartoszburda93@gmail.com">bburda</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -12,6 +12,8 @@
   <exec_depend>ros2launch</exec_depend>
   <exec_depend>turtlebot3_gazebo</exec_depend>
   <exec_depend>ros2_medkit_gateway</exec_depend>
+  <exec_depend>ros2_medkit_fault_manager</exec_depend>
+  <exec_depend>ros2_medkit_diagnostic_bridge</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>nav2_bt_navigator</exec_depend>
   <exec_depend>nav2_controller</exec_depend>
