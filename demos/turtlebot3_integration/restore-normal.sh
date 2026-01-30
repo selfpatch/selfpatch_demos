@@ -26,7 +26,7 @@ echo "Canceling any active navigation goals..."
 # List active executions and cancel them
 EXECUTIONS=$(curl -s "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions" 2>/dev/null)
 if echo "$EXECUTIONS" | jq -e '.items[]' > /dev/null 2>&1; then
-    echo "$EXECUTIONS" | jq -r '.items[].id' | while read EXEC_ID; do
+    echo "$EXECUTIONS" | jq -r '.items[].id' | while read -r EXEC_ID; do
         if [ -n "$EXEC_ID" ]; then
             curl -s -X DELETE "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions/$EXEC_ID" > /dev/null 2>&1
             echo "  Canceled execution: $EXEC_ID"
