@@ -20,7 +20,7 @@ from launch.actions import (
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -87,7 +87,7 @@ def generate_launch_description():
                     os.path.join(ros_gz_sim_dir, "launch", "gz_sim.launch.py")
                 ),
                 launch_arguments={
-                    "gz_args": ["-r -s -v2 ", world_file],
+                    "gz_args": ["-r", "-s", "-v2", world_file],
                     "on_exit_shutdown": "true",
                 }.items(),
                 condition=IfCondition(headless),
@@ -100,7 +100,7 @@ def generate_launch_description():
                 launch_arguments={"use_sim_time": use_sim_time}.items(),
                 condition=UnlessCondition(headless),
             ),
-            # Spawn TurtleBot3 robot (both modes)
+            # Spawn TurtleBot3 robot (headless mode only - GUI mode already includes spawn)
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(turtlebot3_gazebo_dir, "launch", "spawn_turtlebot3.launch.py")

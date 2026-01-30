@@ -8,6 +8,13 @@ API_BASE="${GATEWAY_URL}/api/v1"
 echo "🔍 Checking faults from ros2_medkit gateway..."
 echo ""
 
+# Check for jq dependency
+if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ 'jq' is required but not installed."
+    echo "   Please install jq (e.g., 'sudo apt-get install jq') and retry."
+    exit 1
+fi
+
 # Wait for gateway
 echo "Checking gateway health..."
 if ! curl -sf "${API_BASE}/health" > /dev/null 2>&1; then

@@ -20,6 +20,13 @@ echo "║         SOVD Entity Hierarchy Explorer                     ║"
 echo "║              TurtleBot3 + Nav2 Demo                        ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 
+# Check for jq dependency
+if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ 'jq' is required but not installed."
+    echo "   Please install jq (e.g., 'sudo apt-get install jq') and retry."
+    exit 1
+fi
+
 # Wait for gateway
 echo ""
 echo "Checking gateway health..."

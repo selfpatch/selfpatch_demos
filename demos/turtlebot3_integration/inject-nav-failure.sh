@@ -9,6 +9,13 @@ echo "🚫 Injecting NAVIGATION FAILURE fault..."
 echo "   Sending goal to unreachable location (outside map bounds)"
 echo ""
 
+# Check for jq dependency
+if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ 'jq' is required but not installed."
+    echo "   Please install jq (e.g., 'sudo apt-get install jq') and retry."
+    exit 1
+fi
+
 # Check gateway
 if ! curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
     echo "❌ Gateway not available at ${GATEWAY_URL}"

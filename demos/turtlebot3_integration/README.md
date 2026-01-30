@@ -106,12 +106,12 @@ docker compose --profile nvidia up --build
 
 ```bash
 # Send velocity command using Apps data endpoint (moves robot forward)
-curl -X PUT http://localhost:8080/api/v1/apps/turtlebot3_node/data/cmd_vel \
+curl -X PUT http://localhost:8080/api/v1/apps/turtlebot3-node/data/cmd_vel \
   -H "Content-Type: application/json" \
   -d '{"linear": {"x": 0.2, "y": 0.0, "z": 0.0}, "angular": {"x": 0.0, "y": 0.0, "z": 0.0}}'
 
 # Stop the robot
-curl -X PUT http://localhost:8080/api/v1/apps/turtlebot3_node/data/cmd_vel \
+curl -X PUT http://localhost:8080/api/v1/apps/turtlebot3-node/data/cmd_vel \
   -H "Content-Type: application/json" \
   -d '{"linear": {"x": 0.0}, "angular": {"z": 0.0}}'
 ```
@@ -153,20 +153,20 @@ curl http://localhost:8080/api/v1/apps/amcl | jq
 
 ```bash
 # Get LiDAR scan data
-curl http://localhost:8080/api/v1/apps/turtlebot3_node/data/scan | jq '{
+curl http://localhost:8080/api/v1/apps/turtlebot3-node/data/scan | jq '{
   angle_min: .angle_min,
   angle_max: .angle_max,
   sample_ranges: .ranges[:5]
 }'
 
 # Get odometry data
-curl http://localhost:8080/api/v1/apps/turtlebot3_node/data/odom | jq '{
+curl http://localhost:8080/api/v1/apps/turtlebot3-node/data/odom | jq '{
   position: .pose.pose.position,
   orientation: .pose.pose.orientation
 }'
 
 # List all data topics for an app
-curl http://localhost:8080/api/v1/apps/turtlebot3_node/data | jq
+curl http://localhost:8080/api/v1/apps/turtlebot3-node/data | jq
 ```
 
 ### Fault Management
@@ -179,7 +179,7 @@ curl http://localhost:8080/api/v1/faults | jq
 curl http://localhost:8080/api/v1/areas/robot/faults | jq
 
 # Clear a specific fault
-curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic_bridge/faults/TURTLEBOT3_NODE
+curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic-bridge/faults/TURTLEBOT3_NODE
 ```
 
 ### Operations (Service Calls)
