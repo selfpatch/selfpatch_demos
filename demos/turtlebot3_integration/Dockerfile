@@ -59,6 +59,7 @@ RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_m
 COPY package.xml CMakeLists.txt ${COLCON_WS}/src/turtlebot3_medkit_demo/
 COPY config/ ${COLCON_WS}/src/turtlebot3_medkit_demo/config/
 COPY launch/ ${COLCON_WS}/src/turtlebot3_medkit_demo/launch/
+COPY scripts/ ${COLCON_WS}/src/turtlebot3_medkit_demo/scripts/
 
 # Build ros2_medkit and demo package
 WORKDIR ${COLCON_WS}

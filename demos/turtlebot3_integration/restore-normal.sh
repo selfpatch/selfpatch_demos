@@ -34,20 +34,18 @@ if echo "$EXECUTIONS" | jq -e '.items[]' > /dev/null 2>&1; then
     done
 fi
 
-# Restore velocity smoother defaults
-echo "Restoring velocity_smoother defaults..."
+# Restore velocity smoother defaults (in case controller-failure was run before removal)
+echo ""
+echo "Restoring velocity parameters to defaults..."
 curl -s -X PUT "${API_BASE}/apps/velocity-smoother/configurations/max_velocity" \
   -H "Content-Type: application/json" \
-  -d '{"value": [0.26, 0.0, 1.0]}' > /dev/null
+  -d '{"value": [0.26, 0.0, 1.0]}' > /dev/null 2>&1
 
-# Restore controller defaults
-echo "Restoring controller_server defaults..."
 curl -s -X PUT "${API_BASE}/apps/controller-server/configurations/FollowPath.max_vel_x" \
   -H "Content-Type: application/json" \
-  -d '{"value": 0.26}' > /dev/null
+  -d '{"value": 0.26}' > /dev/null 2>&1
 
 # Clear all faults
-echo ""
 echo "Clearing all faults from FaultManager..."
 curl -s -X DELETE "${API_BASE}/faults" > /dev/null
 
