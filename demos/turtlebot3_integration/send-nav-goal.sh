@@ -65,7 +65,7 @@ echo ""
 RESPONSE=$(curl -s -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions" \
   -H "Content-Type: application/json" \
   -d "{
-    \"request\": {
+    \"goal\": {
       \"pose\": {
         \"header\": {\"frame_id\": \"map\"},
         \"pose\": {

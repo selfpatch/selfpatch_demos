@@ -17,7 +17,8 @@
 Anomaly Detector Node for TurtleBot3 Demo
 
 Monitors navigation metrics and reports faults directly to FaultManager:
-- Navigation goal ABORTED/CANCELED -> ERROR fault
+- Navigation goal ABORTED -> ERROR fault
+- Navigation goal CANCELED -> WARN fault
 - High AMCL localization uncertainty -> WARN/ERROR fault
 - No robot progress when goal active -> WARN fault
 
@@ -25,10 +26,10 @@ Reports faults directly via /fault_manager/report_fault service.
 """
 
 import math
-import time
 from typing import Optional
 
 import rclpy
+from rclpy.time import Time
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
@@ -112,12 +113,12 @@ class AnomalyDetectorNode(Node):
         self.last_goal_status: dict = {}  # goal_id -> last_status
         self.has_active_goal = False
         self.last_position: Optional[tuple] = None
-        self.last_progress_time = time.time()
+        self.last_progress_time: Optional[Time] = None
         self.current_covariance = 0.0
 
-        # Throttling
-        self.last_covariance_report_time = 0.0
-        self.last_no_progress_report_time = 0.0
+        # Throttling (using ROS time for simulation compatibility)
+        self.last_covariance_report_time: Optional[Time] = None
+        self.last_no_progress_report_time: Optional[Time] = None
         self.report_throttle_sec = 5.0
 
         # Track active faults for PASSED events
@@ -131,14 +132,19 @@ class AnomalyDetectorNode(Node):
 
     def goal_status_callback(self, msg: GoalStatusArray):
         """Monitor navigation goal status for failures."""
+        # Compute has_active_goal from entire message to avoid iteration-order issues
+        active_statuses = {GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING}
+        self.has_active_goal = any(
+            s.status in active_statuses for s in msg.status_list
+        )
+
         for status in msg.status_list:
             goal_id = ''.join(f'{b:02x}' for b in status.goal_info.goal_id.uuid)
             last_status = self.last_goal_status.get(goal_id)
 
-            # Track active goals
-            if status.status in [GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING]:
-                self.has_active_goal = True
-                self.last_progress_time = time.time()
+            # Track active goals - update progress time when goal is active
+            if status.status in active_statuses:
+                self.last_progress_time = self.get_clock().now()
 
             # Detect status changes to terminal failure states
             if last_status != status.status:
@@ -151,7 +157,6 @@ class AnomalyDetectorNode(Node):
                         description=f'Navigation goal ABORTED - path planning or execution failed (goal: {goal_id[:8]})',
                         event_type=EVENT_FAILED
                     )
-                    self.has_active_goal = False
                     self.get_logger().warn(f'Navigation goal {goal_id[:8]} ABORTED')
 
                 elif status.status == GoalStatus.STATUS_CANCELED:
@@ -161,7 +166,6 @@ class AnomalyDetectorNode(Node):
                         description=f'Navigation goal CANCELED (goal: {goal_id[:8]})',
                         event_type=EVENT_FAILED
                     )
-                    self.has_active_goal = False
                     self.get_logger().info(f'Navigation goal {goal_id[:8]} CANCELED')
 
                 elif status.status == GoalStatus.STATUS_SUCCEEDED:
@@ -178,17 +182,19 @@ class AnomalyDetectorNode(Node):
                         description='Navigation goal succeeded',
                         event_type=EVENT_PASSED
                     )
-                    self.has_active_goal = False
 
     def amcl_pose_callback(self, msg: PoseWithCovarianceStamped):
         """Monitor AMCL localization covariance."""
         # Calculate covariance magnitude from position covariance (indices 0, 7 for x, y variance)
+        # cov[0] and cov[7] are already variances; use their sum to compute a position stddev magnitude
         cov = msg.pose.covariance
-        self.current_covariance = math.sqrt(cov[0]**2 + cov[7]**2)
+        self.current_covariance = math.sqrt(cov[0] + cov[7])
 
-        now = time.time()
-        if now - self.last_covariance_report_time < self.report_throttle_sec:
-            return
+        now = self.get_clock().now()
+        if self.last_covariance_report_time is not None:
+            elapsed = (now - self.last_covariance_report_time).nanoseconds / 1e9
+            if elapsed < self.report_throttle_sec:
+                return
 
         if self.current_covariance > self.covariance_error_threshold:
             self.report_fault(
@@ -217,7 +223,7 @@ class AnomalyDetectorNode(Node):
                     description='AMCL localization normal',
                     event_type=EVENT_PASSED
                 )
-            self.last_covariance_report_time = now
+                self.last_covariance_report_time = now
 
     def odom_callback(self, msg: Odometry):
         """Track robot position for progress monitoring."""
@@ -229,7 +235,7 @@ class AnomalyDetectorNode(Node):
             distance = math.sqrt((x - last_x)**2 + (y - last_y)**2)
 
             if distance > self.min_progress_distance:
-                self.last_progress_time = time.time()
+                self.last_progress_time = self.get_clock().now()
                 # Clear no-progress fault if robot is moving
                 if 'NAVIGATION_NO_PROGRESS' in self.active_faults:
                     self.report_fault(
@@ -246,11 +252,19 @@ class AnomalyDetectorNode(Node):
         if not self.has_active_goal:
             return
 
-        now = time.time()
-        time_since_progress = now - self.last_progress_time
+        if self.last_progress_time is None:
+            return
+
+        now = self.get_clock().now()
+        time_since_progress = (now - self.last_progress_time).nanoseconds / 1e9
 
         if time_since_progress > self.no_progress_timeout_sec:
-            if now - self.last_no_progress_report_time > self.report_throttle_sec:
+            can_report = True
+            if self.last_no_progress_report_time is not None:
+                elapsed = (now - self.last_no_progress_report_time).nanoseconds / 1e9
+                can_report = elapsed > self.report_throttle_sec
+
+            if can_report:
                 self.report_fault(
                     fault_code='NAVIGATION_NO_PROGRESS',
                     severity=SEVERITY_WARN,
@@ -298,7 +312,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info('AnomalyDetectorNode interrupted by user (KeyboardInterrupt), shutting down.')
     finally:
         node.destroy_node()
         rclpy.shutdown()
