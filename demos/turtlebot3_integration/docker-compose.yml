@@ -1,6 +1,8 @@
 services:
   # CPU-only version (default)
+  # Use with: docker compose --profile cpu up
   turtlebot3-demo:
+    profiles: ["cpu"]
     build:
       context: .
       dockerfile: Dockerfile
