@@ -165,7 +165,7 @@ def generate_launch_description():
                     },
                 ],
             ),
-            # Launch anomaly detector to monitor navigation and publish diagnostics
+            # Launch anomaly detector to monitor navigation and report faults via fault manager
             Node(
                 package="turtlebot3_medkit_demo",
                 executable="anomaly_detector.py",

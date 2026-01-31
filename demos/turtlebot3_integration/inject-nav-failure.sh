@@ -40,8 +40,8 @@ RESPONSE=$(curl -s -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to
 
 echo "$RESPONSE" | jq '.' 2>/dev/null || echo "$RESPONSE"
 
-# Extract execution ID
-EXEC_ID=$(echo "$RESPONSE" | jq -r '.id' 2>/dev/null)
+# Extract execution ID (support both .execution_id and .id)
+EXEC_ID=$(echo "$RESPONSE" | jq -r '.execution_id // .id // empty' 2>/dev/null)
 
 if [ -n "$EXEC_ID" ] && [ "$EXEC_ID" != "null" ]; then
     echo ""
