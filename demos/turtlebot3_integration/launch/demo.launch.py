@@ -165,5 +165,19 @@ def generate_launch_description():
                     },
                 ],
             ),
+            # Launch anomaly detector to monitor navigation and publish diagnostics
+            Node(
+                package="turtlebot3_medkit_demo",
+                executable="anomaly_detector.py",
+                name="anomaly_detector",
+                namespace="bridge",
+                output="screen",
+                parameters=[
+                    {"use_sim_time": use_sim_time},
+                    {"covariance_warn_threshold": 0.3},
+                    {"covariance_error_threshold": 1.0},
+                    {"no_progress_timeout_sec": 20.0},
+                ],
+            ),
         ]
     )
