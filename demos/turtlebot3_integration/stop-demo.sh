@@ -60,10 +60,10 @@ done
 echo "Stopping containers..."
 if docker compose version &> /dev/null; then
     # shellcheck disable=SC2086
-    docker compose down ${REMOVE_VOLUMES} ${REMOVE_IMAGES}
+    docker compose --profile cpu --profile nvidia down ${REMOVE_VOLUMES} ${REMOVE_IMAGES}
 else
     # shellcheck disable=SC2086
-    docker-compose down ${REMOVE_VOLUMES} ${REMOVE_IMAGES}
+    docker-compose --profile cpu --profile nvidia down ${REMOVE_VOLUMES} ${REMOVE_IMAGES}
 fi
 
 # Cleanup X11

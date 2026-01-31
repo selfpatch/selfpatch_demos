@@ -183,6 +183,18 @@ apps:
       node_name: diagnostic_bridge
       namespace: /bridge
 
+  - id: anomaly-detector
+    name: "Anomaly Detector"
+    category: "diagnostics"
+    is_located_on: diagnostic-bridge-unit
+    description: "Monitors navigation metrics and reports faults directly to FaultManager"
+    depends_on:
+      - amcl
+      - bt-navigator
+    ros_binding:
+      node_name: anomaly_detector
+      namespace: /bridge
+
 # =============================================================================
 # FUNCTIONS - High-level capabilities
 # =============================================================================
@@ -213,3 +225,4 @@ functions:
       - medkit-gateway
       - medkit-fault-manager
       - diagnostic-bridge
+      - anomaly-detector

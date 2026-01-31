@@ -271,45 +271,67 @@ TurtleBot3 Demo (manifest-based discovery)
 │   ├── planner-server        → component: nav2-stack
 │   ├── medkit-gateway        → component: gateway
 │   ├── medkit-fault-manager  → component: fault-manager
-│   └── diagnostic-bridge     → component: diagnostic-bridge-unit
+│   ├── diagnostic-bridge     → component: diagnostic-bridge-unit
+│   └── anomaly-detector      → component: diagnostic-bridge-unit
 └── Functions (high-level capabilities)
     ├── autonomous-navigation → hosted by: amcl, bt-navigator, ...
     ├── robot-control         → hosted by: turtlebot3-node, velocity-smoother
-    └── fault-management      → hosted by: gateway, fault-manager, bridge
+    └── fault-management      → hosted by: gateway, fault-manager, bridge, anomaly-detector
 ```
 
 ### Fault Reporting
 
-This demo uses the **legacy fault reporting path** via diagnostic_bridge:
+This demo uses two fault reporting paths:
+
+1. **Direct Fault Reporting** via `anomaly_detector`:
+   - Monitors navigation goal status, AMCL covariance, and robot progress
+   - Reports faults directly to FaultManager via `/fault_manager/report_fault` service
+
+2. **Legacy Path** via `diagnostic_bridge`:
+   - Subscribes to `/diagnostics` topic (DiagnosticArray)
+   - Converts diagnostics to fault reports
 
 ```
-Nav2/TurtleBot3 nodes → /diagnostics topic (DiagnosticArray)
-                              ↓
-        diagnostic_bridge subscribes and converts
-                              ↓
-        FaultManager receives via ReportFault service
-                              ↓
-        Gateway exposes via GET /api/v1/faults
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Fault Reporting Paths                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  anomaly_detector ─────┬──── /fault_manager/report_fault ──────┐   │
+│    (monitors:          │            (direct service call)       │   │
+│     - nav goal status) │                                        │   │
+│     - AMCL covariance) │                                        ▼   │
+│     - robot progress)  │                              ┌──────────────┐
+│                        │                              │ FaultManager │
+│                        │                              └──────┬───────┘
+│  Nav2/TurtleBot3 ──────┼──── /diagnostics topic ──────┐     │        │
+│    (DiagnosticArray)   │                              ▼     │        │
+│                        │                   diagnostic_bridge │        │
+│                        └───────────────────────────────┘     │        │
+│                                                              ▼        │
+│                                           GET /api/v1/faults         │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 | Source | Fault Reporter | Example Faults |
 |--------|----------------|----------------|
+| Navigation Goals | anomaly_detector | `NAVIGATION_GOAL_ABORTED`, `NAVIGATION_GOAL_CANCELED` |
+| Localization | anomaly_detector | `LOCALIZATION_UNCERTAINTY` |
+| Robot Progress | anomaly_detector | `NAVIGATION_NO_PROGRESS` |
 | AMCL | diagnostic_bridge | Localization degraded |
 | Nav2 Controller | diagnostic_bridge | Path following errors |
 | TurtleBot3 | diagnostic_bridge | Motor/sensor issues |
 
 ## Fault Injection Scenarios
 
-This demo includes scripts to inject various fault conditions for testing fault management:
+This demo includes scripts to inject various fault conditions for testing fault management.
+Faults are detected by `anomaly_detector` and reported directly to FaultManager.
 
 ### Available Fault Scenarios
 
 | Script | Fault Type | Description | Expected Faults |
 |--------|-----------|-------------|-----------------|
-| `inject-nav-failure.sh` | Navigation | Send goal to unreachable location | BT_NAVIGATOR, PLANNER_SERVER |
-| `inject-localization-failure.sh` | Localization | Reset AMCL with high uncertainty | AMCL |
-| `inject-controller-failure.sh` | Controller | Set very restrictive velocity limits | VELOCITY_SMOOTHER, CONTROLLER_SERVER |
-| `inject-collision.sh` | Collision | Navigate toward obstacles | COLLISION_MONITOR |
+| `inject-nav-failure.sh` | Navigation | Send goal to unreachable location | `NAVIGATION_GOAL_ABORTED` |
+| `inject-localization-failure.sh` | Localization | Reset AMCL with high uncertainty | `LOCALIZATION_UNCERTAINTY` |
 | `restore-normal.sh` | Recovery | Restore defaults and clear faults | - |
 
 ### Fault Injection Examples
@@ -321,7 +343,7 @@ This demo includes scripts to inject various fault conditions for testing fault 
 ./inject-nav-failure.sh
 
 # Check resulting faults
-curl http://localhost:8080/api/v1/faults | jq '.items[] | {code, severity, message}'
+curl http://localhost:8080/api/v1/faults | jq '.items[] | {fault_code, severity_label, description}'
 ```
 
 #### 2. Localization Failure
@@ -330,27 +352,7 @@ curl http://localhost:8080/api/v1/faults | jq '.items[] | {code, severity, messa
 # Reinitialize AMCL global localization (causes high uncertainty)
 ./inject-localization-failure.sh
 
-# Watch localization recover
-curl http://localhost:8080/api/v1/apps/amcl/data/particlecloud | jq '.poses | length'
-```
-
-#### 3. Controller Restriction
-
-```bash
-# Set very low velocity limits (robot moves extremely slowly)
-./inject-controller-failure.sh
-
-# Try sending a navigation goal - robot will struggle to follow path
-./send-nav-goal.sh 2.0 0.5
-```
-
-#### 4. Collision Scenario
-
-```bash
-# Trigger collision avoidance
-./inject-collision.sh
-
-# Monitor collision warnings
+# Watch for LOCALIZATION_UNCERTAINTY fault
 curl http://localhost:8080/api/v1/faults | jq
 ```
 
@@ -429,16 +431,16 @@ demos/turtlebot3_integration/
 ├── check-faults.sh             # View active faults
 ├── inject-nav-failure.sh       # Inject navigation failure scenario
 ├── inject-localization-failure.sh  # Inject AMCL localization issues
-├── inject-controller-failure.sh    # Inject controller velocity limits
-├── inject-collision.sh         # Inject collision warning scenario
 ├── restore-normal.sh           # Restore normal operation
 ├── config/
 │   ├── medkit_params.yaml           # ros2_medkit gateway config
 │   ├── turtlebot3_manifest.yaml     # SOVD manifest (entity hierarchy)
 │   ├── nav2_params.yaml             # Nav2 navigation parameters
 │   └── turtlebot3_world.yaml        # Map configuration
-└── launch/
-    └── demo.launch.py          # ROS 2 launch file
+├── launch/
+│   └── demo.launch.py          # ROS 2 launch file
+└── scripts/
+    └── anomaly_detector.py     # Navigation anomaly detector node
 ```
 
 ## Scripts
@@ -452,8 +454,6 @@ demos/turtlebot3_integration/
 | `check-faults.sh` | View active faults from gateway |
 | `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |
 | `inject-localization-failure.sh` | Inject localization failure (AMCL reset) |
-| `inject-controller-failure.sh` | Inject controller failure (velocity limits) |
-| `inject-collision.sh` | Inject collision warning scenario |
 | `restore-normal.sh` | Restore normal operation and clear faults |
 
 ## Manual Setup (Alternative)

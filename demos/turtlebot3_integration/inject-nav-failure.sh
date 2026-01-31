@@ -27,7 +27,7 @@ echo "Sending navigation goal to (100.0, 100.0) - far outside map..."
 RESPONSE=$(curl -s -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions" \
   -H "Content-Type: application/json" \
   -d '{
-    "request": {
+    "goal": {
       "pose": {
         "header": {"frame_id": "map"},
         "pose": {
@@ -40,11 +40,26 @@ RESPONSE=$(curl -s -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to
 
 echo "$RESPONSE" | jq '.' 2>/dev/null || echo "$RESPONSE"
 
+# Extract execution ID
+EXEC_ID=$(echo "$RESPONSE" | jq -r '.id' 2>/dev/null)
+
+if [ -n "$EXEC_ID" ] && [ "$EXEC_ID" != "null" ]; then
+    echo ""
+    echo "Waiting for navigation to fail (checking status)..."
+    for i in {1..10}; do
+        sleep 2
+        STATUS=$(curl -s "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions/${EXEC_ID}" | jq -r '.status' 2>/dev/null)
+        echo "  Status: $STATUS"
+        if [ "$STATUS" = "failed" ] || [ "$STATUS" = "completed" ]; then
+            break
+        fi
+    done
+fi
+
 echo ""
 echo "✓ Navigation failure injected!"
 echo ""
-echo "Expected faults (via diagnostic_bridge):"
-echo "  - BT_NAVIGATOR: Goal rejected or path planning failed"
-echo "  - PLANNER_SERVER: No valid path to goal"
+echo "Expected faults (via anomaly_detector → FaultManager):"
+echo "  - NAVIGATION_GOAL_ABORTED: Navigation goal ABORTED"
 echo ""
 echo "Check faults with: curl ${API_BASE}/faults | jq"

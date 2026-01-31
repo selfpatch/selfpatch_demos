@@ -22,14 +22,30 @@ curl -s -X POST "${API_BASE}/apps/amcl/operations/reinitialize_global_localizati
   -d '{}'
 
 echo ""
+echo "Waiting for particles to scatter..."
+sleep 2
+
+# Now try to navigate - with scattered particles, localization uncertainty is high
+echo "Sending navigation goal (with high localization uncertainty)..."
+curl -s -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": {
+      "pose": {
+        "header": {"frame_id": "map"},
+        "pose": {
+          "position": {"x": 2.0, "y": 0.0, "z": 0.0},
+          "orientation": {"w": 1.0}
+        }
+      }
+    }
+  }' | jq '.' 2>/dev/null || true
+
+echo ""
 echo "✓ Localization failure injected!"
 echo ""
-echo "AMCL will now have high uncertainty until it re-localizes."
-echo "Expected faults (via diagnostic_bridge):"
-echo "  - AMCL: Localization confidence low"
-echo "  - BT_NAVIGATOR: Goal may fail due to uncertain pose"
-echo ""
-echo "Watch localization recover with:"
-echo "  curl ${API_BASE}/apps/amcl/data/particlecloud | jq '.poses | length'"
+echo "AMCL has been reinitialized - localization uncertainty is high."
+echo "The anomaly_detector monitors AMCL covariance and will report:"
+echo "  - LOCALIZATION_UNCERTAINTY: High AMCL covariance (uncertainty)"
 echo ""
 echo "Check faults with: curl ${API_BASE}/faults | jq"
