@@ -38,29 +38,45 @@ That's it! The script will:
 
 1. Build the Docker images (first run takes ~5-10 min, downloads ~4GB)
 2. Setup X11 forwarding for Gazebo GUI
-3. Launch TurtleBot3 simulation + Nav2 + ros2_medkit gateway
+3. Launch TurtleBot3 simulation + Nav2 + ros2_medkit gateway in **daemon mode** (background)
 4. Launch sovd_web_ui at <http://localhost:3000>
 
-**Note:** By default, the demo runs with **Gazebo GUI** for visualization. Requires X11 display.
+**Note:** By default, the demo runs in **daemon mode** with **Gazebo GUI** enabled. This allows you to interact with ROS 2 while the demo is running.
 
-### Running Headless (Server Only)
-
-For CI/CD or remote servers without display:
+### Available Options
 
 ```bash
-HEADLESS=true docker compose up
-# or:
-./run-demo.sh --headless
+./run-demo.sh              # Daemon mode with GUI (default)
+./run-demo.sh --attached   # Foreground mode with live logs
+./run-demo.sh --headless   # Daemon mode without GUI (headless)
+./run-demo.sh --nvidia     # Use NVIDIA GPU acceleration
+./run-demo.sh --update     # Pull latest images before running
+./run-demo.sh --no-cache   # Rebuild without cache
 ```
 
-### Running with GUI (Default)
+### Viewing Logs and Interacting with ROS 2
 
-With Gazebo visualization:
+Since the demo runs in daemon mode by default, you can:
 
 ```bash
-docker compose up
-# or:
-./run-demo.sh
+# View live logs
+docker compose --profile cpu logs -f
+
+# Enter the container to run ROS 2 commands
+docker exec -it turtlebot3_medkit_demo bash
+
+# Inside the container:
+ros2 node list
+ros2 topic list
+ros2 topic echo /odom
+```
+
+### Stopping the Demo
+
+```bash
+./stop-demo.sh              # Stop containers
+./stop-demo.sh --volumes    # Stop and remove volumes
+./stop-demo.sh --images     # Stop and remove images
 ```
 
 ### 2. Access the Web UI
@@ -85,7 +101,15 @@ For hardware-accelerated Gazebo rendering with NVIDIA GPU:
 You can also use Docker Compose directly:
 
 ```bash
-docker compose --profile nvidia up --build
+# CPU version (default profile)
+docker compose --profile cpu up -d
+
+# NVIDIA version
+docker compose --profile nvidia up -d
+
+# View logs
+docker compose --profile cpu logs -f
+docker compose --profile nvidia logs -f
 ```
 
 ## Controlling the Robot
@@ -118,7 +142,13 @@ curl -X PUT http://localhost:8080/api/v1/apps/turtlebot3-node/data/cmd_vel \
 
 ### Via ROS2 CLI (inside container)
 
+First, enter the running container:
+
 ```bash
+# Enter the container
+docker exec -it turtlebot3_medkit_demo bash
+
+# Inside the container:
 # Send navigation goal
 ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
   "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 2.0, y: 0.5, z: 0.0}, orientation: {w: 1.0}}}}"
@@ -126,6 +156,9 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 # Manual teleop
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
   "{linear: {x: 0.2}, angular: {z: 0.0}}" --once
+
+# Exit container
+exit
 ```
 
 ## REST API Endpoints
@@ -390,6 +423,7 @@ demos/turtlebot3_integration/
 ├── Dockerfile                  # ROS 2 Jazzy + TurtleBot3 + Nav2 + ros2_medkit
 ├── docker-compose.yml          # Docker Compose (CPU & GPU via profiles)
 ├── run-demo.sh                 # One-click demo launcher
+├── stop-demo.sh                # Stop and cleanup demo
 ├── send-nav-goal.sh            # Send navigation goal via SOVD API
 ├── check-entities.sh           # Explore SOVD entity hierarchy
 ├── check-faults.sh             # View active faults
@@ -412,6 +446,7 @@ demos/turtlebot3_integration/
 | Script | Description |
 |--------|-------------|
 | `run-demo.sh` | Start the full demo (Docker) |
+| `stop-demo.sh` | Stop containers and cleanup |
 | `send-nav-goal.sh [x] [y] [yaw]` | Send navigation goal via SOVD API |
 | `check-entities.sh` | Explore SOVD entity hierarchy |
 | `check-faults.sh` | View active faults from gateway |
