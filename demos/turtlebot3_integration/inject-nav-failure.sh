@@ -46,7 +46,7 @@ EXEC_ID=$(echo "$RESPONSE" | jq -r '.id' 2>/dev/null)
 if [ -n "$EXEC_ID" ] && [ "$EXEC_ID" != "null" ]; then
     echo ""
     echo "Waiting for navigation to fail (checking status)..."
-    for i in {1..10}; do
+    for _ in {1..10}; do
         sleep 2
         STATUS=$(curl -s "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions/${EXEC_ID}" | jq -r '.status' 2>/dev/null)
         echo "  Status: $STATUS"
