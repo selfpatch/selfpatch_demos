@@ -1,11 +1,11 @@
 #!/bin/bash
 # Inject high noise fault - demonstrates LEGACY fault reporting path
-# LiDAR/Camera → DiagnosticArray → /diagnostics → diagnostic_bridge → FaultManager
+# LiDAR/Camera → DiagnosticArray → /diagnostics → diagnostic-bridge → FaultManager
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
 
-echo "Injecting HIGH NOISE fault (Legacy path: LiDAR/Camera → diagnostic_bridge)..."
+echo "Injecting HIGH NOISE fault (Legacy path: LiDAR/Camera → diagnostic-bridge)..."
 echo ""
 
 # LiDAR: increase noise stddev (uses legacy diagnostics path)

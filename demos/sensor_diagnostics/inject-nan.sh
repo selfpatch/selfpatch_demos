@@ -15,16 +15,16 @@ curl -s -X PUT "${API_BASE}/apps/lidar-sim/configurations/inject_nan" \
   -d '{"value": true}'
 echo ""
 
-# MODERN PATH: IMU/GPS → anomaly_detector → FaultManager (direct service call)
+# MODERN PATH: IMU/GPS → anomaly-detector → FaultManager (direct service call)
 echo "[MODERN PATH] Enabling IMU inject_nan..."
-echo "  Fault path: imu-sim → anomaly_detector → /fault_manager/report_fault"
+echo "  Fault path: imu-sim → anomaly-detector → /fault_manager/report_fault"
 curl -s -X PUT "${API_BASE}/apps/imu-sim/configurations/inject_nan" \
   -H "Content-Type: application/json" \
   -d '{"value": true}'
 echo ""
 
 echo "[MODERN PATH] Enabling GPS inject_nan..."
-echo "  Fault path: gps-sim → anomaly_detector → /fault_manager/report_fault"
+echo "  Fault path: gps-sim → anomaly-detector → /fault_manager/report_fault"
 curl -s -X PUT "${API_BASE}/apps/gps-sim/configurations/inject_nan" \
   -H "Content-Type: application/json" \
   -d '{"value": true}'
