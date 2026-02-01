@@ -10,16 +10,16 @@ echo ""
 
 # LiDAR: increase noise stddev (uses legacy diagnostics path)
 echo "[LEGACY PATH] Setting LiDAR noise_stddev to 0.5 (very noisy)..."
-echo "  Fault path: lidar_sim → /diagnostics topic → diagnostic_bridge → FaultManager"
-curl -s -X PUT "${API_BASE}/apps/lidar_sim/configurations/noise_stddev" \
+echo "  Fault path: lidar-sim → /diagnostics topic → diagnostic-bridge → FaultManager"
+curl -s -X PUT "${API_BASE}/apps/lidar-sim/configurations/noise_stddev" \
   -H "Content-Type: application/json" \
   -d '{"value": 0.5}'
 echo ""
 
 # Camera: add noise (uses legacy diagnostics path)
 echo "[LEGACY PATH] Setting Camera noise_level to 0.3..."
-echo "  Fault path: camera_sim → /diagnostics topic → diagnostic_bridge → FaultManager"
-curl -s -X PUT "${API_BASE}/apps/camera_sim/configurations/noise_level" \
+echo "  Fault path: camera-sim → /diagnostics topic → diagnostic-bridge → FaultManager"
+curl -s -X PUT "${API_BASE}/apps/camera-sim/configurations/noise_level" \
   -H "Content-Type: application/json" \
   -d '{"value": 0.3}'
 

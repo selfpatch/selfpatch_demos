@@ -17,14 +17,32 @@ This demo showcases ros2_medkit's data monitoring, configuration management, and
 ### Using Docker (Recommended)
 
 ```bash
-# Start the demo
-docker compose up
-
-# In another terminal, open the Web UI
-# Navigate to http://localhost:3000
-
-# Or run the demo script
+# Start the demo (builds and starts Docker services)
 ./run-demo.sh
+
+# The script will:
+# 1. Build and start Docker containers in daemon mode
+# 2. Display access URLs and available commands
+
+# Explore the API with interactive demonstration
+./check-demo.sh
+
+# To stop the demo
+./stop-demo.sh
+```
+
+**Options:**
+```bash
+./run-demo.sh --attached      # Run in foreground with logs
+./run-demo.sh --update        # Pull latest images before running
+./run-demo.sh --no-cache      # Build without cache
+```
+
+**Advanced usage:**
+```bash
+# Manual Docker control (if needed)
+docker compose up              # Start services manually
+docker compose down            # Stop services
 ```
 
 ### Building from Source
@@ -126,40 +144,40 @@ Sensor Topics → anomaly_detector monitors
 
 ```bash
 # Get LiDAR scan
-curl http://localhost:8080/api/v1/apps/lidar_sim/data/scan | jq '.ranges[:5]'
+curl http://localhost:8080/api/v1/apps/lidar-sim/data/scan | jq '.ranges[:5]'
 
 # Get IMU data
-curl http://localhost:8080/api/v1/apps/imu_sim/data/imu | jq '.linear_acceleration'
+curl http://localhost:8080/api/v1/apps/imu-sim/data/imu | jq '.linear_acceleration'
 
 # Get GPS fix
-curl http://localhost:8080/api/v1/apps/gps_sim/data/fix | jq '{lat: .latitude, lon: .longitude}'
+curl http://localhost:8080/api/v1/apps/gps-sim/data/fix | jq '{lat: .latitude, lon: .longitude}'
 ```
 
 ### View Configurations
 
 ```bash
 # List all LiDAR configurations
-curl http://localhost:8080/api/v1/apps/lidar_sim/configurations | jq
+curl http://localhost:8080/api/v1/apps/lidar-sim/configurations | jq
 
 # Get specific parameter
-curl http://localhost:8080/api/v1/apps/lidar_sim/configurations/noise_stddev | jq
+curl http://localhost:8080/api/v1/apps/lidar-sim/configurations/noise_stddev | jq
 ```
 
 ### Inject Faults
 
 ```bash
 # Increase sensor noise
-curl -X PUT http://localhost:8080/api/v1/apps/lidar_sim/configurations/noise_stddev \
+curl -X PUT http://localhost:8080/api/v1/apps/lidar-sim/configurations/noise_stddev \
   -H "Content-Type: application/json" \
   -d '{"value": 0.5}'
 
 # Cause sensor timeout
-curl -X PUT http://localhost:8080/api/v1/apps/lidar_sim/configurations/failure_probability \
+curl -X PUT http://localhost:8080/api/v1/apps/lidar-sim/configurations/failure_probability \
   -H "Content-Type: application/json" \
   -d '{"value": 1.0}'
 
 # Inject NaN values
-curl -X PUT http://localhost:8080/api/v1/apps/lidar_sim/configurations/inject_nan \
+curl -X PUT http://localhost:8080/api/v1/apps/lidar-sim/configurations/inject_nan \
   -H "Content-Type: application/json" \
   -d '{"value": true}'
 ```
@@ -185,7 +203,9 @@ curl http://localhost:8080/api/v1/faults | jq
 
 | Script | Description |
 |--------|-------------|
-| `run-demo.sh` | Interactive demo walkthrough |
+| `run-demo.sh` | Start Docker services (daemon mode) |
+| `stop-demo.sh` | Stop Docker services |
+| `check-demo.sh` | Interactive API demonstration and exploration |
 | `inject-noise.sh` | Inject high noise fault |
 | `inject-failure.sh` | Cause sensor timeout |
 | `inject-nan.sh` | Inject NaN values |
