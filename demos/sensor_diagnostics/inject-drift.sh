@@ -1,11 +1,11 @@
 #!/bin/bash
 # Inject sensor drift fault - demonstrates LEGACY fault reporting path
-# LiDAR drift → DiagnosticArray → /diagnostics → diagnostic_bridge → FaultManager
+# LiDAR drift → DiagnosticArray → /diagnostics → diagnostic-bridge → FaultManager
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
 
-echo "Injecting DRIFT fault (Legacy path: LiDAR → diagnostic_bridge)..."
+echo "Injecting DRIFT fault (Legacy path: LiDAR → diagnostic-bridge)..."
 echo ""
 
 # LiDAR drift: uses legacy diagnostics path

@@ -1,11 +1,11 @@
 #!/bin/bash
 # Inject sensor failure (timeout) fault - demonstrates MODERN fault reporting path
-# IMU sensor → anomaly_detector → FaultManager (via ReportFault service)
+# IMU sensor → anomaly-detector → FaultManager (via ReportFault service)
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
 
-echo "Injecting SENSOR FAILURE fault (Modern path: IMU → anomaly_detector)..."
+echo "Injecting SENSOR FAILURE fault (Modern path: IMU → anomaly-detector)..."
 
 # Set high failure probability - IMU will stop publishing
 echo "Setting IMU failure_probability to 1.0 (complete failure)..."
