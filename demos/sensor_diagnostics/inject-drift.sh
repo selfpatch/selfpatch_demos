@@ -10,8 +10,8 @@ echo ""
 
 # LiDAR drift: uses legacy diagnostics path
 echo "[LEGACY PATH] Setting LiDAR drift_rate to 0.1 m/s..."
-echo "  Fault path: lidar_sim → /diagnostics topic → diagnostic_bridge → FaultManager"
-curl -s -X PUT "${API_BASE}/apps/lidar_sim/configurations/drift_rate" \
+echo "  Fault path: lidar-sim → /diagnostics topic → diagnostic-bridge → FaultManager"
+curl -s -X PUT "${API_BASE}/apps/lidar-sim/configurations/drift_rate" \
   -H "Content-Type: application/json" \
   -d '{"value": 0.1}'
 
@@ -21,5 +21,5 @@ echo ""
 echo "Fault codes expected (auto-generated from diagnostic name):"
 echo "  - LIDAR_SIM (DRIFTING status, WARN severity)"
 echo ""
-echo "Watch the drift accumulate with: curl ${GATEWAY_URL}/api/v1/apps/lidar_sim/data/scan | jq '.ranges[:5]'"
+echo "Watch the drift accumulate with: curl ${GATEWAY_URL}/api/v1/apps/lidar-sim/data/scan | jq '.ranges[:5]'"
 echo "Check faults with: curl ${GATEWAY_URL}/api/v1/faults | jq"

@@ -51,9 +51,19 @@ The sensor diagnostics demo is the fastest way to try ros2_medkit:
 
 ```bash
 cd demos/sensor_diagnostics
-docker compose up
-# Open http://localhost:3000 for the Web UI
-# Run ./run-demo.sh for an interactive walkthrough
+./run-demo.sh
+# Docker services start in daemon mode
+# Web UI available at http://localhost:3000
+
+# Explore the API
+./check-demo.sh
+```
+
+**Options:**
+```bash
+./run-demo.sh --attached      # Run in foreground with logs
+./check-demo.sh               # Interactive API demonstration
+./stop-demo.sh                # Stop the demo
 ```
 
 **Features:**
@@ -72,6 +82,9 @@ cd demos/turtlebot3_integration
 ./run-demo.sh
 # Gazebo will open, Web UI at http://localhost:3000
 # Try: ./send-nav-goal.sh 2.0 0.5
+
+# To stop
+./stop-demo.sh
 ```
 
 **Features:**
