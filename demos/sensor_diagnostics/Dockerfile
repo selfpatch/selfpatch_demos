@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     python3-requests \
     nlohmann-json3-dev \
     libcpp-httplib-dev \
+    sqlite3 \
     libsqlite3-dev \
     git \
     curl \
@@ -47,6 +48,9 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep install --from-paths src --ignore-src -r -y \
       --skip-keys='ament_cmake_clang_format ament_cmake_clang_tidy test_msgs example_interfaces sqlite3' && \
     colcon build --symlink-install --cmake-args -DBUILD_TESTING=OFF"
+
+# Create storage directories for faults and rosbags
+RUN mkdir -p /var/lib/ros2_medkit/rosbags
 
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
