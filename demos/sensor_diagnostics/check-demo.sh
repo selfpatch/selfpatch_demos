@@ -90,6 +90,42 @@ curl -s "${API_BASE}/apps/lidar-sim/configurations" | jq '.items[] | {name: .nam
 echo_step "9. Checking Current Faults"
 curl -s "${API_BASE}/faults" | jq '.'
 
+# If there are faults, demonstrate snapshot / bulk-data endpoints
+FAULT_COUNT=$(curl -s "${API_BASE}/faults" | jq '.items | length')
+if [ "$FAULT_COUNT" -gt 0 ]; then
+    FIRST_FAULT=$(curl -s "${API_BASE}/faults" | jq -r '.items[0].code')
+    FIRST_ENTITY=$(curl -s "${API_BASE}/faults" | jq -r '.items[0].entity_id')
+
+    echo_step "10. Fault Detail with Environment Data (Snapshots)"
+    echo "Fetching fault ${FIRST_FAULT} on entity ${FIRST_ENTITY}..."
+    curl -s "${API_BASE}/${FIRST_ENTITY}/faults/${FIRST_FAULT}" | jq '{
+      code: .item.code,
+      status: .item.status,
+      environment_data: {
+        extended_data_records: .environment_data.extended_data_records,
+        snapshot_count: (.environment_data.snapshots | length)
+      }
+    }'
+
+    echo_step "11. Bulk-Data Categories (Rosbag Recordings)"
+    echo "Checking available bulk-data categories..."
+    curl -s "${API_BASE}/${FIRST_ENTITY}/bulk-data" | jq '.'
+
+    echo_step "12. Bulk-Data Descriptors (Rosbag Files)"
+    echo "Listing available rosbag recordings..."
+    curl -s "${API_BASE}/${FIRST_ENTITY}/bulk-data/rosbags" | jq '.items[] | {
+      id: .id,
+      name: .name,
+      size: .size,
+      mimetype: .mimetype,
+      "x-medkit": ."x-medkit"
+    }'
+else
+    echo ""
+    echo "   No active faults. Inject a fault first to see snapshot/bulk-data features:"
+    echo "   ./inject-noise.sh && sleep 5 && bash $0"
+fi
+
 echo ""
 echo_success "API demonstration complete!"
 echo ""
@@ -100,9 +136,10 @@ echo "   ./inject-nan.sh          # Inject NaN values"
 echo "   ./inject-drift.sh        # Inject sensor drift"
 echo "   ./restore-normal.sh      # Restore normal operation"
 echo ""
+echo "📸 After injecting a fault, check snapshots and rosbags:"
+echo "   curl ${API_BASE}/faults | jq                                    # List faults"
+echo "   curl ${API_BASE}/components/lidar-unit/faults/<CODE> | jq       # Fault detail + snapshots"
+echo "   curl ${API_BASE}/components/lidar-unit/bulk-data/rosbags | jq   # List rosbag recordings"
+echo ""
 echo "🌐 Web UI: http://localhost:3000"
 echo "🌐 REST API: http://localhost:8080/api/v1/"
-echo ""
-echo "📖 More examples:"
-echo "   curl ${API_BASE}/apps/imu-sim/configurations | jq    # IMU parameters"
-echo "   curl ${API_BASE}/apps/gps-sim/data/fix | jq          # GPS data"
