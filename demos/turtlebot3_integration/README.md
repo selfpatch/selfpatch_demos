@@ -15,6 +15,7 @@ This demo demonstrates:
 - Running Nav2 navigation stack (AMCL, planner, controller)
 - Running ros2_medkit gateway with **manifest-based discovery**
 - Fault management via **diagnostic_bridge** (legacy /diagnostics support)
+- **Rosbag snapshot capture** when faults are confirmed (MCAP format)
 - Querying robot data via **REST API**
 - Entity hierarchy: Areas → Components → Apps → Functions
 - Controlling the robot via sovd_web_ui
@@ -74,10 +75,13 @@ ros2 topic echo /odom
 ### Stopping the Demo
 
 ```bash
-./stop-demo.sh              # Stop containers
-./stop-demo.sh --volumes    # Stop and remove volumes
+./stop-demo.sh              # Stop containers (preserves rosbag data)
+./stop-demo.sh --volumes    # Stop and remove volumes (deletes rosbag data)
 ./stop-demo.sh --images     # Stop and remove images
 ```
+
+**Note:** Rosbag recordings are stored in a Docker volume (`turtlebot3_medkit_data`).
+Use `--volumes` to delete this data when stopping.
 
 ### 2. Access the Web UI
 
@@ -211,9 +215,41 @@ curl http://localhost:8080/api/v1/faults | jq
 # Get faults for a specific area
 curl http://localhost:8080/api/v1/areas/robot/faults | jq
 
+# Get fault details with environment data (includes snapshots)
+curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED | jq
+
 # Clear a specific fault
 curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic-bridge/faults/TURTLEBOT3_NODE
 ```
+
+### Rosbag Snapshots (Bulk Data)
+
+When a fault is confirmed, the FaultManager automatically captures:
+- **Freeze frame snapshots**: Latest messages from key topics (odometry, pose, scan)
+- **Rosbag recording**: 10 seconds before + 2 seconds after fault confirmation
+
+```bash
+# List bulk-data categories for an entity
+curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED/bulk-data | jq
+
+# List rosbag files available for download
+curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED/bulk-data/rosbags | jq
+
+# Download a rosbag file (returns MCAP format)
+curl -O http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED/bulk-data/rosbags/{bulk_data_id}
+
+# Get fault snapshots (freeze frames)
+curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED/snapshots | jq
+```
+
+**Recorded Topics:**
+- `/odom`, `/amcl_pose`, `/scan` - Robot state
+- `/cmd_vel` - Velocity commands
+- `/tf`, `/tf_static` - Transforms
+- `/navigate_to_pose/_action/status`, `/navigate_to_pose/_action/feedback` - Navigation state
+- `/local_costmap/costmap`, `/global_costmap/costmap` - Costmaps
+- `/plan` - Navigation plan
+- `/diagnostics` - System diagnostics
 
 ### Operations (Service Calls)
 

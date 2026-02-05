@@ -68,6 +68,9 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep install --from-paths src --ignore-src -r -y && \
     colcon build --symlink-install"
 
+# Create storage directories for faults and rosbags
+RUN mkdir -p /var/lib/ros2_medkit/rosbags
+
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
     echo "source ${COLCON_WS}/install/setup.bash" >> ~/.bashrc && \
