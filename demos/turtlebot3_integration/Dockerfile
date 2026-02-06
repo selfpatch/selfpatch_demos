@@ -52,7 +52,6 @@ RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
        ros2_medkit/src/ros2_medkit_fault_manager \
        ros2_medkit/src/ros2_medkit_fault_reporter \
        ros2_medkit/src/ros2_medkit_diagnostic_bridge \
-       ros2_medkit/src/dynamic_message_introspection . && \
     rm -rf ros2_medkit
 
 # Copy demo package from local context (this repo)
