@@ -45,7 +45,7 @@ RUN apt-get update && apt-get install -y \
 
 # Clone ros2_medkit from GitHub
 WORKDIR ${COLCON_WS}/src
-RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_medkit.git && \
+RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
     mv ros2_medkit/src/ros2_medkit_gateway \
        ros2_medkit/src/ros2_medkit_msgs \
        ros2_medkit/src/ros2_medkit_serialization \
@@ -67,9 +67,6 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y && \
     colcon build --symlink-install"
-
-# Create storage directories for faults and rosbags
-RUN mkdir -p /var/lib/ros2_medkit/rosbags
 
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
