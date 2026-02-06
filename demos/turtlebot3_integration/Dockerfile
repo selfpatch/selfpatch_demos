@@ -46,12 +46,12 @@ RUN apt-get update && apt-get install -y \
 # Clone ros2_medkit from GitHub
 WORKDIR ${COLCON_WS}/src
 RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
-    mv ros2_medkit/src/ros2_medkit_gateway \
-       ros2_medkit/src/ros2_medkit_msgs \
-       ros2_medkit/src/ros2_medkit_serialization \
-       ros2_medkit/src/ros2_medkit_fault_manager \
-       ros2_medkit/src/ros2_medkit_fault_reporter \
-       ros2_medkit/src/ros2_medkit_diagnostic_bridge \
+    mv ros2_medkit/src/ros2_medkit_gateway . && \
+    mv ros2_medkit/src/ros2_medkit_msgs . && \
+    mv ros2_medkit/src/ros2_medkit_serialization . && \
+    mv ros2_medkit/src/ros2_medkit_fault_manager . && \
+    mv ros2_medkit/src/ros2_medkit_fault_reporter . && \
+    mv ros2_medkit/src/ros2_medkit_diagnostic_bridge . && \
     rm -rf ros2_medkit
 
 # Copy demo package from local context (this repo)
