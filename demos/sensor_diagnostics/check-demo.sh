@@ -88,38 +88,56 @@ echo "These parameters can be modified at runtime to inject faults..."
 curl -s "${API_BASE}/apps/lidar-sim/configurations" | jq '.items[] | {name: .name, value: .value, type: .type}'
 
 echo_step "9. Checking Current Faults"
-curl -s "${API_BASE}/faults" | jq '.'
+FAULTS_JSON=$(curl -s "${API_BASE}/faults")
+echo "$FAULTS_JSON" | jq '.'
 
 # If there are faults, demonstrate snapshot / bulk-data endpoints
-FAULT_COUNT=$(curl -s "${API_BASE}/faults" | jq '.items | length')
+FAULT_COUNT=$(echo "$FAULTS_JSON" | jq '.items | length')
 if [ "$FAULT_COUNT" -gt 0 ]; then
-    FIRST_FAULT=$(curl -s "${API_BASE}/faults" | jq -r '.items[0].code')
-    FIRST_ENTITY=$(curl -s "${API_BASE}/faults" | jq -r '.items[0].entity_id')
+    # Find the first fault that has both a non-null entity_id and code
+    FIRST_FAULT_ENTRY=$(echo "$FAULTS_JSON" | jq -r '.items[] | select(.entity_id != null and .code != null) | "\(.entity_type) \(.entity_id) \(.code)"' | head -n 1)
 
-    echo_step "10. Fault Detail with Environment Data (Snapshots)"
-    echo "Fetching fault ${FIRST_FAULT} on entity ${FIRST_ENTITY}..."
-    curl -s "${API_BASE}/${FIRST_ENTITY}/faults/${FIRST_FAULT}" | jq '{
-      code: .item.code,
-      status: .item.status,
-      environment_data: {
-        extended_data_records: .environment_data.extended_data_records,
-        snapshot_count: (.environment_data.snapshots | length)
-      }
-    }'
+    if [ -z "$FIRST_FAULT_ENTRY" ]; then
+        echo ""
+        echo "   Faults exist but none provide both 'entity_id' and 'code'."
+        echo "   Skipping snapshot and bulk-data demonstration."
+    else
+        FIRST_ENTITY_TYPE=$(echo "$FIRST_FAULT_ENTRY" | awk '{print $1}')
+        FIRST_ENTITY=$(echo "$FIRST_FAULT_ENTRY" | awk '{print $2}')
+        FIRST_FAULT=$(echo "$FIRST_FAULT_ENTRY" | awk '{print $3}')
+        # Map entity_type to plural resource path (e.g., "app" -> "apps")
+        case "$FIRST_ENTITY_TYPE" in
+            app|apps) ENTITY_PATH="apps" ;;
+            component|components) ENTITY_PATH="components" ;;
+            area|areas) ENTITY_PATH="areas" ;;
+            *) ENTITY_PATH="apps" ;;
+        esac
 
-    echo_step "11. Bulk-Data Categories (Rosbag Recordings)"
-    echo "Checking available bulk-data categories..."
-    curl -s "${API_BASE}/${FIRST_ENTITY}/bulk-data" | jq '.'
+        echo_step "10. Fault Detail with Environment Data (Snapshots)"
+        echo "Fetching fault ${FIRST_FAULT} on ${ENTITY_PATH}/${FIRST_ENTITY}..."
+        curl -s "${API_BASE}/${ENTITY_PATH}/${FIRST_ENTITY}/faults/${FIRST_FAULT}" | jq '{
+          code: .item.code,
+          status: .item.status,
+          environment_data: {
+            extended_data_records: .environment_data.extended_data_records,
+            snapshot_count: (.environment_data.snapshots | length)
+          }
+        }'
 
-    echo_step "12. Bulk-Data Descriptors (Rosbag Files)"
-    echo "Listing available rosbag recordings..."
-    curl -s "${API_BASE}/${FIRST_ENTITY}/bulk-data/rosbags" | jq '.items[] | {
-      id: .id,
-      name: .name,
-      size: .size,
-      mimetype: .mimetype,
-      "x-medkit": ."x-medkit"
-    }'
+        echo_step "11. Bulk-Data Categories (Rosbag Recordings)"
+        echo "Checking available bulk-data categories..."
+        curl -s "${API_BASE}/${ENTITY_PATH}/${FIRST_ENTITY}/bulk-data" | jq '.'
+
+        echo_step "12. Bulk-Data Descriptors (Rosbag Files)"
+        echo "Listing available rosbag recordings..."
+        curl -s "${API_BASE}/${ENTITY_PATH}/${FIRST_ENTITY}/bulk-data/rosbags" | jq '.items[] | {
+          id: .id,
+          name: .name,
+          size: .size,
+          mimetype: .mimetype,
+          "x-medkit": ."x-medkit"
+        }'
+    fi
 else
     echo ""
     echo "   No active faults. Inject a fault first to see snapshot/bulk-data features:"

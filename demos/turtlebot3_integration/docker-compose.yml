@@ -20,7 +20,8 @@ services:
     stdin_open: true
     tty: true
     command: >
-      bash -c "source /opt/ros/jazzy/setup.bash &&
+      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
+               source /opt/ros/jazzy/setup.bash &&
                source /root/demo_ws/install/setup.bash &&
                export TURTLEBOT3_MODEL=burger &&
                ros2 launch turtlebot3_medkit_demo demo.launch.py headless:=$${HEADLESS}"
@@ -58,7 +59,8 @@ services:
     stdin_open: true
     tty: true
     command: >
-      bash -c "source /opt/ros/jazzy/setup.bash &&
+      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
+               source /opt/ros/jazzy/setup.bash &&
                source /root/demo_ws/install/setup.bash &&
                export TURTLEBOT3_MODEL=burger &&
                ros2 launch turtlebot3_medkit_demo demo.launch.py headless:=$${HEADLESS}"

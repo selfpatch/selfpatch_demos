@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y \
 
 # Clone ros2_medkit from GitHub (gateway + dependencies)
 WORKDIR ${COLCON_WS}/src
-RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_medkit.git && \
+RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
     mv ros2_medkit/src/ros2_medkit_gateway . && \
     mv ros2_medkit/src/ros2_medkit_serialization . && \
     mv ros2_medkit/src/ros2_medkit_msgs . && \
@@ -49,9 +49,6 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
       --skip-keys='ament_cmake_clang_format ament_cmake_clang_tidy test_msgs example_interfaces sqlite3' && \
     colcon build --symlink-install --cmake-args -DBUILD_TESTING=OFF"
 
-# Create storage directories for faults and rosbags
-RUN mkdir -p /var/lib/ros2_medkit/rosbags
-
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
     echo "source ${COLCON_WS}/install/setup.bash" >> ~/.bashrc
@@ -59,5 +56,5 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
 # Expose gateway port
 EXPOSE 8080
 
-# Default command: launch the demo
-CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && ros2 launch sensor_diagnostics_demo demo.launch.py"]
+# Default command: create storage dirs (volume mount hides build-time mkdir) and launch
+CMD ["bash", "-c", "mkdir -p /var/lib/ros2_medkit/rosbags && source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && ros2 launch sensor_diagnostics_demo demo.launch.py"]

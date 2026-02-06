@@ -230,16 +230,16 @@ When a fault is confirmed, the FaultManager automatically captures:
 
 ```bash
 # List bulk-data categories for an entity
-curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED/bulk-data | jq
+curl http://localhost:8080/api/v1/apps/{entity_id}/bulk-data | jq
 
 # List rosbag files available for download
-curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED/bulk-data/rosbags | jq
+curl http://localhost:8080/api/v1/apps/{entity_id}/bulk-data/rosbags | jq
 
 # Download a rosbag file (returns MCAP format)
-curl -O http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED/bulk-data/rosbags/{bulk_data_id}
+curl -O http://localhost:8080/api/v1/apps/{entity_id}/bulk-data/rosbags/{fault_code}
 
-# Get fault snapshots (freeze frames)
-curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED/snapshots | jq
+# Get fault detail with snapshots (freeze frames)
+curl http://localhost:8080/api/v1/apps/{entity_id}/faults/{fault_code} | jq
 ```
 
 **Recorded Topics:**
@@ -409,7 +409,7 @@ curl http://localhost:8080/api/v1/faults | jq
 curl http://localhost:8080/api/v1/areas/navigation/faults | jq
 
 # Clear specific fault
-curl -X DELETE http://localhost:8080/api/v1/faults/{fault_id}
+curl -X DELETE http://localhost:8080/api/v1/apps/{entity_id}/faults/{fault_code}
 
 # Clear all faults
 curl -X DELETE http://localhost:8080/api/v1/faults
