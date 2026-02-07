@@ -1,0 +1,66 @@
+services:
+  # CPU-only version (default)
+  # Use with: docker compose --profile cpu up
+  moveit-demo:
+    profiles: ["cpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moveit_medkit_demo
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROS_DOMAIN_ID=40
+      - HEADLESS=${HEADLESS:-false}
+      - LAUNCH_FILE=${LAUNCH_FILE:-demo.launch.py}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    ports:
+      - "8080:8080"
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /root/demo_ws/install/setup.bash &&
+               ros2 launch moveit_medkit_demo $${LAUNCH_FILE} headless:=$${HEADLESS}"
+
+  # NVIDIA GPU accelerated version
+  # Use with: docker compose --profile nvidia up
+  # Requires: nvidia-container-toolkit
+  # Install: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+  moveit-demo-nvidia:
+    profiles: ["nvidia"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moveit_medkit_demo_nvidia
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROS_DOMAIN_ID=40
+      - HEADLESS=${HEADLESS:-false}
+      - LAUNCH_FILE=${LAUNCH_FILE:-demo.launch.py}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    ports:
+      - "8080:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /root/demo_ws/install/setup.bash &&
+               ros2 launch moveit_medkit_demo $${LAUNCH_FILE} headless:=$${HEADLESS}"
+
+  # SOVD Web UI — pre-built from GHCR
+  sovd-web-ui:
+    image: ghcr.io/selfpatch/sovd_web_ui:latest
+    container_name: sovd_web_ui
+    ports:
+      - "3000:80"
