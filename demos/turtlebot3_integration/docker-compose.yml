@@ -14,7 +14,6 @@ services:
       - HEADLESS=${HEADLESS:-false}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - medkit_data:/var/lib/ros2_medkit  # Persistent storage for faults and rosbags
     ports:
       - "8080:8080"
     stdin_open: true
@@ -46,7 +45,6 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - medkit_data:/var/lib/ros2_medkit  # Persistent storage for faults and rosbags
     ports:
       - "8080:8080"
     deploy:
@@ -70,7 +68,3 @@ services:
     container_name: sovd_web_ui
     ports:
       - "3000:80"
-
-volumes:
-  medkit_data:
-    name: turtlebot3_medkit_data
