@@ -1,0 +1,11 @@
+# MoveIt 2 planning config overrides for Panda demo
+# Only needed if you want to override default MoveIt planning parameters
+move_group:
+  ros__parameters:
+    planning_scene_monitor:
+      publish_planning_scene: true
+      publish_geometry_updates: true
+      publish_state_updates: true
+
+    # Use OMPL planner
+    default_planning_pipeline: ompl
