@@ -75,13 +75,12 @@ ros2 topic echo /odom
 ### Stopping the Demo
 
 ```bash
-./stop-demo.sh              # Stop containers (preserves rosbag data)
-./stop-demo.sh --volumes    # Stop and remove volumes (deletes rosbag data)
+./stop-demo.sh              # Stop containers
 ./stop-demo.sh --images     # Stop and remove images
 ```
 
-**Note:** Rosbag recordings are stored in a Docker volume (`turtlebot3_medkit_data`).
-Use `--volumes` to delete this data when stopping.
+**Note:** Fault data and rosbag recordings are ephemeral — they are stored
+inside the container and cleared on restart.
 
 ### 2. Access the Web UI
 
