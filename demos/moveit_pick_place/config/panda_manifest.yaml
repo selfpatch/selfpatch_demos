@@ -1,0 +1,226 @@
+# SOVD Manifest for MoveIt 2 Panda + ros2_medkit Integration Demo
+# Defines the entity hierarchy for ros2_medkit gateway
+manifest_version: "1.0"
+
+metadata:
+  name: "panda-moveit-demo"
+  description: "Panda robot arm with MoveIt 2 manipulation and ros2_medkit diagnostics"
+  version: "0.1.0"
+
+config:
+  unmanifested_nodes: warn
+  inherit_runtime_resources: true
+
+# =============================================================================
+# AREAS - Functional groupings
+# =============================================================================
+areas:
+  - id: manipulation
+    name: "Manipulation"
+    description: "Robot arm and gripper hardware"
+    namespace: /
+
+  - id: planning
+    name: "Planning"
+    description: "MoveIt 2 motion planning stack"
+    namespace: /
+
+  - id: diagnostics
+    name: "Diagnostics"
+    description: "ros2_medkit gateway and fault management"
+    namespace: /diagnostics
+
+  - id: bridge
+    name: "Bridge"
+    description: "Legacy diagnostics bridge"
+    namespace: /bridge
+
+# =============================================================================
+# COMPONENTS - Hardware/logical units
+# =============================================================================
+components:
+  - id: panda-arm
+    name: "Panda Arm"
+    type: "actuator"
+    description: "7-DOF Franka Emika Panda robot arm"
+    area: manipulation
+
+  - id: panda-gripper
+    name: "Panda Gripper"
+    type: "actuator"
+    description: "Panda 2-finger parallel gripper"
+    area: manipulation
+
+  - id: moveit-planning
+    name: "MoveIt Planning"
+    type: "controller"
+    description: "MoveIt 2 motion planning pipeline (OMPL)"
+    area: planning
+
+  - id: task-constructor
+    name: "Task Constructor"
+    type: "controller"
+    description: "MoveIt Task Constructor pick-and-place coordinator"
+    area: planning
+
+  - id: gateway
+    name: "SOVD Gateway"
+    type: "controller"
+    description: "ros2_medkit REST API gateway"
+    area: diagnostics
+
+  - id: fault-manager
+    name: "Fault Manager"
+    type: "controller"
+    description: "ros2_medkit fault aggregation service"
+    area: diagnostics
+
+  - id: diagnostic-bridge
+    name: "Diagnostic Bridge"
+    type: "controller"
+    description: "Bridges legacy /diagnostics topic to fault_manager"
+    area: bridge
+
+# =============================================================================
+# APPS - ROS 2 nodes with runtime binding
+# =============================================================================
+apps:
+  # === Manipulation Apps ===
+  - id: joint-state-broadcaster
+    name: "Joint State Broadcaster"
+    category: "driver"
+    is_located_on: panda-arm
+    description: "Broadcasts Panda joint states"
+    ros_binding:
+      node_name: joint_state_broadcaster
+      namespace: /
+
+  - id: panda-arm-controller
+    name: "Panda Arm Controller"
+    category: "driver"
+    is_located_on: panda-arm
+    description: "JointTrajectoryController for 7-DOF arm"
+    ros_binding:
+      node_name: panda_arm_controller
+      namespace: /
+
+  - id: panda-hand-controller
+    name: "Panda Hand Controller"
+    category: "driver"
+    is_located_on: panda-gripper
+    description: "GripperActionController for 2-finger gripper"
+    ros_binding:
+      node_name: panda_hand_controller
+      namespace: /
+
+  - id: robot-state-publisher
+    name: "Robot State Publisher"
+    category: "driver"
+    is_located_on: panda-arm
+    description: "Publishes robot TF tree from URDF"
+    ros_binding:
+      node_name: robot_state_publisher
+      namespace: /
+
+  # === Planning Apps ===
+  - id: move-group
+    name: "MoveGroup"
+    category: "planning"
+    is_located_on: moveit-planning
+    description: "MoveIt 2 motion planning and execution node"
+    depends_on:
+      - joint-state-broadcaster
+      - panda-arm-controller
+    ros_binding:
+      node_name: move_group
+      namespace: /
+
+  - id: mtc-pick-place
+    name: "Pick-and-Place Loop"
+    category: "application"
+    is_located_on: task-constructor
+    description: "Continuous pick-and-place task executor"
+    depends_on:
+      - move-group
+      - panda-hand-controller
+    ros_binding:
+      node_name: pick_place_loop
+      namespace: /
+
+  # === Diagnostics Apps ===
+  - id: medkit-gateway
+    name: "ros2_medkit Gateway"
+    category: "gateway"
+    is_located_on: gateway
+    description: "REST API gateway for SOVD protocol"
+    ros_binding:
+      node_name: ros2_medkit_gateway
+      namespace: /diagnostics
+
+  - id: medkit-fault-manager
+    name: "Fault Manager"
+    category: "diagnostics"
+    is_located_on: fault-manager
+    description: "Manages and stores fault information"
+    ros_binding:
+      node_name: fault_manager
+      namespace: /
+
+  - id: diagnostic-bridge-app
+    name: "Diagnostic Bridge"
+    category: "diagnostics"
+    is_located_on: diagnostic-bridge
+    description: "Bridges /diagnostics topic (DiagnosticArray) to fault_manager"
+    ros_binding:
+      node_name: diagnostic_bridge
+      namespace: /bridge
+
+  - id: manipulation-monitor
+    name: "Manipulation Monitor"
+    category: "diagnostics"
+    is_located_on: diagnostic-bridge
+    description: "Monitors MoveIt actions and robot state, reports faults"
+    depends_on:
+      - move-group
+      - panda-arm-controller
+    ros_binding:
+      node_name: manipulation_monitor
+      namespace: /bridge
+
+# =============================================================================
+# FUNCTIONS - High-level capabilities
+# =============================================================================
+functions:
+  - id: pick-and-place
+    name: "Pick and Place"
+    category: "manipulation"
+    description: "Pick objects and place them at target positions"
+    hosted_by:
+      - mtc-pick-place
+      - move-group
+      - panda-arm-controller
+      - panda-hand-controller
+
+  - id: motion-planning
+    name: "Motion Planning"
+    category: "planning"
+    description: "Plan collision-free motion trajectories"
+    hosted_by:
+      - move-group
+
+  - id: gripper-control
+    name: "Gripper Control"
+    category: "manipulation"
+    description: "Open and close the Panda gripper"
+    hosted_by:
+      - panda-hand-controller
+
+  - id: fault-management
+    name: "Fault Management"
+    category: "diagnostics"
+    description: "Collect and expose fault information via SOVD API"
+    hosted_by:
+      - medkit-gateway
+      - medkit-fault-manager
+      - diagnostic-bridge-app
+      - manipulation-monitor

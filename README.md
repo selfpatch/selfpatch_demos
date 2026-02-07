@@ -18,6 +18,7 @@ to complete mobile robot integration:
 
 - **Sensor Diagnostics** — Lightweight demo focusing on data monitoring and fault injection
 - **TurtleBot3 Integration** — Full-featured demo with Nav2 navigation, showing entity hierarchy and real-time control
+- **MoveIt Pick-and-Place** — Panda 7-DOF arm manipulation with MoveIt 2, fault monitoring for planning, controllers, and joint limits
 
 **Key Capabilities Demonstrated:**
 
@@ -42,6 +43,7 @@ Both demos support:
 |------|-------------|----------|--------|
 | [Sensor Diagnostics](demos/sensor_diagnostics/) | Lightweight sensor diagnostics demo (no Gazebo required) | Data monitoring, fault injection, dual fault reporting paths | ✅ Ready |
 | [TurtleBot3 Integration](demos/turtlebot3_integration/) | Full ros2_medkit integration with TurtleBot3 and Nav2 | SOVD-compliant API, manifest-based discovery, fault management | ✅ Ready |
+| [MoveIt Pick-and-Place](demos/moveit_pick_place/) | Panda 7-DOF arm with MoveIt 2 manipulation and ros2_medkit | Planning fault detection, controller monitoring, joint limits | ✅ Ready |
 
 ### Quick Start
 
@@ -95,6 +97,31 @@ cd demos/turtlebot3_integration
 - Manifest-based discovery (Areas → Components → Apps → Functions)
 - Fault injection scenarios for Nav2 components
 - Real-time robot control via HTTP
+
+#### MoveIt 2 Pick-and-Place Demo (Manipulation Stack)
+
+Panda robot arm demo with pick-and-place manipulation:
+
+```bash
+cd demos/moveit_pick_place
+./run-demo.sh
+# RViz will open with Panda arm (or use --headless), Web UI at http://localhost:3000
+# Move the arm: ./move-arm.sh demo
+# Inject faults: ./inject-planning-failure.sh
+# Check faults: ./check-faults.sh
+
+# To stop
+./stop-demo.sh
+```
+
+**Features:**
+
+- Panda 7-DOF arm with MoveIt 2 and mock hardware (no physics sim)
+- Interactive arm control via `move-arm.sh`
+- Continuous pick-and-place task loop
+- Manipulation fault monitoring (planning, controller, joint limits)
+- 5 fault injection scenarios with one-click scripts
+- SOVD-compliant REST API with rich entity hierarchy (4 areas, 7 components)
 
 ## Getting Started
 
