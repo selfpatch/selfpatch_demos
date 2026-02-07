@@ -27,3 +27,62 @@ diagnostics:
       discovery:
         runtime:
           create_synthetic_components: false  # Manifest defines components
+
+# Fault Manager configuration (runs in root namespace)
+fault_manager:
+  ros__parameters:
+    # Storage configuration
+    storage_type: "sqlite"
+    database_path: "/var/lib/ros2_medkit/faults.db"
+
+    # Debounce configuration
+    confirmation_threshold: 0  # Immediate confirmation
+    healing_enabled: false
+    healing_threshold: 3
+    auto_confirm_after_sec: 0.0
+
+    # Snapshot configuration (freeze frames)
+    snapshots:
+      enabled: true
+      background_capture: true  # Non-blocking capture
+      timeout_sec: 2.0
+      max_message_size: 131072  # 128KB max per message
+
+      # Topics to capture for all faults
+      default_topics:
+        - /odom
+        - /amcl_pose
+        - /scan
+        - /tf
+        - /navigate_to_pose/_action/status
+
+      # Rosbag recording configuration
+      rosbag:
+        enabled: true
+        duration_sec: 10.0  # Record 10 seconds before fault confirmation
+        duration_after_sec: 2.0  # Record 2 seconds after confirmation
+        lazy_start: false  # Always recording (ring buffer)
+        format: "mcap"  # MCAP format (recommended for cross-platform)
+        storage_path: "/var/lib/ros2_medkit/rosbags"
+        max_bag_size_mb: 100  # Max size per rosbag file
+        max_total_storage_mb: 1000  # 1GB total storage limit
+        auto_cleanup: true  # Cleanup rosbags on fault clear
+
+        # Topics to record (use 'config' or 'all')
+        topics: "config"  # Use include/exclude lists below
+        include_topics:
+          - /odom
+          - /amcl_pose
+          - /scan
+          - /cmd_vel
+          - /tf
+          - /tf_static
+          - /navigate_to_pose/_action/status
+          - /navigate_to_pose/_action/feedback
+          - /local_costmap/costmap
+          - /global_costmap/costmap
+          - /plan
+          - /diagnostics
+        exclude_topics:
+          - /rosout
+          - /parameter_events

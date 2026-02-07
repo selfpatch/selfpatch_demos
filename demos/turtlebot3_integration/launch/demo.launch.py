@@ -131,13 +131,17 @@ def generate_launch_description():
             ),
             # Launch ros2_medkit fault_manager in root namespace
             # Aggregates faults from all nodes via ReportFault service
+            # Also handles snapshot and rosbag capture when faults are confirmed
             Node(
                 package="ros2_medkit_fault_manager",
                 executable="fault_manager_node",
                 name="fault_manager",
                 namespace="",
                 output="screen",
-                parameters=[{"use_sim_time": use_sim_time}],
+                parameters=[
+                    medkit_params_file,
+                    {"use_sim_time": use_sim_time},
+                ],
             ),
             # Launch diagnostic_bridge under /bridge namespace
             # Converts legacy /diagnostics topic to faults

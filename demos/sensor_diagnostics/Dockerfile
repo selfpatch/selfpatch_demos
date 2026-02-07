@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     python3-requests \
     nlohmann-json3-dev \
     libcpp-httplib-dev \
+    sqlite3 \
     libsqlite3-dev \
     git \
     curl \
@@ -24,14 +25,13 @@ RUN apt-get update && apt-get install -y \
 
 # Clone ros2_medkit from GitHub (gateway + dependencies)
 WORKDIR ${COLCON_WS}/src
-RUN git clone --depth 1 --recurse-submodules https://github.com/selfpatch/ros2_medkit.git && \
+RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
     mv ros2_medkit/src/ros2_medkit_gateway . && \
     mv ros2_medkit/src/ros2_medkit_serialization . && \
     mv ros2_medkit/src/ros2_medkit_msgs . && \
     mv ros2_medkit/src/ros2_medkit_fault_manager . && \
     mv ros2_medkit/src/ros2_medkit_fault_reporter . && \
     mv ros2_medkit/src/ros2_medkit_diagnostic_bridge . && \
-    mv ros2_medkit/src/dynamic_message_introspection/dynmsg . && \
     rm -rf ros2_medkit
 
 # Copy demo package
@@ -55,5 +55,5 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
 # Expose gateway port
 EXPOSE 8080
 
-# Default command: launch the demo
-CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && ros2 launch sensor_diagnostics_demo demo.launch.py"]
+# Default command: create storage dirs (volume mount hides build-time mkdir) and launch
+CMD ["bash", "-c", "mkdir -p /var/lib/ros2_medkit/rosbags && source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && ros2 launch sensor_diagnostics_demo demo.launch.py"]

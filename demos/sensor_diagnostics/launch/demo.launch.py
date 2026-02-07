@@ -125,13 +125,17 @@ def generate_launch_description():
             # ===== Fault Manager (at root namespace) =====
             # Services at /fault_manager/* (e.g., /fault_manager/report_fault)
             # Both paths report here: diagnostic_bridge (legacy) and anomaly_detector (modern)
+            # Also handles snapshot and rosbag capture when faults are confirmed
             Node(
                 package="ros2_medkit_fault_manager",
                 executable="fault_manager_node",
                 name="fault_manager",
                 namespace="",  # Root namespace so services are at /fault_manager/*
                 output="screen",
-                parameters=[{"use_sim_time": use_sim_time}],
+                parameters=[
+                    medkit_params_file,
+                    {"use_sim_time": use_sim_time},
+                ],
             ),
         ]
     )
