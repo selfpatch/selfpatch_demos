@@ -1,6 +1,10 @@
 #!/bin/bash
 # Inject Grasp Failure - Move target object out of robot's workspace
 # This will cause MoveGroup to fail planning to an unreachable target
+#
+# NOTE: This injection only works if the pick-place loop uses the
+# target_cylinder object as its grasp target. If the loop uses hardcoded
+# joint/cartesian targets, moving the collision object has no effect.
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
@@ -22,28 +26,53 @@ if ! curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
     exit 1
 fi
 
-# Move the target cylinder far away from the robot
+# Move the target cylinder far away from the robot via /apply_planning_scene service
 echo "Moving target object to unreachable position (5.0, 5.0, 0.1)..."
 docker exec moveit_medkit_demo bash -c "
 source /opt/ros/jazzy/setup.bash && \
 source /root/demo_ws/install/setup.bash && \
-ros2 topic pub --once /planning_scene moveit_msgs/msg/PlanningScene '{
-  world: {
-    collision_objects: [
-      {
-        id: \"target_cylinder\",
-        header: {frame_id: \"panda_link0\"},
-        primitives: [{type: 3, dimensions: [0.1, 0.02]}],
-        primitive_poses: [{
-          position: {x: 5.0, y: 5.0, z: 0.1},
-          orientation: {w: 1.0}
-        }],
-        operation: 0
-      }
-    ]
-  },
-  is_diff: true
-}'"
+python3 -c \"
+import rclpy
+from rclpy.node import Node
+from moveit_msgs.srv import ApplyPlanningScene
+from moveit_msgs.msg import PlanningScene, CollisionObject
+from shape_msgs.msg import SolidPrimitive
+from geometry_msgs.msg import Pose
+from std_msgs.msg import Header
+
+rclpy.init()
+node = Node('inject_grasp')
+client = node.create_client(ApplyPlanningScene, '/apply_planning_scene')
+client.wait_for_service(timeout_sec=5.0)
+
+scene = PlanningScene()
+scene.is_diff = True
+
+cyl = CollisionObject()
+cyl.id = 'target_cylinder'
+cyl.header.frame_id = 'panda_link0'
+cyl.operation = CollisionObject.ADD
+prim = SolidPrimitive()
+prim.type = SolidPrimitive.CYLINDER
+prim.dimensions = [0.1, 0.02]
+cyl.primitives.append(prim)
+pose = Pose()
+pose.position.x = 5.0
+pose.position.y = 5.0
+pose.position.z = 0.1
+pose.orientation.w = 1.0
+cyl.primitive_poses.append(pose)
+scene.world.collision_objects.append(cyl)
+
+req = ApplyPlanningScene.Request()
+req.scene = scene
+future = client.call_async(req)
+rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+result = future.result()
+print(f'Target moved: {result.success}' if result else 'Service call failed')
+node.destroy_node()
+rclpy.shutdown()
+\""
 
 echo ""
 echo "✓ Grasp failure injected!"

@@ -21,54 +21,72 @@ if ! curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
     exit 1
 fi
 
-# 1. Remove injected collision objects
+# 1. Remove injected collision objects via /apply_planning_scene service
+# Using service call (not topic pub) for reliable planning scene updates
 echo "Removing injected collision objects..."
 docker exec moveit_medkit_demo bash -c "
 source /opt/ros/jazzy/setup.bash && \
 source /root/demo_ws/install/setup.bash && \
-ros2 topic pub --once /planning_scene moveit_msgs/msg/PlanningScene '{
-  world: {
-    collision_objects: [
-      {id: \"injected_wall\", operation: 1},
-      {id: \"surprise_obstacle\", operation: 1}
-    ]
-  },
-  is_diff: true
-}'"
+python3 -c \"
+import rclpy
+from rclpy.node import Node
+from moveit_msgs.srv import ApplyPlanningScene
+from moveit_msgs.msg import PlanningScene, CollisionObject
+from std_msgs.msg import Header
 
-# 2. Restore target object to original position
-echo "Restoring target object to pick position..."
-docker exec moveit_medkit_demo bash -c "
-source /opt/ros/jazzy/setup.bash && \
-source /root/demo_ws/install/setup.bash && \
-ros2 topic pub --once /planning_scene moveit_msgs/msg/PlanningScene '{
-  world: {
-    collision_objects: [
-      {
-        id: \"target_cylinder\",
-        header: {frame_id: \"panda_link0\"},
-        primitives: [{type: 3, dimensions: [0.1, 0.02]}],
-        primitive_poses: [{
-          position: {x: 0.5, y: 0.0, z: 0.1},
-          orientation: {w: 1.0}
-        }],
-        operation: 0
-      }
-    ]
-  },
-  is_diff: true
-}'"
+rclpy.init()
+node = Node('restore_helper')
 
-# 3. Restore controller parameters
+# Remove injected objects
+client = node.create_client(ApplyPlanningScene, '/apply_planning_scene')
+client.wait_for_service(timeout_sec=5.0)
+
+scene = PlanningScene()
+scene.is_diff = True
+
+# Remove injected_wall
+wall = CollisionObject()
+wall.id = 'injected_wall'
+wall.operation = CollisionObject.REMOVE
+scene.world.collision_objects.append(wall)
+
+# Remove surprise_obstacle
+obstacle = CollisionObject()
+obstacle.id = 'surprise_obstacle'
+obstacle.operation = CollisionObject.REMOVE
+scene.world.collision_objects.append(obstacle)
+
+# Remove target_cylinder (moved by grasp failure)
+cylinder = CollisionObject()
+cylinder.id = 'target_cylinder'
+cylinder.operation = CollisionObject.REMOVE
+scene.world.collision_objects.append(cylinder)
+
+req = ApplyPlanningScene.Request()
+req.scene = scene
+future = client.call_async(req)
+rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+result = future.result()
+print(f'Scene update accepted: {result.success}' if result else 'Service call failed')
+node.destroy_node()
+rclpy.shutdown()
+\"
+"
+
+# 3. Restore controller parameters via gateway REST API
 echo "Restoring controller parameters..."
-docker exec moveit_medkit_demo bash -c "
-source /opt/ros/jazzy/setup.bash && \
-source /root/demo_ws/install/setup.bash && \
-ros2 param set /panda_arm_controller constraints.goal_time 0.0 && \
-ros2 param set /panda_arm_controller constraints.stopped_velocity_tolerance 0.01" 2>/dev/null || true
+curl -s -X PUT "${API_BASE}/apps/panda-arm-controller/configurations/constraints.goal_time" \
+  -H "Content-Type: application/json" -d '{"data": 0.0}' > /dev/null 2>&1 || true
+curl -s -X PUT "${API_BASE}/apps/panda-arm-controller/configurations/constraints.stopped_velocity_tolerance" \
+  -H "Content-Type: application/json" -d '{"data": 0.01}' > /dev/null 2>&1 || true
 
-# 4. Clear all faults
+# 4. Wait for operations to stabilize, then clear faults
+echo "Waiting for operations to stabilize..."
+sleep 10
 echo "Clearing all faults..."
+curl -s -X DELETE "${API_BASE}/faults" > /dev/null
+# Wait for any straggling reports to land, then clear again
+sleep 5
 curl -s -X DELETE "${API_BASE}/faults" > /dev/null
 
 echo ""

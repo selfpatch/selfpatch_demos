@@ -36,11 +36,14 @@ if [ "$FAULT_COUNT" = "0" ]; then
     echo "   No active faults — system is healthy! ✅"
 else
     echo "$FAULTS" | jq '.items[] | {
-        code: .code,
-        severity: .severity,
-        reporter: .reporter_id,
-        message: .message,
-        timestamp: .timestamp
+        code: .fault_code,
+        severity: .severity_label,
+        status: .status,
+        description: .description,
+        sources: .reporting_sources,
+        occurrences: .occurrence_count,
+        first_occurred: .first_occurred,
+        last_occurred: .last_occurred
     }'
 fi
 
@@ -52,7 +55,7 @@ echo "   Total active faults: $FAULT_COUNT"
 if [ "$FAULT_COUNT" != "0" ]; then
     echo ""
     echo "   By severity:"
-    echo "$FAULTS" | jq -r '.items | group_by(.severity) | .[] | "     \(.[0].severity): \(length)"'
+    echo "$FAULTS" | jq -r '.items | group_by(.severity_label) | .[] | "     \(.[0].severity_label): \(length)"'
 fi
 
 echo ""

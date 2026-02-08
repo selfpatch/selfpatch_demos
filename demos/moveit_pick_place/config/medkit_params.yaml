@@ -27,3 +27,29 @@ diagnostics:
       discovery:
         runtime:
           create_synthetic_components: false  # Manifest defines components
+
+# Fault Manager configuration (runs in root namespace)
+fault_manager:
+  ros__parameters:
+    # Storage configuration
+    storage_type: "sqlite"
+    database_path: "/tmp/ros2_medkit/faults.db"
+
+    # Debounce configuration
+    confirmation_threshold: 0  # Immediate confirmation for demo
+    healing_enabled: false
+    auto_confirm_after_sec: 0.0
+
+    # Snapshot configuration (freeze frames)
+    snapshots:
+      enabled: true
+      background_capture: false  # On-demand capture when fault occurs
+      timeout_sec: 2.0
+      max_message_size: 131072  # 128KB max per message
+
+      # Topics to capture for all faults
+      default_topics:
+        - /joint_states
+        - /move_action/_action/status
+        - /panda_arm_controller/follow_joint_trajectory/_action/status
+        - /diagnostics

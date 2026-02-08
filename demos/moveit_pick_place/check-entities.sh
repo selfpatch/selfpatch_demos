@@ -51,9 +51,9 @@ curl -s "${API_BASE}/functions" | jq '.items[] | {id: .id, name: .name, category
 echo_step "5. Sample Data (Joint States)"
 echo "Getting latest joint states from Panda arm..."
 curl -s "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" 2>/dev/null | jq '{
-    joint_names: .name,
-    positions: .position,
-    velocities: .velocity
+    joint_names: .data.name,
+    positions: .data.position,
+    velocities: .data.velocity
 }' || echo "   (Joint state data not available — robot may still be starting)"
 
 echo_step "6. Faults"

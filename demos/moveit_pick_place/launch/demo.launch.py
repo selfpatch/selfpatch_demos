@@ -86,13 +86,17 @@ def generate_launch_description():
             ),
             # === ros2_medkit stack ===
             # Fault manager — root namespace
+            # Also handles snapshot capture when faults are confirmed
             Node(
                 package="ros2_medkit_fault_manager",
                 executable="fault_manager_node",
                 name="fault_manager",
                 namespace="",
                 output="screen",
-                parameters=[{"use_sim_time": use_sim_time}],
+                parameters=[
+                    medkit_params_file,
+                    {"use_sim_time": use_sim_time},
+                ],
             ),
             # Diagnostic bridge — /bridge namespace
             # auto_generate_codes=False prevents noisy controller_manager
