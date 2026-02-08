@@ -90,9 +90,10 @@ class ManipulationMonitor(Node):
         )
 
         # MoveGroup action status — for planning failures
+        # In MoveIt 2 Jazzy, MoveGroupMoveAction serves at /move_action
         self.move_group_status_sub = self.create_subscription(
             GoalStatusArray,
-            '/move_group/_action/status',
+            '/move_action/_action/status',
             self.move_group_status_callback,
             status_qos,
         )

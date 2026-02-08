@@ -1,6 +1,10 @@
 #!/bin/bash
-# Inject Controller Timeout - Set extremely low velocity scaling
+# Inject Controller Timeout - Set extremely tight goal time tolerance
 # This will cause the arm controller to timeout during trajectory execution
+#
+# NOTE: This injection has no effect with fake/mock hardware (ros2_control
+# FakeSystem) because the simulated controller reports instant success.
+# It produces real faults only with physical robots or Gazebo physics.
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
@@ -23,28 +27,23 @@ if ! curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
     exit 1
 fi
 
-# Set an extremely tight goal_time constraint on the controller
-# This causes FollowJointTrajectory to abort because the robot can't
-# reach the target within the allowed time window
-echo "Setting controller goal_time constraint via ROS 2 parameter..."
-docker exec moveit_medkit_demo bash -c "
-source /opt/ros/jazzy/setup.bash && \
-source /root/demo_ws/install/setup.bash && \
-ros2 param set /panda_arm_controller constraints.goal_time 0.001" 2>/dev/null || \
-    echo "   Warning: Could not set goal_time parameter"
+# Set controller parameters via gateway REST API (reliable, no DDS issues)
+echo "Setting controller goal_time constraint via gateway API..."
+curl -s -X PUT "${API_BASE}/apps/panda-arm-controller/configurations/constraints.goal_time" \
+  -H "Content-Type: application/json" \
+  -d '{"data": 0.001}' > /dev/null
 
-# Also try setting stopped_velocity_tolerance to near-zero to make it
-# harder for the controller to consider the trajectory complete
-docker exec moveit_medkit_demo bash -c "
-source /opt/ros/jazzy/setup.bash && \
-source /root/demo_ws/install/setup.bash && \
-ros2 param set /panda_arm_controller constraints.stopped_velocity_tolerance 0.0001" 2>/dev/null || \
-    echo "   Warning: Could not set stopped_velocity_tolerance parameter"
+curl -s -X PUT "${API_BASE}/apps/panda-arm-controller/configurations/constraints.stopped_velocity_tolerance" \
+  -H "Content-Type: application/json" \
+  -d '{"data": 0.0001}' > /dev/null
 
 echo ""
 echo "✓ Controller timeout injected!"
 echo ""
-echo "Expected faults (via manipulation_monitor → FaultManager):"
+echo "⚠️  NOTE: With fake hardware, the controller succeeds instantly and this"
+echo "   injection will NOT produce faults. Use with real robot or Gazebo."
+echo ""
+echo "Expected faults (with real hardware):"
 echo "  - CONTROLLER_TIMEOUT: Joint trajectory controller timed out"
 echo "  - TRAJECTORY_EXECUTION_FAILED: Arm controller ABORTED trajectory"
 echo ""

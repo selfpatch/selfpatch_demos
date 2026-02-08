@@ -23,7 +23,7 @@ This demo demonstrates:
 - Docker and docker-compose
 - X11 display server (for RViz GUI) or `--headless` mode
 - (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-- ~5-6 GB disk space for Docker image
+- ~7 GB disk space for Docker image
 
 ## Quick Start
 
@@ -35,7 +35,7 @@ cd demos/moveit_pick_place
 ```
 
 That's it! The script will:
-1. Build the Docker image (first run: ~15-20 min, ~5-6 GB)
+1. Build the Docker image (first run: ~15-20 min, ~7 GB)
 2. Set up X11 forwarding for RViz GUI
 3. Launch Panda robot + MoveIt 2 + ros2_medkit gateway
 4. Launch sovd_web_ui at http://localhost:3000
@@ -113,7 +113,7 @@ docker exec -it moveit_medkit_demo bash      # Shell into container
 │  │  manipulation_monitor.py ──► fault_manager ◄── diag_bridge│   │
 │  │         │                        │                        │   │
 │  │         │ monitors:              │ stores faults           │   │
-│  │         │ • /move_group status   │                        │   │
+│  │         │ • /move_action status  │                        │   │
 │  │         │ • /controller status   ▼                        │   │
 │  │         │ • /joint_states    gateway_node ──► REST API    │   │
 │  └─────────┴────────────────────────┬───────────────────────┘   │
@@ -185,7 +185,7 @@ curl http://localhost:8080/api/v1/functions | jq
 ### Read Joint States
 
 ```bash
-curl http://localhost:8080/api/v1/apps/joint-state-broadcaster/data/joint_states | jq
+curl http://localhost:8080/api/v1/apps/joint-state-broadcaster/data/%2Fjoint_states | jq
 ```
 
 ### List MoveIt Configurations
@@ -214,6 +214,38 @@ curl http://localhost:8080/api/v1/faults | jq
 curl -X DELETE http://localhost:8080/api/v1/faults
 ```
 
+### View Fault Snapshots
+
+When a fault is detected, the fault manager captures environment snapshots (freeze frames) from configured ROS 2 topics. Snapshots are embedded in the fault detail response:
+
+```bash
+# Get fault detail with snapshots
+curl http://localhost:8080/api/v1/apps/manipulation-monitor/faults/MOTION_PLANNING_FAILED | jq '.environment_data.snapshots'
+```
+
+Captured topics (on-demand, 2s timeout):
+- `/joint_states` — Current joint positions at fault time
+- `/diagnostics` — Active diagnostics messages
+
+> **Note:** Action status topics (`/move_action/_action/status`, `/panda_arm_controller/follow_joint_trajectory/_action/status`) may timeout during snapshot capture since they only publish on state transitions.
+
+### Modify Configurations via REST API
+
+You can read and write ROS 2 node parameters through the gateway:
+
+```bash
+# List all parameters for an app
+curl http://localhost:8080/api/v1/apps/panda-arm-controller/configurations | jq
+
+# Read a specific parameter
+curl http://localhost:8080/api/v1/apps/panda-arm-controller/configurations/gains.panda_joint1.p | jq
+
+# Set a parameter value
+curl -X PUT http://localhost:8080/api/v1/apps/panda-arm-controller/configurations/constraints.goal_time \
+  -H 'Content-Type: application/json' \
+  -d '{"data": {"value": 0.5}}'
+```
+
 ## Fault Injection Scenarios
 
 ### 1. Planning Failure
@@ -232,6 +264,8 @@ Blocks the robot's path with a large collision wall.
 
 Moves the target object far outside the arm's reachable workspace.
 
+> **Note:** This injection only works if the pick-place loop uses the `target_cylinder` collision object as its grasp target. With the default hardcoded joint/cartesian targets, this injection may have no visible effect.
+
 ```bash
 ./inject-grasp-failure.sh
 ```
@@ -243,6 +277,8 @@ Moves the target object far outside the arm's reachable workspace.
 ### 3. Controller Timeout
 
 Sets extremely tight goal time tolerance on the arm controller.
+
+> **Note:** This injection has no effect with fake/mock hardware because the simulated controller reports instant success. Use with Gazebo physics (`--gazebo`) or a physical robot for visible faults.
 
 ```bash
 ./inject-controller-timeout.sh
@@ -256,6 +292,8 @@ Sets extremely tight goal time tolerance on the arm controller.
 ### 4. Joint Limit Violation
 
 Commands the arm to reach extreme joint positions near/beyond URDF limits.
+
+> **Note:** While the pick-place loop is running, the controller accepts only one goal at a time and may reject external trajectory commands. This injection works best when the pick-place loop is paused.
 
 ```bash
 ./inject-joint-limit.sh
@@ -293,7 +331,7 @@ After any injection, verify faults:
 ```bash
 ./check-faults.sh
 # OR
-curl http://localhost:8080/api/v1/faults | jq '.items[] | {code, severity, message}'
+curl http://localhost:8080/api/v1/faults | jq '.items[] | {fault_code, severity_label, description}'
 ```
 
 ## Web UI
@@ -331,6 +369,8 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 | "MoveGroup not available" | Slow startup | Wait 60-90 seconds after container starts |
 | Controller not loading | Missing config | Verify `moveit_controllers.yaml` is correct |
 | Joint states empty | Controllers not loaded | Check `ros2 control list_controllers` inside container |
+| `ros2` CLI hangs in `docker exec` | DDS discovery across container boundaries | Use gateway REST API instead of `ros2` CLI for parameter/service operations |
+| Injection script has no output | DDS multicast not reachable from host | Run injection scripts inside the demo container or use REST API equivalents |
 
 ## Comparison with Other Demos
 
@@ -342,7 +382,7 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 | Fault types | Sensor drift, noise | Nav failures, localization | Planning, controller, joint limits |
 | Entity complexity | Simple (flat) | Medium (3 areas) | High (4 areas, 7 components) |
 | SOVD manifest | No | Yes (hybrid) | Yes (hybrid) |
-| Docker image | ~2 GB | ~4 GB | ~5-6 GB |
+| Docker image | ~2 GB | ~4 GB | ~7 GB |
 | GPU recommended | No | Optional | Optional |
 
 ## Technical Details
@@ -351,7 +391,7 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 
 | Topic | What it tells us | Fault codes |
 |-------|------------------|-------------|
-| `/move_group/_action/status` | Planning success/failure | `MOTION_PLANNING_FAILED` |
+| `/move_action/_action/status` | Planning success/failure | `MOTION_PLANNING_FAILED` |
 | `/panda_arm_controller/follow_joint_trajectory/_action/status` | Trajectory execution | `TRAJECTORY_EXECUTION_FAILED`, `CONTROLLER_TIMEOUT` |
 | `/joint_states` | Current joint positions | `JOINT_LIMIT_APPROACHING`, `JOINT_LIMIT_VIOLATED` |
 
