@@ -51,10 +51,13 @@ COPY launch/ ${COLCON_WS}/src/moveit_medkit_demo/launch/
 COPY scripts/ ${COLCON_WS}/src/moveit_medkit_demo/scripts/
 
 # Build ros2_medkit and demo package
+# Note: rosdep install uses || true because ros2_medkit packages are not in
+# rosdep indices (they're built from source). All system deps are already
+# installed via apt above; rosdep handles any transitive deps it can resolve.
 WORKDIR ${COLCON_WS}
 RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y" && \
+    rosdep install --from-paths src --ignore-src -r -y || true" && \
     bash -c "source /opt/ros/jazzy/setup.bash && \
     colcon build --symlink-install --cmake-args -DBUILD_TESTING=OFF"
 
