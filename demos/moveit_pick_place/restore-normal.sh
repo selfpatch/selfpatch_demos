@@ -24,7 +24,16 @@ fi
 # 1. Remove injected collision objects via /apply_planning_scene service
 # Using service call (not topic pub) for reliable planning scene updates
 echo "Removing injected collision objects..."
-docker exec moveit_medkit_demo bash -c "
+
+# Auto-detect running demo container (supports CPU and NVIDIA profiles)
+CONTAINER="${CONTAINER_NAME:-$(docker ps --format '{{.Names}}' | grep -E '^moveit_medkit_demo(_nvidia)?$' | head -n1)}"
+if [ -z "${CONTAINER}" ]; then
+    echo "❌ Could not find a running MoveIt demo container."
+    echo "   Start the demo first, or set CONTAINER_NAME explicitly."
+    exit 1
+fi
+
+docker exec "${CONTAINER}" bash -c "
 source /opt/ros/jazzy/setup.bash && \
 source /root/demo_ws/install/setup.bash && \
 python3 -c \"

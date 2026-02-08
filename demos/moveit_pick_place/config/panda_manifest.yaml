@@ -57,10 +57,10 @@ components:
     description: "MoveIt 2 motion planning pipeline (OMPL)"
     area: planning
 
-  - id: task-constructor
-    name: "Task Constructor"
+  - id: pick-place-loop
+    name: "Pick-and-Place Loop"
     type: "controller"
-    description: "MoveIt Task Constructor pick-and-place coordinator"
+    description: "Custom pick_place_loop.py pick-and-place demo node"
     area: planning
 
   - id: gateway
@@ -135,10 +135,10 @@ apps:
       node_name: move_group
       namespace: /
 
-  - id: mtc-pick-place
+  - id: pick-place-node
     name: "Pick-and-Place Loop"
     category: "application"
-    is_located_on: task-constructor
+    is_located_on: pick-place-loop
     description: "Continuous pick-and-place task executor"
     depends_on:
       - move-group
@@ -196,7 +196,7 @@ functions:
     category: "manipulation"
     description: "Pick objects and place them at target positions"
     hosted_by:
-      - mtc-pick-place
+      - pick-place-node
       - move-group
       - panda-arm-controller
       - panda-hand-controller

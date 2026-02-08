@@ -26,7 +26,7 @@ Monitors robot manipulation for faults and reports to FaultManager:
 Reports faults via /fault_manager/report_fault service.
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
 import rclpy
 from rclpy.node import Node
@@ -209,11 +209,9 @@ class ManipulationMonitor(Node):
 
     def joint_state_callback(self, msg: JointState):
         """Check joint positions against limits."""
-        for i, name in enumerate(msg.name):
+        for name, position in zip(msg.name, msg.position):
             if name not in PANDA_JOINT_LIMITS:
                 continue
-
-            position = msg.position[i]
             lower, upper = PANDA_JOINT_LIMITS[name]
 
             dist_to_lower = position - lower

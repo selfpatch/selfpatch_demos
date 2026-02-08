@@ -85,6 +85,7 @@ class PickPlaceLoop(Node):
 
         # State flags
         self.move_group_ready = False
+        self.goal_in_flight = False  # Guard against overlapping goals
 
         # Wait for MoveGroup with periodic retries (non-blocking startup)
         self.get_logger().info("PickPlaceLoop initialized, waiting for MoveGroup...")
@@ -108,6 +109,8 @@ class PickPlaceLoop(Node):
         """One pick-and-place cycle step."""
         if not self.move_group_ready:
             return
+        if self.goal_in_flight:
+            return  # Skip — previous goal still executing
 
         phase = self.phases[self.phase_idx]
         self.cycle_count += 1
@@ -145,6 +148,7 @@ class PickPlaceLoop(Node):
         goal.request.goal_constraints.append(constraints)
 
         self.get_logger().info(f"Sending {label} goal (target: {target_name})...")
+        self.goal_in_flight = True
         future = self.move_group_client.send_goal_async(goal)
         future.add_done_callback(lambda f: self.goal_response_callback(f, label))
 
@@ -153,6 +157,7 @@ class PickPlaceLoop(Node):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().error(f"{label} goal REJECTED")
+            self.goal_in_flight = False
             return
 
         self.get_logger().info(f"{label} goal accepted, waiting for result...")
@@ -163,6 +168,8 @@ class PickPlaceLoop(Node):
         """Handle MoveGroup result and advance state machine."""
         result = future.result().result
         status = future.result().status
+
+        self.goal_in_flight = False
 
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().info(f"{label} SUCCEEDED")
@@ -182,6 +189,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
+        # Allow clean shutdown on Ctrl+C without printing a traceback.
         pass
     finally:
         node.destroy_node()

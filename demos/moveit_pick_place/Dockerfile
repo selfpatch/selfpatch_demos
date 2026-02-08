@@ -32,9 +32,10 @@ RUN apt-get update && apt-get install -y \
     sqlite3 libsqlite3-dev git curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone ros2_medkit from GitHub
+# Clone ros2_medkit from GitHub (pinned to a specific ref for reproducibility)
+ARG ROS2_MEDKIT_REF=main
 WORKDIR ${COLCON_WS}/src
-RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
+RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} https://github.com/selfpatch/ros2_medkit.git && \
     mv ros2_medkit/src/ros2_medkit_gateway \
        ros2_medkit/src/ros2_medkit_msgs \
        ros2_medkit/src/ros2_medkit_serialization \
@@ -53,7 +54,7 @@ COPY scripts/ ${COLCON_WS}/src/moveit_medkit_demo/scripts/
 WORKDIR ${COLCON_WS}
 RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y || true" && \
+    rosdep install --from-paths src --ignore-src -r -y" && \
     bash -c "source /opt/ros/jazzy/setup.bash && \
     colcon build --symlink-install --cmake-args -DBUILD_TESTING=OFF"
 
