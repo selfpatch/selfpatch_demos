@@ -15,18 +15,22 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Setup X11 forwarding for RViz GUI
-echo "Setting up X11 forwarding..."
-xhost +local:docker 2>/dev/null || {
-    echo "   Warning: xhost failed. GUI may not work."
-    echo "   Install with: sudo apt install x11-xserver-utils"
-}
+# Setup X11 forwarding for RViz GUI (skip in headless mode or when no display)
+if [[ "${HEADLESS:-false}" != "true" ]] && [[ -n "${DISPLAY:-}" ]]; then
+    echo "Setting up X11 forwarding..."
+    xhost +local:docker 2>/dev/null || {
+        echo "   Warning: xhost failed. GUI may not work."
+        echo "   Install with: sudo apt install x11-xserver-utils"
+    }
+fi
 
 # Cleanup function
 cleanup() {
     echo ""
     echo "Cleaning up..."
-    xhost -local:docker 2>/dev/null || true
+    if [[ "${HEADLESS:-false}" != "true" ]] && [[ -n "${DISPLAY:-}" ]]; then
+        xhost -local:docker 2>/dev/null || true
+    fi
     echo "Done!"
 }
 trap cleanup EXIT
@@ -44,6 +48,7 @@ usage() {
     echo ""
     echo "Options:"
     echo "  --nvidia     Use NVIDIA GPU acceleration"
+    echo "  --gazebo     Run in Gazebo simulation mode (default)"
     echo "  --fake       Use fake hardware (mock controllers, no physics)"
     echo "  --no-cache   Build Docker images without cache"
     echo "  --headless   Run without GUI (default: GUI enabled)"
@@ -53,6 +58,7 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  $0                      # Daemon mode with Gazebo (default)"
+    echo "  $0 --gazebo             # Gazebo simulation mode (default)"
     echo "  $0 --attached           # Foreground with logs"
     echo "  $0 --headless           # Headless mode (no GUI)"
     echo "  $0 --fake               # Fake hardware (no physics sim)"
@@ -126,7 +132,7 @@ echo "Run mode: $([ "$DETACH_MODE" = "true" ] && echo "daemon (background)" || e
 
 # Build and run
 echo "   Building and starting demo..."
-echo "   (First run takes ~15-20 min, downloading ~5-6GB image)"
+echo "   (First run takes ~15-20 min, downloading ~7GB image)"
 echo ""
 echo "🌐 REST API available at: http://localhost:8080/api/v1/"
 echo "🌐 Web UI available at: http://localhost:3000/"

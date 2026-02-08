@@ -46,10 +46,10 @@ That's it! The script will:
 ### 2. Available Options
 
 ```bash
-./run-demo.sh                  # Default: CPU, fake hardware, daemon mode
-./run-demo.sh --gazebo         # Gazebo Harmonic physics simulation
-./run-demo.sh --gazebo --nvidia # Gazebo + GPU acceleration
-./run-demo.sh --nvidia         # GPU acceleration (fake hardware)
+./run-demo.sh                  # Default: Gazebo simulation, daemon mode
+./run-demo.sh --fake           # Fake hardware (mock controllers, no physics)
+./run-demo.sh --nvidia         # Gazebo + GPU acceleration
+./run-demo.sh --fake --nvidia  # Fake hardware + GPU acceleration
 ./run-demo.sh --headless       # No GUI (CI/server)
 ./run-demo.sh --attached       # Foreground with logs
 ./run-demo.sh --no-cache       # Rebuild without cache
@@ -57,8 +57,8 @@ That's it! The script will:
 ```
 
 **Simulation modes:**
-- **Default (fake hardware)** — Mock controllers echo commanded positions instantly. Fast startup (~10s), works headless, no physics. Good for diagnostics testing.
-- **Gazebo (`--gazebo`)** — Gazebo Harmonic physics simulation with `gz_ros2_control`. Realistic dynamics, 3D world view. Slower startup (~30s), needs X11 or `--headless`. Recommended with `--nvidia` for GPU acceleration.
+- **Default (Gazebo)** — Gazebo Harmonic physics simulation with `gz_ros2_control`. Realistic dynamics, 3D world view. Slower startup (~30s), needs X11 or `--headless`. Recommended with `--nvidia` for GPU acceleration.
+- **Fake hardware (`--fake`)** — Mock controllers echo commanded positions instantly. Fast startup (~10s), works headless, no physics. Good for diagnostics testing.
 
 ### 3. Moving the Arm
 
@@ -141,8 +141,8 @@ Areas
 │   Components
 │   ├── moveit-planning  — OMPL planning pipeline
 │   │   Apps: move-group
-│   └── task-constructor — Pick-and-place coordinator
-│       Apps: mtc-pick-place
+│   └── pick-place-loop — Pick-and-place demo node
+│       Apps: pick-place-node
 │
 ├── diagnostics/         — ros2_medkit gateway and fault management
 │   Components
