@@ -48,3 +48,8 @@ jobs:
         run: |
           cd demos/turtlebot3_integration
           docker build -t turtlebot3-medkit-demo:test -f Dockerfile .
+
+      - name: Build MoveIt Pick-and-Place demo image
+        run: |
+          cd demos/moveit_pick_place
+          docker build -t moveit-pick-place-demo:test -f Dockerfile .
