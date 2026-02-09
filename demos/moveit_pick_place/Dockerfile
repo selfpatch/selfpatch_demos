@@ -49,6 +49,7 @@ COPY package.xml CMakeLists.txt ${COLCON_WS}/src/moveit_medkit_demo/
 COPY config/ ${COLCON_WS}/src/moveit_medkit_demo/config/
 COPY launch/ ${COLCON_WS}/src/moveit_medkit_demo/launch/
 COPY scripts/ ${COLCON_WS}/src/moveit_medkit_demo/scripts/
+COPY worlds/ ${COLCON_WS}/src/moveit_medkit_demo/worlds/
 
 # Build ros2_medkit and demo package
 # Note: rosdep install uses || true because ros2_medkit packages are not in

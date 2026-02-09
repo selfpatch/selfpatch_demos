@@ -54,6 +54,11 @@ def generate_launch_description():
         demo_pkg_dir, "config", "panda_manifest.yaml"
     )
 
+    # Factory world file path
+    factory_world = os.path.join(
+        demo_pkg_dir, "worlds", "factory.sdf"
+    )
+
     headless = LaunchConfiguration("headless", default="False")
 
     # ── Robot description (URDF with ros2_control + Gazebo hardware) ─
@@ -99,6 +104,7 @@ def generate_launch_description():
         world_joint = (
             '  <link name="world"/>\n'
             '  <joint name="world_to_panda" type="fixed">\n'
+            '    <origin xyz="0 0 0.75" rpy="0 0 0"/>\n'
             '    <parent link="world"/>\n'
             '    <child link="panda_link0"/>\n'
             '  </joint>\n'
@@ -106,6 +112,122 @@ def generate_launch_description():
         robot_description_raw = robot_description_raw.replace(
             "</robot>", world_joint + "</robot>"
         )
+
+    # ── Inject Gazebo visual materials for robot links ───────────────
+    # Gives the Panda arm a realistic industrial appearance in Gazebo
+    # with white body links, dark joints, and orange accents (Franka
+    # Emika brand colors).
+    gazebo_materials = (
+        # Base and main body links — white with subtle metallic sheen
+        '  <gazebo reference="panda_link0">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.85 0.85 0.85 1</ambient>\n"
+        "        <diffuse>0.92 0.92 0.92 1</diffuse>\n"
+        "        <specular>0.6 0.6 0.6 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        '  <gazebo reference="panda_link1">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.85 0.85 0.85 1</ambient>\n"
+        "        <diffuse>0.92 0.92 0.92 1</diffuse>\n"
+        "        <specular>0.6 0.6 0.6 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        # Joints — dark anthracite grey
+        '  <gazebo reference="panda_link2">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.25 0.25 0.28 1</ambient>\n"
+        "        <diffuse>0.35 0.35 0.38 1</diffuse>\n"
+        "        <specular>0.4 0.4 0.4 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        '  <gazebo reference="panda_link3">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.85 0.85 0.85 1</ambient>\n"
+        "        <diffuse>0.92 0.92 0.92 1</diffuse>\n"
+        "        <specular>0.6 0.6 0.6 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        '  <gazebo reference="panda_link4">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.25 0.25 0.28 1</ambient>\n"
+        "        <diffuse>0.35 0.35 0.38 1</diffuse>\n"
+        "        <specular>0.4 0.4 0.4 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        # Upper arm — white
+        '  <gazebo reference="panda_link5">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.85 0.85 0.85 1</ambient>\n"
+        "        <diffuse>0.92 0.92 0.92 1</diffuse>\n"
+        "        <specular>0.6 0.6 0.6 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        # Wrist joint — dark
+        '  <gazebo reference="panda_link6">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.25 0.25 0.28 1</ambient>\n"
+        "        <diffuse>0.35 0.35 0.38 1</diffuse>\n"
+        "        <specular>0.4 0.4 0.4 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        # End-effector flange — white
+        '  <gazebo reference="panda_link7">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.85 0.85 0.85 1</ambient>\n"
+        "        <diffuse>0.92 0.92 0.92 1</diffuse>\n"
+        "        <specular>0.6 0.6 0.6 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        # Hand / gripper — dark grey with slight blue tint
+        '  <gazebo reference="panda_hand">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.2 0.22 0.28 1</ambient>\n"
+        "        <diffuse>0.3 0.32 0.38 1</diffuse>\n"
+        "        <specular>0.45 0.45 0.5 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        # Finger tips — dark rubber-like
+        '  <gazebo reference="panda_leftfinger">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.15 0.15 0.15 1</ambient>\n"
+        "        <diffuse>0.22 0.22 0.22 1</diffuse>\n"
+        "        <specular>0.1 0.1 0.1 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+        '  <gazebo reference="panda_rightfinger">\n'
+        "    <visual>\n"
+        "      <material>\n"
+        "        <ambient>0.15 0.15 0.15 1</ambient>\n"
+        "        <diffuse>0.22 0.22 0.22 1</diffuse>\n"
+        "        <specular>0.1 0.1 0.1 1</specular>\n"
+        "      </material>\n"
+        "    </visual>\n"
+        "  </gazebo>\n"
+    )
+    robot_description_raw = robot_description_raw.replace(
+        "</robot>", gazebo_materials + "</robot>"
+    )
 
     robot_description = {"robot_description": robot_description_raw}
 
@@ -185,6 +307,11 @@ def generate_launch_description():
                 value="offscreen",
                 condition=IfCondition(headless),
             ),
+            # ── Add world directory to Gazebo resource path ────────
+            SetEnvironmentVariable(
+                name="GZ_SIM_RESOURCE_PATH",
+                value=os.path.join(demo_pkg_dir, "worlds"),
+            ),
             # ── Gazebo Harmonic (GUI) ────────────────────────────────
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -198,7 +325,9 @@ def generate_launch_description():
                         )
                     ]
                 ),
-                launch_arguments={"gz_args": "-r empty.sdf"}.items(),
+                launch_arguments={
+                    "gz_args": f"-r {factory_world}"
+                }.items(),
                 condition=UnlessCondition(headless),
             ),
             # ── Gazebo Harmonic (headless — server only) ─────────────
@@ -214,7 +343,9 @@ def generate_launch_description():
                         )
                     ]
                 ),
-                launch_arguments={"gz_args": "-r -s empty.sdf"}.items(),
+                launch_arguments={
+                    "gz_args": f"-r -s {factory_world}"
+                }.items(),
                 condition=IfCondition(headless),
             ),
             # ── Clock bridge (Gazebo → ROS 2) ────────────────────────

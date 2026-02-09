@@ -13,6 +13,11 @@ install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
 
+# Install world files
+install(DIRECTORY worlds/
+  DESTINATION share/${PROJECT_NAME}/worlds
+)
+
 # Install scripts
 install(PROGRAMS
   scripts/manipulation_monitor.py
