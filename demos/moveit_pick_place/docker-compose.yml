@@ -16,6 +16,7 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
     ports:
       - "8080:8080"
+      - "8765:8765"
     stdin_open: true
     tty: true
     command: >
@@ -45,6 +46,7 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
     ports:
       - "8080:8080"
+      - "8765:8765"
     deploy:
       resources:
         reservations:

@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     nlohmann-json3-dev \
     libcpp-httplib-dev \
     ros-jazzy-rosbag2-storage-mcap \
+    ros-jazzy-foxglove-bridge \
     sqlite3 libsqlite3-dev git curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -78,6 +79,6 @@ RUN mkdir -p ${DEMO_SCRIPTS} && \
     ln -sf ${COLCON_WS}/install/moveit_medkit_demo/lib/moveit_medkit_demo/restore-normal.sh ${DEMO_SCRIPTS}/restore-normal.sh
 ENV PATH="${DEMO_SCRIPTS}:${PATH}"
 
-EXPOSE 8080
+EXPOSE 8080 8765
 
 CMD ["bash"]
