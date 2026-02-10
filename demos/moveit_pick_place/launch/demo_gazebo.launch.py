@@ -475,6 +475,24 @@ def generate_launch_description():
                 ],
             ),
             # ═════════════════════════════════════════════════════════
+            # Foxglove Bridge (WebSocket on port 8765)
+            # ═════════════════════════════════════════════════════════
+            Node(
+                package="foxglove_bridge",
+                executable="foxglove_bridge",
+                name="foxglove_bridge",
+                output="screen",
+                parameters=[
+                    {
+                        "use_sim_time": True,
+                        "port": 8765,
+                        "address": "0.0.0.0",
+                        "send_buffer_limit": 10000000,
+                        "num_threads": 0,
+                    }
+                ],
+            ),
+            # ═════════════════════════════════════════════════════════
             # Demo scripts
             # ═════════════════════════════════════════════════════════
             TimerAction(
