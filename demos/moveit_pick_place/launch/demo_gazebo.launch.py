@@ -442,7 +442,10 @@ def generate_launch_description():
                 name="fault_manager",
                 namespace="",
                 output="screen",
-                parameters=[{"use_sim_time": True}],
+                parameters=[
+                    medkit_params_file,
+                    {"use_sim_time": True},
+                ],
             ),
             Node(
                 package="ros2_medkit_diagnostic_bridge",

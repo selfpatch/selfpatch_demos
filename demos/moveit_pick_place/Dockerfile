@@ -29,8 +29,12 @@ RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     nlohmann-json3-dev \
     libcpp-httplib-dev \
+    ros-jazzy-rosbag2-storage-mcap \
     sqlite3 libsqlite3-dev git curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Create persistent directories for fault storage and rosbag recordings
+RUN mkdir -p /var/lib/ros2_medkit/rosbags
 
 # Clone ros2_medkit from GitHub (pinned to a specific ref for reproducibility)
 ARG ROS2_MEDKIT_REF=main
@@ -65,6 +69,14 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
     echo "source ${COLCON_WS}/install/setup.bash" >> ~/.bashrc
+
+# Make inject/restore scripts available at a well-known path
+ENV DEMO_SCRIPTS=${COLCON_WS}/scripts
+RUN mkdir -p ${DEMO_SCRIPTS} && \
+    ln -sf ${COLCON_WS}/install/moveit_medkit_demo/lib/moveit_medkit_demo/inject-collision.sh ${DEMO_SCRIPTS}/inject-collision.sh && \
+    ln -sf ${COLCON_WS}/install/moveit_medkit_demo/lib/moveit_medkit_demo/inject-planning-failure.sh ${DEMO_SCRIPTS}/inject-planning-failure.sh && \
+    ln -sf ${COLCON_WS}/install/moveit_medkit_demo/lib/moveit_medkit_demo/restore-normal.sh ${DEMO_SCRIPTS}/restore-normal.sh
+ENV PATH="${DEMO_SCRIPTS}:${PATH}"
 
 EXPOSE 8080
 

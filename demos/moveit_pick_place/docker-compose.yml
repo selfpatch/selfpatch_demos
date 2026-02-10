@@ -11,7 +11,7 @@ services:
       - DISPLAY=${DISPLAY}
       - ROS_DOMAIN_ID=40
       - HEADLESS=${HEADLESS:-false}
-      - LAUNCH_FILE=${LAUNCH_FILE:-demo.launch.py}
+      - LAUNCH_FILE=${LAUNCH_FILE:-demo_gazebo.launch.py}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
     ports:
@@ -19,7 +19,8 @@ services:
     stdin_open: true
     tty: true
     command: >
-      bash -c "source /opt/ros/jazzy/setup.bash &&
+      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
+               source /opt/ros/jazzy/setup.bash &&
                source /root/demo_ws/install/setup.bash &&
                ros2 launch moveit_medkit_demo $${LAUNCH_FILE} headless:=$${HEADLESS}"
 
@@ -37,7 +38,7 @@ services:
       - DISPLAY=${DISPLAY}
       - ROS_DOMAIN_ID=40
       - HEADLESS=${HEADLESS:-false}
-      - LAUNCH_FILE=${LAUNCH_FILE:-demo.launch.py}
+      - LAUNCH_FILE=${LAUNCH_FILE:-demo_gazebo.launch.py}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
     volumes:
@@ -54,7 +55,8 @@ services:
     stdin_open: true
     tty: true
     command: >
-      bash -c "source /opt/ros/jazzy/setup.bash &&
+      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
+               source /opt/ros/jazzy/setup.bash &&
                source /root/demo_ws/install/setup.bash &&
                ros2 launch moveit_medkit_demo $${LAUNCH_FILE} headless:=$${HEADLESS}"
 
