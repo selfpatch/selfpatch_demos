@@ -41,15 +41,12 @@ BUILD_ARGS=""
 HEADLESS_MODE="false"
 UPDATE_IMAGES="false"
 DETACH_MODE="true"
-GAZEBO_MODE="true"
 
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
     echo "  --nvidia     Use NVIDIA GPU acceleration"
-    echo "  --gazebo     Run in Gazebo simulation mode (default)"
-    echo "  --fake       Use fake hardware (mock controllers, no physics)"
     echo "  --no-cache   Build Docker images without cache"
     echo "  --headless   Run without GUI (default: GUI enabled)"
     echo "  --update     Pull latest images before running"
@@ -58,16 +55,11 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  $0                      # Daemon mode with Gazebo (default)"
-    echo "  $0 --gazebo             # Gazebo simulation mode (default)"
     echo "  $0 --attached           # Foreground with logs"
     echo "  $0 --headless           # Headless mode (no GUI)"
-    echo "  $0 --fake               # Fake hardware (no physics sim)"
     echo "  $0 --nvidia             # GPU acceleration"
     echo "  $0 --no-cache           # Rebuild without cache"
     echo "  $0 --update             # Pull and run latest version"
-    echo ""
-    echo "Environment variables:"
-    echo "  HEADLESS=true|false    Control GUI mode (default: false)"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -83,14 +75,6 @@ while [[ $# -gt 0 ]]; do
         --headless)
             echo "Running in headless mode (no GUI)"
             HEADLESS_MODE="true"
-            ;;
-        --gazebo)
-            # Kept for backward compatibility (Gazebo is now default)
-            GAZEBO_MODE="true"
-            ;;
-        --fake)
-            echo "Using fake hardware (mock controllers)"
-            GAZEBO_MODE="false"
             ;;
         --update)
             echo "Will pull latest images"
@@ -120,13 +104,8 @@ fi
 
 # Export for docker-compose
 export HEADLESS=$HEADLESS_MODE
-if [[ "$GAZEBO_MODE" == "true" ]]; then
-    export LAUNCH_FILE="demo_gazebo.launch.py"
-    echo "Simulation: Gazebo Harmonic (physics simulation)"
-else
-    export LAUNCH_FILE="demo.launch.py"
-    echo "Simulation: fake hardware (mock controllers, RViz only)"
-fi
+export LAUNCH_FILE="demo_gazebo.launch.py"
+echo "Simulation: Gazebo Harmonic (physics simulation)"
 echo "Display mode: $([ "$HEADLESS_MODE" = "true" ] && echo "headless (no GUI)" || echo "GUI enabled")"
 echo "Run mode: $([ "$DETACH_MODE" = "true" ] && echo "daemon (background)" || echo "attached (foreground)")"
 

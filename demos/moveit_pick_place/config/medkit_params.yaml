@@ -11,9 +11,8 @@ diagnostics:
       refresh_interval_ms: 10000  # 10 seconds (default), reduces log spam
 
       cors:
-        # Restrict origins to localhost by default; add explicit origins
-        # (e.g., "http://your-ui-host:3000") for cross-host access.
-        allowed_origins: ["http://localhost:8080", "http://localhost:3000"]
+        # Allow any origin for demo use
+        allowed_origins: ["*"]
         allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
         allowed_headers: ["Content-Type", "Accept"]
         allow_credentials: false
@@ -35,7 +34,7 @@ fault_manager:
   ros__parameters:
     # Storage configuration
     storage_type: "sqlite"
-    database_path: "/tmp/ros2_medkit/faults.db"
+    database_path: "/var/lib/ros2_medkit/faults.db"
 
     # Debounce configuration
     confirmation_threshold: 0  # Immediate confirmation for demo
@@ -45,13 +44,38 @@ fault_manager:
     # Snapshot configuration (freeze frames)
     snapshots:
       enabled: true
-      background_capture: false  # On-demand capture when fault occurs
+      background_capture: true  # Continuously cache latest messages
       timeout_sec: 2.0
       max_message_size: 131072  # 128KB max per message
 
       # Topics to capture for all faults
       default_topics:
         - /joint_states
-        - /move_action/_action/status
-        - /panda_arm_controller/follow_joint_trajectory/_action/status
         - /diagnostics
+
+      # Rosbag recording configuration
+      rosbag:
+        enabled: true
+        duration_sec: 10.0  # Record 10 seconds before fault confirmation
+        duration_after_sec: 2.0  # Record 2 seconds after confirmation
+        lazy_start: false  # Always recording (ring buffer)
+        format: "mcap"
+        storage_path: "/var/lib/ros2_medkit/rosbags"
+        max_bag_size_mb: 100
+        max_total_storage_mb: 1000
+        auto_cleanup: true
+
+        topics: "config"
+        include_topics:
+          - /joint_states
+          - /diagnostics
+          - /tf
+          - /tf_static
+          - /move_action/_action/status
+          - /move_action/_action/feedback
+          - /panda_arm_controller/follow_joint_trajectory/_action/status
+          - /panda_arm_controller/follow_joint_trajectory/_action/feedback
+          - /planning_scene
+        exclude_topics:
+          - /rosout
+          - /parameter_events

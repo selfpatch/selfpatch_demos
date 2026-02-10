@@ -1,28 +1,30 @@
 # MoveIt 2 Pick-and-Place Integration Demo
 
-A comprehensive integration demo combining a **Panda 7-DOF robot arm** with **MoveIt 2** motion planning and **ros2_medkit** SOVD-compliant diagnostics. The robot performs continuous pick-and-place cycles while a manipulation monitor detects faults — planning failures, controller timeouts, joint limit violations — and reports them through the SOVD REST API.
+A comprehensive integration demo combining a **Panda 7-DOF robot arm** with **MoveIt 2** motion planning and **ros2_medkit** SOVD-compliant diagnostics. The robot performs continuous pick-and-place cycles in a **Gazebo Harmonic factory scene** while a manipulation monitor detects faults — planning failures, collisions — and reports them through the SOVD REST API with environment snapshots.
 
 ## Status
 
-✅ **Demo Ready** — Docker-based deployment with MoveIt 2, RViz visualization, mock hardware, and full ros2_medkit stack.
+✅ **Demo Ready** — Docker-based deployment with MoveIt 2, Gazebo Harmonic physics simulation, factory environment, and full ros2_medkit stack.
 
 ## Overview
 
 This demo demonstrates:
 
 - **MoveIt 2 motion planning** with the Panda 7-DOF arm and gripper
+- **Gazebo Harmonic simulation** with a realistic factory scene (conveyor belt, work table, storage, lighting)
 - **Continuous pick-and-place** loop as a realistic manipulation workload
-- **Manipulation fault monitoring** (planning failures, trajectory errors, joint limits)
+- **Manipulation fault monitoring** (planning failures, collision detection)
+- **Fault snapshots** — environment state captured at fault time (joint states, diagnostics)
 - **SOVD-compliant REST API** with Areas → Components → Apps → Functions hierarchy
 - **Manifest-based entity discovery** (hybrid mode with runtime enrichment)
-- **5 fault injection scenarios** with one-click scripts
+- **2 fault injection scenarios** with visible Gazebo models and one-click scripts
 - **Web UI** for visual entity browsing and fault monitoring
 
 ## Prerequisites
 
 - Docker and docker-compose
-- X11 display server (for RViz GUI) or `--headless` mode
-- (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+- X11 display server (for Gazebo GUI) or `--headless` mode
+- (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) — recommended for smooth Gazebo rendering
 - ~7 GB disk space for Docker image
 
 ## Quick Start
@@ -36,8 +38,8 @@ cd demos/moveit_pick_place
 
 That's it! The script will:
 1. Build the Docker image (first run: ~15-20 min, ~7 GB)
-2. Set up X11 forwarding for RViz GUI
-3. Launch Panda robot + MoveIt 2 + ros2_medkit gateway
+2. Set up X11 forwarding for Gazebo GUI
+3. Launch Panda robot in factory world + MoveIt 2 + ros2_medkit gateway
 4. Launch sovd_web_ui at http://localhost:3000
 
 **REST API:** http://localhost:8080/api/v1/
@@ -47,18 +49,14 @@ That's it! The script will:
 
 ```bash
 ./run-demo.sh                  # Default: Gazebo simulation, daemon mode
-./run-demo.sh --fake           # Fake hardware (mock controllers, no physics)
-./run-demo.sh --nvidia         # Gazebo + GPU acceleration
-./run-demo.sh --fake --nvidia  # Fake hardware + GPU acceleration
+./run-demo.sh --nvidia         # GPU acceleration (recommended)
 ./run-demo.sh --headless       # No GUI (CI/server)
 ./run-demo.sh --attached       # Foreground with logs
 ./run-demo.sh --no-cache       # Rebuild without cache
 ./run-demo.sh --update         # Pull latest images first
 ```
 
-**Simulation modes:**
-- **Default (Gazebo)** — Gazebo Harmonic physics simulation with `gz_ros2_control`. Realistic dynamics, 3D world view. Slower startup (~30s), needs X11 or `--headless`. Recommended with `--nvidia` for GPU acceleration.
-- **Fake hardware (`--fake`)** — Mock controllers echo commanded positions instantly. Fast startup (~10s), works headless, no physics. Good for diagnostics testing.
+The demo always uses **Gazebo Harmonic** physics simulation with `gz_ros2_control`. The factory scene includes a work table, conveyor belt, storage bin, and industrial lighting. Use `--nvidia` for GPU-accelerated rendering.
 
 ### 3. Moving the Arm
 
@@ -97,9 +95,9 @@ docker exec -it moveit_medkit_demo bash      # Shell into container
 │                    Docker Container                              │
 │                                                                  │
 │  ┌──────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
-│  │ Fake HW  │  │  ros2_control │  │     MoveIt 2             │  │
-│  │  (mock   │──│  Controllers  │──│  move_group (OMPL)       │  │
-│  │ controllers)│  arm+gripper  │  │                          │  │
+│  │ Gazebo   │  │  ros2_control │  │     MoveIt 2             │  │
+│  │ Harmonic │──│  Controllers  │──│  move_group (OMPL)       │  │
+│  │ (physics)│  │  arm+gripper  │  │                          │  │
 │  └──────────┘  └──────────────┘  └──────────┬───────────────┘  │
 │                                              │                   │
 │  ┌──────────────────────────────┐            │                   │
@@ -112,8 +110,8 @@ docker exec -it moveit_medkit_demo bash      # Shell into container
 │  │                                                           │   │
 │  │  manipulation_monitor.py ──► fault_manager ◄── diag_bridge│   │
 │  │         │                        │                        │   │
-│  │         │ monitors:              │ stores faults           │   │
-│  │         │ • /move_action status  │                        │   │
+│  │         │ monitors:              │ stores faults +         │   │
+│  │         │ • /move_action status  │ captures snapshots     │   │
 │  │         │ • /controller status   ▼                        │   │
 │  │         │ • /joint_states    gateway_node ──► REST API    │   │
 │  └─────────┴────────────────────────┬───────────────────────┘   │
@@ -223,11 +221,9 @@ When a fault is detected, the fault manager captures environment snapshots (free
 curl http://localhost:8080/api/v1/apps/manipulation-monitor/faults/MOTION_PLANNING_FAILED | jq '.environment_data.snapshots'
 ```
 
-Captured topics (on-demand, 2s timeout):
+Captured topics (background capture, always available):
 - `/joint_states` — Current joint positions at fault time
 - `/diagnostics` — Active diagnostics messages
-
-> **Note:** Action status topics (`/move_action/_action/status`, `/panda_arm_controller/follow_joint_trajectory/_action/status`) may timeout during snapshot capture since they only publish on state transitions.
 
 ### Modify Configurations via REST API
 
@@ -248,9 +244,21 @@ curl -X PUT http://localhost:8080/api/v1/apps/panda-arm-controller/configuration
 
 ## Fault Injection Scenarios
 
+The fault injection scripts are **baked into the Docker image** under `$DEMO_SCRIPTS/` (on `PATH`). The host-side `./inject-*.sh` and `./restore-normal.sh` wrappers auto-detect the running container and delegate via `docker exec`.
+
+You can also run them directly inside the container:
+
+```bash
+docker exec -it moveit_medkit_demo inject-collision.sh
+docker exec -it moveit_medkit_demo inject-planning-failure.sh
+docker exec -it moveit_medkit_demo restore-normal.sh
+```
+
+> **Future:** When SOVD Scripts endpoints are available, these will be callable via `curl` against the gateway REST API.
+
 ### 1. Planning Failure
 
-Blocks the robot's path with a large collision wall.
+Blocks the robot's path with a large collision wall (visible as orange wall in Gazebo).
 
 ```bash
 ./inject-planning-failure.sh
@@ -260,53 +268,9 @@ Blocks the robot's path with a large collision wall.
 |------|----------|-------------|
 | `MOTION_PLANNING_FAILED` | ERROR | MoveGroup goal ABORTED — no collision-free path |
 
-### 2. Grasp Failure
+### 2. Collision Detection
 
-Moves the target object far outside the arm's reachable workspace.
-
-> **Note:** This injection only works if the pick-place loop uses the `target_cylinder` collision object as its grasp target. With the default hardcoded joint/cartesian targets, this injection may have no visible effect.
-
-```bash
-./inject-grasp-failure.sh
-```
-
-| Code | Severity | Description |
-|------|----------|-------------|
-| `MOTION_PLANNING_FAILED` | ERROR | Cannot plan to unreachable target position |
-
-### 3. Controller Timeout
-
-Sets extremely tight goal time tolerance on the arm controller.
-
-> **Note:** This injection has no effect with fake/mock hardware because the simulated controller reports instant success. Use with Gazebo physics (`--gazebo`) or a physical robot for visible faults.
-
-```bash
-./inject-controller-timeout.sh
-```
-
-| Code | Severity | Description |
-|------|----------|-------------|
-| `CONTROLLER_TIMEOUT` | ERROR | Joint trajectory controller timed out |
-| `TRAJECTORY_EXECUTION_FAILED` | ERROR | Arm controller ABORTED trajectory |
-
-### 4. Joint Limit Violation
-
-Commands the arm to reach extreme joint positions near/beyond URDF limits.
-
-> **Note:** While the pick-place loop is running, the controller accepts only one goal at a time and may reject external trajectory commands. This injection works best when the pick-place loop is paused.
-
-```bash
-./inject-joint-limit.sh
-```
-
-| Code | Severity | Description |
-|------|----------|-------------|
-| `JOINT_LIMIT_APPROACHING` | WARN | Joint within 0.1 rad of limit |
-| `JOINT_LIMIT_VIOLATED` | ERROR | Joint position beyond URDF limit |
-
-### 5. Collision Detection
-
-Spawns a surprise obstacle in the robot's active workspace mid-motion.
+Spawns a surprise obstacle in the robot's active workspace (visible as red sphere in Gazebo).
 
 ```bash
 ./inject-collision.sh
@@ -316,9 +280,9 @@ Spawns a surprise obstacle in the robot's active workspace mid-motion.
 |------|----------|-------------|
 | `MOTION_PLANNING_FAILED` | ERROR | Cannot find collision-free path around obstacle |
 
-### 6. Restore Normal
+### 3. Restore Normal
 
-Removes all injected objects, restores parameters, and clears faults.
+Removes all injected objects (from both Gazebo and MoveIt planning scene) and clears faults.
 
 ```bash
 ./restore-normal.sh
@@ -346,17 +310,28 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 
 ## Utility Scripts
 
+### Host-side (run from your machine)
+
 | Script | Description |
 |--------|-------------|
+| `run-demo.sh` | **Start the demo** — build and launch the Docker container |
+| `stop-demo.sh` | Stop demo containers |
 | `move-arm.sh` | **Interactive arm controller** — move to preset positions |
 | `check-entities.sh` | Explore the full SOVD entity hierarchy with sample data |
 | `check-faults.sh` | View active faults with severity summary |
-| `inject-planning-failure.sh` | Block robot path with collision wall |
-| `inject-grasp-failure.sh` | Move target object out of reach |
-| `inject-controller-timeout.sh` | Set extremely tight goal time tolerance |
-| `inject-joint-limit.sh` | Command extreme joint positions |
-| `inject-collision.sh` | Spawn surprise obstacle |
-| `restore-normal.sh` | Remove all injected faults and restore defaults |
+| `inject-planning-failure.sh` | Thin wrapper → `docker exec` the in-container script |
+| `inject-collision.sh` | Thin wrapper → `docker exec` the in-container script |
+| `restore-normal.sh` | Thin wrapper → `docker exec` the in-container script |
+
+### In-container (baked into Docker image, on `PATH`)
+
+| Script | Description |
+|--------|-------------|
+| `inject-planning-failure.sh` | Spawn visible wall + MoveIt collision object |
+| `inject-collision.sh` | Spawn visible sphere + MoveIt collision object |
+| `restore-normal.sh` | Remove Gazebo models + MoveIt objects, clear faults |
+| `manipulation_monitor.py` | ROS 2 node: monitors topics and reports faults |
+| `pick_place_loop.py` | ROS 2 node: continuous pick-and-place cycle |
 
 ## Troubleshooting
 
@@ -370,20 +345,19 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 | Controller not loading | Missing config | Verify `moveit_controllers.yaml` is correct |
 | Joint states empty | Controllers not loaded | Check `ros2 control list_controllers` inside container |
 | `ros2` CLI hangs in `docker exec` | DDS discovery across container boundaries | Use gateway REST API instead of `ros2` CLI for parameter/service operations |
-| Injection script has no output | DDS multicast not reachable from host | Run injection scripts inside the demo container or use REST API equivalents |
 
 ## Comparison with Other Demos
 
 | Feature | Sensor Diagnostics | TurtleBot3 + Nav2 | **MoveIt Pick-and-Place** |
 |---------|-------------------|-------------------|---------------------------|
 | Robot | Simulated sensors | TurtleBot3 Burger | Panda 7-DOF arm |
-| Simulation | None (pure ROS 2) | Gazebo Harmonic | Fake HW or Gazebo Harmonic |
+| Simulation | None (pure ROS 2) | Gazebo Harmonic | Gazebo Harmonic |
 | Task | Sensor monitoring | Autonomous navigation | Pick-and-place manipulation |
-| Fault types | Sensor drift, noise | Nav failures, localization | Planning, controller, joint limits |
+| Fault types | Sensor drift, noise | Nav failures, localization | Planning failures, collisions |
 | Entity complexity | Simple (flat) | Medium (3 areas) | High (4 areas, 7 components) |
 | SOVD manifest | No | Yes (hybrid) | Yes (hybrid) |
 | Docker image | ~2 GB | ~4 GB | ~7 GB |
-| GPU recommended | No | Optional | Optional |
+| GPU recommended | No | Optional | Recommended |
 
 ## Technical Details
 
@@ -399,9 +373,8 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 
 | Code | Severity | Trigger |
 |------|----------|---------|
-| `MOTION_PLANNING_FAILED` | ERROR | MoveGroup goal ABORTED |
+| `MOTION_PLANNING_FAILED` | ERROR | MoveGroup goal ABORTED (collision wall or obstacle) |
 | `TRAJECTORY_EXECUTION_FAILED` | ERROR | Controller action ABORTED |
-| `CONTROLLER_TIMEOUT` | ERROR | Controller action ABORTED (timeout) |
 | `JOINT_LIMIT_APPROACHING` | WARN | Joint within warn margin of URDF limit |
 | `JOINT_LIMIT_VIOLATED` | ERROR | Joint position beyond URDF limit |
 
@@ -410,8 +383,8 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 - ROS 2 Jazzy Desktop (Ubuntu 24.04)
 - MoveIt 2 + OMPL planner
 - Panda URDF + MoveIt config
-- Gazebo Harmonic + gz_ros2_control (for `--gazebo` mode)
-- ros2_control with mock hardware (for default mode)
+- Gazebo Harmonic + gz_ros2_control
+- Factory world scene (SDF)
 - ros2_medkit stack (gateway, fault_manager, diagnostic_bridge)
 - Demo package (launch, config, scripts)
 
