@@ -30,6 +30,10 @@ COLCON_IGNORE
 .coverage
 htmlcov/
 
+# Local dev Docker files (not for CI/CD)
+Dockerfile.local
+docker-compose.local.yml
+
 # Environment
 .env
 .venv/
