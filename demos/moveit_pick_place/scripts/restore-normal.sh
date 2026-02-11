@@ -4,7 +4,9 @@
 
 set -e
 
+# shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
+# shellcheck source=/dev/null
 source /root/demo_ws/install/setup.bash
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
