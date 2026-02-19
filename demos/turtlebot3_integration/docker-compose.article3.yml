@@ -1,0 +1,21 @@
+# Docker Compose override for Article 3 (Debounce Demo)
+#
+# Usage:
+#   STORM (no debounce, default config):
+#     docker compose --profile cpu up -d
+#
+#   DEBOUNCE (with filtering):
+#     docker compose --profile cpu -f docker-compose.yml -f docker-compose.article3.yml up -d
+#
+# The override mounts the debounce config over the default one inside the container.
+# colcon build --symlink-install means the installed config points to the source,
+# so mounting over the source path works.
+
+services:
+  turtlebot3-demo:
+    volumes:
+      - ./config/medkit_params_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/medkit_params.yaml:ro
+
+  turtlebot3-demo-nvidia:
+    volumes:
+      - ./config/medkit_params_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/medkit_params.yaml:ro

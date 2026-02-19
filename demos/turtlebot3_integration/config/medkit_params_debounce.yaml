@@ -1,0 +1,93 @@
+# ros2_medkit gateway configuration for TurtleBot3 demo
+# ARTICLE 3 - DEBOUNCE VERSION
+# Differences from default:
+#   confirmation_threshold: -3 (was 0) — requires 3 sustained FAILED events
+#   healing_enabled: true (was false) — auto-heal after PASSED events
+#
+# Node runs under /diagnostics namespace, so we need to match that here
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      server:
+        # Bind to all interfaces for Docker networking
+        host: "0.0.0.0"
+        port: 8080
+
+      refresh_interval_ms: 10000  # 10 seconds (default), reduces log spam
+
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
+        allowed_headers: ["Content-Type", "Accept"]
+        allow_credentials: false
+        max_age_seconds: 86400
+
+      max_parallel_topic_samples: 10
+
+      # Discovery configuration
+      discovery_mode: "hybrid"  # runtime_only, manifest_only, or hybrid
+      manifest_path: ""  # Will be set via launch argument
+      manifest_strict_validation: true
+
+      discovery:
+        runtime:
+          create_synthetic_components: false  # Manifest defines components
+
+# Fault Manager configuration (runs in root namespace)
+fault_manager:
+  ros__parameters:
+    # Storage configuration
+    storage_type: "sqlite"
+    database_path: "/var/lib/ros2_medkit/faults.db"
+
+    # === DEBOUNCE CONFIGURATION (Article 3) ===
+    confirmation_threshold: -3   # Need 3 sustained FAILED events to confirm
+    healing_enabled: true        # Auto-heal when problem resolves
+    healing_threshold: 3         # Need 3 PASSED events to heal
+    auto_confirm_after_sec: 0.0  # Disabled
+
+    # Snapshot configuration (freeze frames)
+    snapshots:
+      enabled: true
+      background_capture: true  # Non-blocking capture
+      timeout_sec: 2.0
+      max_message_size: 131072  # 128KB max per message
+
+      # Topics to capture for all faults
+      default_topics:
+        - /odom
+        - /amcl_pose
+        - /scan
+        - /tf
+        - /navigate_to_pose/_action/status
+
+      # Rosbag recording configuration
+      rosbag:
+        enabled: true
+        duration_sec: 10.0  # Record 10 seconds before fault confirmation
+        duration_after_sec: 2.0  # Record 2 seconds after confirmation
+        lazy_start: false  # Always recording (ring buffer)
+        format: "mcap"  # MCAP format (recommended for cross-platform)
+        storage_path: "/var/lib/ros2_medkit/rosbags"
+        max_bag_size_mb: 100  # Max size per rosbag file
+        max_total_storage_mb: 1000  # 1GB total storage limit
+        auto_cleanup: true  # Cleanup rosbags on fault clear
+
+        # Topics to record (use 'config' or 'all')
+        topics: "config"  # Use include/exclude lists below
+        include_topics:
+          - /odom
+          - /amcl_pose
+          - /scan
+          - /cmd_vel
+          - /tf
+          - /tf_static
+          - /navigate_to_pose/_action/status
+          - /navigate_to_pose/_action/feedback
+          - /local_costmap/costmap
+          - /global_costmap/costmap
+          - /plan
+          - /diagnostics
+        exclude_topics:
+          - /rosout
+          - /parameter_events
