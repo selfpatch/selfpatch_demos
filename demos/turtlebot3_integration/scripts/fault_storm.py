@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# Copyright 2026 selfpatch
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Fault storm injector for ros2_medkit debounce demo.
 
 Fires 9 noise faults (1 report each) + 1 real problem (5 sustained reports),
@@ -13,10 +27,13 @@ Usage (standalone):
     python3 fault_storm.py
 
 Usage (Docker demo):
+    # CPU profile (default):
     docker exec turtlebot3_medkit_demo bash -c \
         "source /opt/ros/jazzy/setup.bash && \
          source /root/demo_ws/install/setup.bash && \
          python3 /root/demo_ws/src/turtlebot3_medkit_demo/scripts/fault_storm.py"
+    # NVIDIA profile:
+    docker exec turtlebot3_medkit_demo_nvidia bash -c ...
 """
 
 import rclpy
@@ -103,7 +120,11 @@ class FaultStormNode(Node):
             ReportFault, "/fault_manager/report_fault"
         )
         self.get_logger().info("Waiting for fault_manager...")
-        self.client.wait_for_service(timeout_sec=5.0)
+        if not self.client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error(
+                "fault_manager service not available after 5s; aborting."
+            )
+            raise RuntimeError("fault_manager service not available")
         self.get_logger().info("Connected")
 
     def fire(self, fault_code, severity, description, source_id):
