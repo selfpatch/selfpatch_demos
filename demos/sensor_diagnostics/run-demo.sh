@@ -93,12 +93,21 @@ if [[ "$DETACH_MODE" == "true" ]]; then
 fi
 
 if docker compose version &> /dev/null; then
-    # shellcheck disable=SC2086
-    docker compose build ${BUILD_ARGS} && docker compose up ${DETACH_FLAG}
+    COMPOSE_CMD="docker compose"
 else
-    # shellcheck disable=SC2086
-    docker-compose build ${BUILD_ARGS} && docker-compose up ${DETACH_FLAG}
+    COMPOSE_CMD="docker-compose"
 fi
+
+# shellcheck disable=SC2086
+if ! ${COMPOSE_CMD} build ${BUILD_ARGS}; then
+    echo ""
+    echo "❌ Docker build failed! Stopping any partially created containers..."
+    ${COMPOSE_CMD} down 2>/dev/null || true
+    exit 1
+fi
+
+# shellcheck disable=SC2086
+${COMPOSE_CMD} up ${DETACH_FLAG}
 
 if [[ "$DETACH_MODE" == "true" ]]; then
     echo ""
