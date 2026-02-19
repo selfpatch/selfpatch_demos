@@ -95,11 +95,16 @@ else
 fi
 
 if [[ "$DETACH_MODE" == "true" ]]; then
+    if [[ "$PROFILE" == "nvidia" ]]; then
+        CONTAINER="turtlebot3_medkit_demo_nvidia"
+    else
+        CONTAINER="turtlebot3_medkit_demo"
+    fi
     echo ""
     echo "✅ Demo started in DEBOUNCE mode!"
     echo ""
     echo "Fire fault storm to see debounce in action:"
-    echo "   docker exec turtlebot3_medkit_demo bash -c \\"
+    echo "   docker exec $CONTAINER bash -c \\"
     echo "     'source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && python3 /root/demo_ws/src/turtlebot3_medkit_demo/scripts/fault_storm.py'"
     echo ""
     echo "🛑 To stop: ./stop-demo.sh"
