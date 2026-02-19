@@ -1,5 +1,5 @@
 #!/bin/bash
-# TurtleBot3 + ros2_medkit Demo Runner — DEBOUNCE MODE (Article 3)
+# TurtleBot3 + ros2_medkit Demo Runner - DEBOUNCE MODE
 #
 # Same as run-demo.sh but uses debounce config:
 #   confirmation_threshold: -3 (requires sustained failure)
@@ -77,20 +77,20 @@ echo ""
 if docker compose version &> /dev/null; then
     docker compose --profile "$PROFILE" \
         -f docker-compose.yml \
-        -f docker-compose.article3.yml \
+        -f docker-compose.debounce.yml \
         build && \
     docker compose --profile "$PROFILE" \
         -f docker-compose.yml \
-        -f docker-compose.article3.yml \
+        -f docker-compose.debounce.yml \
         up ${DETACH_FLAG}
 else
     docker-compose --profile "$PROFILE" \
         -f docker-compose.yml \
-        -f docker-compose.article3.yml \
+        -f docker-compose.debounce.yml \
         build && \
     docker-compose --profile "$PROFILE" \
         -f docker-compose.yml \
-        -f docker-compose.article3.yml \
+        -f docker-compose.debounce.yml \
         up ${DETACH_FLAG}
 fi
 
@@ -98,8 +98,9 @@ if [[ "$DETACH_MODE" == "true" ]]; then
     echo ""
     echo "✅ Demo started in DEBOUNCE mode!"
     echo ""
-    echo "Run the article 3 demo sequence:"
-    echo "   ./article3-demo.sh"
+    echo "Fire fault storm to see debounce in action:"
+    echo "   docker exec turtlebot3_medkit_demo bash -c \\"
+    echo "     'source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && python3 /root/demo_ws/src/turtlebot3_medkit_demo/scripts/fault_storm.py'"
     echo ""
     echo "🛑 To stop: ./stop-demo.sh"
 fi
