@@ -47,7 +47,7 @@ RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} https://github.com/selfpatch
        ros2_medkit/src/ros2_medkit_fault_manager \
        ros2_medkit/src/ros2_medkit_fault_reporter \
        ros2_medkit/src/ros2_medkit_diagnostic_bridge . && \
-    mkdir -p ${COLCON_WS}/cmake && mv ros2_medkit/cmake/ROS2MedkitCompat.cmake ${COLCON_WS}/cmake/ && \
+    cp -r ros2_medkit/cmake ${COLCON_WS}/ && \
     rm -rf ros2_medkit
 
 # Copy demo package from local context
