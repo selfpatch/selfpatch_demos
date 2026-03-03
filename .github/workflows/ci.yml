@@ -5,6 +5,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+  repository_dispatch:
+    types: [ros2_medkit_updated]
 
 jobs:
   lint:
@@ -33,6 +35,13 @@ jobs:
   docker-build:
     runs-on: ubuntu-24.04
     steps:
+      - name: Show triggering source
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          echo "## Triggered by ros2_medkit" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: \`${{ github.event.client_payload.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Run: ${{ github.event.client_payload.run_url }}" >> $GITHUB_STEP_SUMMARY
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
