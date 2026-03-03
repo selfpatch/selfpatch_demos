@@ -8,6 +8,9 @@ on:
   repository_dispatch:
     types: [ros2_medkit_updated]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-24.04
@@ -40,12 +43,12 @@ jobs:
         run: |
           SHA="${{ github.event.client_payload.sha }}"
           RUN_URL="${{ github.event.client_payload.run_url }}"
-          echo "## Triggered by ros2_medkit" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: \`${SHA:-unknown}\`" >> $GITHUB_STEP_SUMMARY
+          echo "## Triggered by ros2_medkit" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${SHA:-unknown}\`" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$RUN_URL" ]; then
-            echo "- Run: [View triggering run]($RUN_URL)" >> $GITHUB_STEP_SUMMARY
+            echo "- Run: [View triggering run]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- Run: (URL not provided)" >> $GITHUB_STEP_SUMMARY
+            echo "- Run: (URL not provided)" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Checkout repository
