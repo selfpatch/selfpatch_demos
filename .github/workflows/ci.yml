@@ -38,9 +38,15 @@ jobs:
       - name: Show triggering source
         if: github.event_name == 'repository_dispatch'
         run: |
+          SHA="${{ github.event.client_payload.sha }}"
+          RUN_URL="${{ github.event.client_payload.run_url }}"
           echo "## Triggered by ros2_medkit" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: \`${{ github.event.client_payload.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Run: ${{ github.event.client_payload.run_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: \`${SHA:-unknown}\`" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$RUN_URL" ]; then
+            echo "- Run: [View triggering run]($RUN_URL)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Run: (URL not provided)" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Checkout repository
         uses: actions/checkout@v4
