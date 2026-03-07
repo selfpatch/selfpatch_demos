@@ -16,14 +16,11 @@ diagnostics:
         allow_credentials: false
         max_age_seconds: 86400
 
-      max_parallel_topic_samples: 10
-
       # Discovery configuration
-      discovery_mode: "hybrid"  # runtime_only, manifest_only, or hybrid
-      manifest_path: ""  # Will be set via launch argument
-      manifest_strict_validation: true
-
       discovery:
+        mode: "hybrid"  # runtime_only, manifest_only, or hybrid
+        manifest_path: ""  # Will be set via launch argument
+        manifest_strict_validation: true
         runtime:
           create_synthetic_components: false  # Manifest defines components
 

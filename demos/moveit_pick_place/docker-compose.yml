@@ -62,6 +62,23 @@ services:
                source /root/demo_ws/install/setup.bash &&
                ros2 launch moveit_medkit_demo $${LAUNCH_FILE} headless:=$${HEADLESS}"
 
+  # For CI testing - fake hardware (no Gazebo), tests run externally
+  moveit-demo-ci:
+    profiles: ["ci"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moveit_medkit_demo_ci
+    environment:
+      - ROS_DOMAIN_ID=40
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
+               source /opt/ros/jazzy/setup.bash &&
+               source /root/demo_ws/install/setup.bash &&
+               ros2 launch moveit_medkit_demo demo.launch.py headless:=true"
+
   # SOVD Web UI — pre-built from GHCR
   sovd-web-ui:
     image: ghcr.io/selfpatch/sovd_web_ui:latest

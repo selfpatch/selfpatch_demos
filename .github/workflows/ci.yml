@@ -35,7 +35,7 @@ jobs:
           YAMLLINT_CONFIG="{extends: relaxed, rules: {line-length: {max: 120}}}"
           find . \( -name "*.yaml" -o -name "*.yml" \) -type f | xargs yamllint -d "$YAMLLINT_CONFIG"
 
-  docker-build:
+  build-and-test-sensor:
     runs-on: ubuntu-24.04
     steps:
       - name: Show triggering source
@@ -54,20 +54,65 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Build and start sensor_diagnostics demo
+        working-directory: demos/sensor_diagnostics
+        run: docker compose --profile ci up -d --build sensor-demo-ci
 
-      - name: Build Sensor Diagnostics demo image
-        run: |
-          cd demos/sensor_diagnostics
-          docker build -t sensor-diagnostics-demo:test -f Dockerfile .
+      - name: Run smoke tests
+        run: ./tests/smoke_test.sh
 
-      - name: Build TurtleBot3 demo image
-        run: |
-          cd demos/turtlebot3_integration
-          docker build -t turtlebot3-medkit-demo:test -f Dockerfile .
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: demos/sensor_diagnostics
+        run: docker compose --profile ci logs sensor-demo-ci --tail=200
 
-      - name: Build MoveIt Pick-and-Place demo image
-        run: |
-          cd demos/moveit_pick_place
-          docker build -t moveit-pick-place-demo:test -f Dockerfile .
+      - name: Teardown
+        if: always()
+        working-directory: demos/sensor_diagnostics
+        run: docker compose --profile ci down
+
+  build-and-test-turtlebot:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and start turtlebot3 demo
+        working-directory: demos/turtlebot3_integration
+        run: docker compose --profile ci up -d --build turtlebot3-demo-ci
+
+      - name: Run smoke tests
+        run: ./tests/smoke_test_turtlebot3.sh
+
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: demos/turtlebot3_integration
+        run: docker compose --profile ci logs turtlebot3-demo-ci --tail=200
+
+      - name: Teardown
+        if: always()
+        working-directory: demos/turtlebot3_integration
+        run: docker compose --profile ci down
+
+  build-and-test-moveit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and start moveit demo
+        working-directory: demos/moveit_pick_place
+        run: docker compose --profile ci up -d --build moveit-demo-ci
+
+      - name: Run smoke tests
+        run: ./tests/smoke_test_moveit.sh
+
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: demos/moveit_pick_place
+        run: docker compose --profile ci logs moveit-demo-ci --tail=200
+
+      - name: Teardown
+        if: always()
+        working-directory: demos/moveit_pick_place
+        run: docker compose --profile ci down

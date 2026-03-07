@@ -126,7 +126,7 @@ def generate_launch_description():
                     medkit_params_file,
                     {
                         "use_sim_time": use_sim_time,
-                        "manifest_path": manifest_file,
+                        "discovery.manifest_path": manifest_file,
                     },
                 ],
             ),

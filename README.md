@@ -173,6 +173,19 @@ curl http://localhost:8080/api/v1/faults | jq
 
 See individual demo READMEs for more examples.
 
+## Testing
+
+Each demo has automated smoke tests that verify the gateway starts and the REST API works correctly:
+
+```bash
+# Run smoke tests against a running demo (default: http://localhost:8080)
+./tests/smoke_test.sh              # Sensor diagnostics (21 tests, incl. fault injection)
+./tests/smoke_test_turtlebot3.sh   # TurtleBot3 (entity discovery)
+./tests/smoke_test_moveit.sh       # MoveIt pick-and-place (entity discovery)
+```
+
+CI runs all 3 demos in parallel - each job builds the Docker image, starts the container, and runs the smoke tests against it. See [CI workflow](.github/workflows/ci.yml).
+
 ## Related Projects
 
 - [ros2_medkit](https://github.com/selfpatch/ros2_medkit) — Core diagnostics library with SOVD-compliant gateway
