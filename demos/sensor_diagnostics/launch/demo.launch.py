@@ -56,7 +56,7 @@ def generate_launch_description():
     manifest_file = os.path.join(pkg_dir, "config", "sensor_manifest.yaml")
 
     # Beacon mode from environment (controls both plugin loading and node behavior)
-    beacon_mode = os.environ.get('BEACON_MODE', 'none')
+    beacon_mode = os.environ.get('BEACON_MODE', 'none').strip().lower()
     valid_beacon_modes = ('none', 'topic', 'param')
     if beacon_mode not in valid_beacon_modes:
         import sys
