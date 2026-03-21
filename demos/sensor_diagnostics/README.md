@@ -11,6 +11,7 @@ This demo showcases ros2_medkit's data monitoring, configuration management, and
 - **Focus on diagnostics** - Pure ros2_medkit features without robot complexity
 - **Configurable faults** - Runtime fault injection via REST API
 - **Dual fault reporting** - Demonstrates both legacy (diagnostics) and modern (direct) paths
+- **Beacon discovery** - Optional push (topic) or pull (parameter) entity enrichment
 
 ## Quick Start
 
@@ -254,6 +255,58 @@ curl http://localhost:8080/api/v1/faults | jq
 | `noise_level` | double | 0.0 | Fraction of noisy pixels (0-1) |
 | `brightness` | int | 128 | Base brightness (0-255) |
 | `inject_black_frames` | bool | false | Randomly inject black frames |
+
+## Beacon Mode (Entity Enrichment)
+
+The gateway's beacon plugins let sensor nodes publish extra metadata (display names, process info, topology hints) that enriches the SOVD entity model at runtime - without modifying the manifest.
+
+Three modes are available, controlled by the `BEACON_MODE` environment variable:
+
+| Mode | Plugin | Mechanism | Description |
+|------|--------|-----------|-------------|
+| `none` | - | - | Default. No beacon plugins. Entities come from manifest + runtime discovery only. |
+| `topic` | topic_beacon | Push (ROS 2 topic) | Sensor nodes publish `MedkitDiscoveryHint` messages on `/ros2_medkit/discovery` every 5s. Gateway subscribes and enriches entities. |
+| `param` | parameter_beacon | Pull (ROS 2 parameters) | Sensor nodes declare `ros2_medkit.discovery.*` parameters. Gateway polls them every 5s. |
+
+### Usage
+
+```bash
+# Docker - set BEACON_MODE before starting
+BEACON_MODE=topic docker compose up -d
+BEACON_MODE=param docker compose up -d
+docker compose up -d   # default: none
+
+# Local (non-Docker)
+BEACON_MODE=topic ros2 launch sensor_diagnostics_demo demo.launch.py
+```
+
+### Viewing Beacon Data
+
+When a beacon mode is active, each sensor entity gets enriched with extra metadata visible through the API:
+
+```bash
+# Topic beacon metadata
+curl http://localhost:8080/api/v1/apps/lidar-sim/x-medkit-topic-beacon | jq
+
+# Parameter beacon metadata
+curl http://localhost:8080/api/v1/apps/lidar-sim/x-medkit-param-beacon | jq
+```
+
+The beacon data includes:
+- **entity_id** - Manifest app ID (e.g., `lidar-sim`)
+- **display_name** - Human-friendly name (e.g., `LiDAR Simulator`)
+- **component_id** - Parent component (e.g., `lidar-unit`)
+- **function_ids** - Function membership (e.g., `sensor-monitoring`)
+- **process_id** / **hostname** - Process-level diagnostics
+- **metadata** - Sensor-specific key-value pairs (sensor_type, data_topic, frame_id)
+
+### How It Works
+
+**Topic beacon** (push): Each sensor node creates a publisher on `/ros2_medkit/discovery` and publishes a `MedkitDiscoveryHint` message every 5 seconds. The gateway's `topic_beacon` plugin subscribes to this topic and merges the hints into the entity model. Hints have a TTL (default 10s) - if a node stops publishing, the data goes stale.
+
+**Parameter beacon** (pull): Each sensor node declares ROS 2 parameters under the `ros2_medkit.discovery.*` prefix. The gateway's `parameter_beacon` plugin polls all nodes for these parameters every 5 seconds. No explicit publishing is needed - the gateway reads the parameters via the ROS 2 parameter service.
+
+Both mechanisms enrich the same entities defined in the manifest. They do not create new entities (the `allow_new_entities` option is disabled). Only one beacon mode should be active at a time - they serve the same purpose via different transport mechanisms.
 
 ## Use Cases
 
