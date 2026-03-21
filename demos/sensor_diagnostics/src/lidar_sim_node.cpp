@@ -25,6 +25,8 @@
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 
+#include "beacon_helper.hpp"
+
 namespace sensor_diagnostics
 {
 
@@ -79,6 +81,13 @@ public:
     // Register parameter callback for runtime reconfiguration
     param_callback_handle_ = this->add_on_set_parameters_callback(
       std::bind(&LidarSimNode::on_parameter_change, this, std::placeholders::_1));
+
+    // Initialize beacon (reads beacon_mode parameter: none/topic/param)
+    beacon_ = std::make_unique<BeaconHelper>(this, BeaconHelper::Config{
+      "lidar-sim", "LiDAR Simulator", "lidar-unit",
+      {"sensor-monitoring"},
+      {{"sensor_type", "lidar"}, {"data_topic", "scan"}, {"frame_id", "lidar_link"}},
+    });
 
     RCLCPP_INFO(this->get_logger(), "LiDAR simulator started at %.1f Hz", rate);
   }
@@ -308,6 +317,9 @@ private:
   double failure_probability_;
   bool inject_nan_;
   double drift_rate_;
+
+  // Beacon
+  std::unique_ptr<BeaconHelper> beacon_;
 
   // Statistics
   rclcpp::Time start_time_;

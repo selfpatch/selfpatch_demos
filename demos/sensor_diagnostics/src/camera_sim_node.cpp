@@ -24,6 +24,8 @@
 #include "sensor_msgs/msg/camera_info.hpp"
 #include "sensor_msgs/msg/image.hpp"
 
+#include "beacon_helper.hpp"
+
 namespace sensor_diagnostics
 {
 
@@ -70,6 +72,13 @@ public:
     // Register parameter callback
     param_callback_handle_ = this->add_on_set_parameters_callback(
       std::bind(&CameraSimNode::on_parameter_change, this, std::placeholders::_1));
+
+    // Initialize beacon (reads beacon_mode parameter: none/topic/param)
+    beacon_ = std::make_unique<BeaconHelper>(this, BeaconHelper::Config{
+      "camera-sim", "Camera Simulator", "camera-unit",
+      {"sensor-monitoring"},
+      {{"sensor_type", "camera"}, {"data_topic", "image_raw"}, {"frame_id", "camera_link"}},
+    });
 
     RCLCPP_INFO(
       this->get_logger(), "Camera simulator started at %.1f Hz (%dx%d)",
@@ -257,6 +266,9 @@ private:
   // Random number generation
   std::mt19937 rng_;
   std::uniform_real_distribution<double> uniform_dist_;
+
+  // Beacon
+  std::unique_ptr<BeaconHelper> beacon_;
 
   // Parameters
   int width_;

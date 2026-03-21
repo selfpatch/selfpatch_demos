@@ -22,6 +22,7 @@ ament_target_dependencies(lidar_sim_node
   sensor_msgs
   diagnostic_msgs
   rcl_interfaces
+  ros2_medkit_msgs
 )
 
 # IMU simulator node
@@ -30,6 +31,7 @@ ament_target_dependencies(imu_sim_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
+  ros2_medkit_msgs
 )
 
 # GPS simulator node
@@ -38,6 +40,7 @@ ament_target_dependencies(gps_sim_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
+  ros2_medkit_msgs
 )
 
 # Camera simulator node
@@ -47,6 +50,7 @@ ament_target_dependencies(camera_sim_node
   sensor_msgs
   diagnostic_msgs
   rcl_interfaces
+  ros2_medkit_msgs
 )
 
 # Anomaly detector node

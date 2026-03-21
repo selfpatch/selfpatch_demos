@@ -21,6 +21,8 @@
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "sensor_msgs/msg/nav_sat_status.hpp"
 
+#include "beacon_helper.hpp"
+
 namespace sensor_diagnostics
 {
 
@@ -70,6 +72,13 @@ public:
     // Register parameter callback
     param_callback_handle_ = this->add_on_set_parameters_callback(
       std::bind(&GpsSimNode::on_parameter_change, this, std::placeholders::_1));
+
+    // Initialize beacon (reads beacon_mode parameter: none/topic/param)
+    beacon_ = std::make_unique<BeaconHelper>(this, BeaconHelper::Config{
+      "gps-sim", "GPS Simulator", "gps-unit",
+      {"sensor-monitoring"},
+      {{"sensor_type", "gps"}, {"data_topic", "fix"}, {"frame_id", "gps_link"}},
+    });
 
     RCLCPP_INFO(this->get_logger(), "GPS simulator started at %.1f Hz", rate);
   }
@@ -241,6 +250,9 @@ private:
   std::mt19937 rng_;
   std::normal_distribution<double> normal_dist_;
   std::uniform_real_distribution<double> uniform_dist_;
+
+  // Beacon
+  std::unique_ptr<BeaconHelper> beacon_;
 
   // Parameters
   double base_latitude_;
