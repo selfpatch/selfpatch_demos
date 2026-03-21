@@ -11,7 +11,9 @@ This launch file starts:
 
 import os
 
+from ament_index_python.packages import get_package_prefix
 from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -24,6 +26,18 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def _resolve_plugin_path(package_name, lib_name):
+    """Resolve a gateway plugin .so path, returning empty string if not found."""
+    try:
+        prefix = get_package_prefix(package_name)
+        path = os.path.join(prefix, 'lib', package_name, f'lib{lib_name}.so')
+        if os.path.isfile(path):
+            return path
+    except PackageNotFoundError:
+        pass
+    return ''
+
+
 def generate_launch_description():
     # Get package share directories
     demo_pkg_dir = get_package_share_directory("moveit_medkit_demo")
@@ -34,6 +48,24 @@ def generate_launch_description():
     # Config file paths
     medkit_params_file = os.path.join(demo_pkg_dir, "config", "medkit_params.yaml")
     manifest_file = os.path.join(demo_pkg_dir, "config", "panda_manifest.yaml")
+
+    # Resolve plugin paths
+    graph_provider_path = _resolve_plugin_path(
+        'ros2_medkit_graph_provider', 'ros2_medkit_graph_provider_plugin')
+    procfs_plugin_path = _resolve_plugin_path(
+        'ros2_medkit_linux_introspection', 'procfs_introspection')
+
+    # Build plugin overrides - only include plugins that were found
+    plugin_overrides = {}
+    active_plugins = []
+    if graph_provider_path:
+        active_plugins.append('graph_provider')
+        plugin_overrides['plugins.graph_provider.path'] = graph_provider_path
+    if procfs_plugin_path:
+        active_plugins.append('procfs_introspection')
+        plugin_overrides['plugins.procfs_introspection.path'] = procfs_plugin_path
+    if active_plugins:
+        plugin_overrides['plugins'] = active_plugins
 
     # Launch configuration variables
     use_sim_time = LaunchConfiguration("use_sim_time", default="False")
@@ -128,6 +160,7 @@ def generate_launch_description():
                         "use_sim_time": use_sim_time,
                         "discovery.manifest_path": manifest_file,
                     },
+                    plugin_overrides,
                 ],
             ),
             # === Foxglove Bridge (WebSocket on port 8765) ===

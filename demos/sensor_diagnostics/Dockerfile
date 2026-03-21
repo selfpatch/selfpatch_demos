@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     python3-requests \
     nlohmann-json3-dev \
     libcpp-httplib-dev \
+    libsystemd-dev \
     sqlite3 \
     libsqlite3-dev \
     git \
@@ -23,16 +24,22 @@ RUN apt-get update && apt-get install -y \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone ros2_medkit from GitHub (gateway + dependencies)
+# Clone ros2_medkit from GitHub (gateway + dependencies + plugins)
+ARG ROS2_MEDKIT_REF=main
 WORKDIR ${COLCON_WS}/src
-RUN git clone --depth 1 https://github.com/selfpatch/ros2_medkit.git && \
+RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} https://github.com/selfpatch/ros2_medkit.git && \
+    mv ros2_medkit/src/ros2_medkit_cmake . && \
     mv ros2_medkit/src/ros2_medkit_gateway . && \
     mv ros2_medkit/src/ros2_medkit_serialization . && \
     mv ros2_medkit/src/ros2_medkit_msgs . && \
     mv ros2_medkit/src/ros2_medkit_fault_manager . && \
     mv ros2_medkit/src/ros2_medkit_fault_reporter . && \
     mv ros2_medkit/src/ros2_medkit_diagnostic_bridge . && \
-    mv ros2_medkit/src/ros2_medkit_cmake . && \
+    mv ros2_medkit/src/ros2_medkit_plugins/ros2_medkit_graph_provider . && \
+    mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_beacon_common . && \
+    mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_topic_beacon . && \
+    mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_param_beacon . && \
+    mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_linux_introspection . && \
     rm -rf ros2_medkit
 
 # Copy demo package

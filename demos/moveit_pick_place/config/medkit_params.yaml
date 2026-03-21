@@ -26,6 +26,11 @@ diagnostics:
         runtime:
           create_synthetic_components: false  # Manifest defines components
 
+      # Plugin configuration (paths set by launch file)
+      plugins: ["graph_provider", "procfs_introspection"]
+      plugins.graph_provider.path: ""
+      plugins.procfs_introspection.path: ""
+
 # Fault Manager configuration (runs in root namespace)
 fault_manager:
   ros__parameters:

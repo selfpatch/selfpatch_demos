@@ -18,7 +18,7 @@ This demo demonstrates:
 - **Rosbag snapshot capture** when faults are confirmed (MCAP format)
 - Querying robot data via **REST API**
 - Entity hierarchy: Areas → Components → Apps → Functions
-- Controlling the robot via sovd_web_ui
+- Controlling the robot via ros2_medkit_web_ui
 
 ## Prerequisites
 
@@ -40,7 +40,7 @@ That's it! The script will:
 1. Build the Docker images (first run takes ~5-10 min, downloads ~4GB)
 2. Setup X11 forwarding for Gazebo GUI
 3. Launch TurtleBot3 simulation + Nav2 + ros2_medkit gateway in **daemon mode** (background)
-4. Launch sovd_web_ui at <http://localhost:3000>
+4. Launch ros2_medkit_web_ui at <http://localhost:3000>
 
 **Note:** By default, the demo runs in **daemon mode** with **Gazebo GUI** enabled. This allows you to interact with ROS 2 while the demo is running.
 
@@ -119,7 +119,7 @@ docker compose --profile nvidia logs -f
 
 ### Via Web UI
 
-1. Connect to the gateway in sovd_web_ui
+1. Connect to the gateway in ros2_medkit_web_ui
 2. Find entity with `/cmd_vel` data
 3. Enter velocity command JSON (or use form with fields from schema):
 
@@ -449,7 +449,7 @@ curl -X DELETE http://localhost:8080/api/v1/faults
                                                  │
          ┌───────────────────────────────────────┼────────────────────┐
          ▼                    ▼                  ▼                    ▼
-   sovd_web_ui          curl/browser      External tools        MCP Server
+   ros2_medkit_web_ui          curl/browser      External tools        MCP Server
   (localhost:3000)                                          (ros2_medkit_mcp)
 ```
 

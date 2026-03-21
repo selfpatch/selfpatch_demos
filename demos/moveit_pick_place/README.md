@@ -40,7 +40,7 @@ That's it! The script will:
 1. Build the Docker image (first run: ~15-20 min, ~7 GB)
 2. Set up X11 forwarding for Gazebo GUI
 3. Launch Panda robot in factory world + MoveIt 2 + ros2_medkit gateway
-4. Launch sovd_web_ui at http://localhost:3000
+4. Launch ros2_medkit_web_ui at http://localhost:3000
 
 **REST API:** http://localhost:8080/api/v1/
 **Web UI:** http://localhost:3000/
@@ -120,7 +120,7 @@ docker exec -it moveit_medkit_demo bash      # Shell into container
                                       │
                         ┌─────────────┼─────────────┐
                         │             │             │
-                   sovd_web_ui    curl/httpie    MCP Server
+                   ros2_medkit_web_ui    curl/httpie    MCP Server
                     :3000                        (LLM tools)
 ```
 
@@ -300,7 +300,7 @@ curl http://localhost:8080/api/v1/faults | jq '.items[] | {fault_code, severity_
 
 ## Web UI
 
-The sovd_web_ui container starts automatically at **http://localhost:3000**.
+The ros2_medkit_web_ui container starts automatically at **http://localhost:3000**.
 
 Connect it to the gateway at `http://localhost:8080` to browse:
 - Entity tree (Areas → Components → Apps)
