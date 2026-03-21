@@ -26,10 +26,8 @@ diagnostics:
         runtime:
           create_synthetic_components: false  # Manifest defines components
 
-      # Plugin configuration (paths set by launch file)
-      plugins: ["graph_provider", "procfs_introspection"]
-      plugins.graph_provider.path: ""
-      plugins.procfs_introspection.path: ""
+      # Plugin configuration (set by launch file when .so paths are resolved)
+      plugins: [""]
 
 # Fault Manager configuration (runs in root namespace)
 fault_manager:

@@ -83,8 +83,7 @@ def generate_launch_description():
     if procfs_plugin_path:
         active_plugins.append('procfs_introspection')
         plugin_overrides['plugins.procfs_introspection.path'] = procfs_plugin_path
-    if active_plugins:
-        plugin_overrides['plugins'] = active_plugins
+    plugin_overrides['plugins'] = active_plugins
 
     # Factory world file path
     factory_world = os.path.join(
