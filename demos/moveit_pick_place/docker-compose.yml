@@ -79,9 +79,9 @@ services:
                source /root/demo_ws/install/setup.bash &&
                ros2 launch moveit_medkit_demo demo.launch.py headless:=true"
 
-  # SOVD Web UI — pre-built from GHCR
-  sovd-web-ui:
-    image: ghcr.io/selfpatch/sovd_web_ui:latest
-    container_name: sovd_web_ui
+  # Web UI - pre-built from GHCR
+  medkit-web-ui:
+    image: ghcr.io/selfpatch/ros2_medkit_web_ui:latest
+    container_name: ros2_medkit_web_ui
     ports:
       - "3000:80"

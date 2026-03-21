@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y \
     libcpp-httplib-dev \
     ros-jazzy-rosbag2-storage-mcap \
     ros-jazzy-foxglove-bridge \
+    libsystemd-dev \
     sqlite3 libsqlite3-dev git curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,13 +42,18 @@ RUN mkdir -p /var/lib/ros2_medkit/rosbags
 ARG ROS2_MEDKIT_REF=main
 WORKDIR ${COLCON_WS}/src
 RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} https://github.com/selfpatch/ros2_medkit.git && \
+    mv ros2_medkit/src/ros2_medkit_cmake . && \
     mv ros2_medkit/src/ros2_medkit_gateway \
        ros2_medkit/src/ros2_medkit_msgs \
        ros2_medkit/src/ros2_medkit_serialization \
        ros2_medkit/src/ros2_medkit_fault_manager \
        ros2_medkit/src/ros2_medkit_fault_reporter \
-       ros2_medkit/src/ros2_medkit_diagnostic_bridge \
-       ros2_medkit/src/ros2_medkit_cmake . && \
+       ros2_medkit/src/ros2_medkit_diagnostic_bridge . && \
+    mv ros2_medkit/src/ros2_medkit_plugins/ros2_medkit_graph_provider . && \
+    mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_beacon_common . && \
+    mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_topic_beacon . && \
+    mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_param_beacon . && \
+    mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_linux_introspection . && \
     rm -rf ros2_medkit
 
 # Copy demo package from local context

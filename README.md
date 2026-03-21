@@ -33,7 +33,7 @@ to complete mobile robot integration:
 Both demos support:
 
 - REST API access via SOVD protocol
-- Web UI for visualization ([sovd_web_ui](https://github.com/selfpatch/sovd_web_ui))
+- Web UI for visualization ([ros2_medkit_web_ui](https://github.com/selfpatch/ros2_medkit_web_ui))
 - Fault injection and monitoring
 - Docker deployment for easy setup
 
@@ -189,7 +189,7 @@ CI runs all 3 demos in parallel - each job builds the Docker image, starts the c
 ## Related Projects
 
 - [ros2_medkit](https://github.com/selfpatch/ros2_medkit) — Core diagnostics library with SOVD-compliant gateway
-- [sovd_web_ui](https://github.com/selfpatch/sovd_web_ui) — Web-based visualization and control interface
+- [ros2_medkit_web_ui](https://github.com/selfpatch/ros2_medkit_web_ui) — Web-based visualization and control interface
 - [ros2_medkit_mcp](https://github.com/selfpatch/ros2_medkit_mcp) — MCP server for LLM integration
 - [ros2_medkit documentation](https://selfpatch.github.io/ros2_medkit/) — Full documentation and API reference
 

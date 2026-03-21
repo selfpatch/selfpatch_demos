@@ -20,9 +20,9 @@ services:
                ros2 launch sensor_diagnostics_demo demo.launch.py"
 
   # Web UI for visualization (optional)
-  sovd-web-ui:
-    image: ghcr.io/selfpatch/sovd_web_ui:latest
-    container_name: sovd_web_ui
+  medkit-web-ui:
+    image: ghcr.io/selfpatch/ros2_medkit_web_ui:latest
+    container_name: ros2_medkit_web_ui
     ports:
       - "3000:80"
     depends_on:
