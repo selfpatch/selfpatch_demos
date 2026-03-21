@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -42,10 +43,23 @@ public:
     node_->declare_parameter("beacon_mode", "none");
     mode_ = node_->get_parameter("beacon_mode").as_string();
 
+    // Cache process info (constant during lifetime)
+    pid_ = static_cast<uint32_t>(getpid());
+    char hostname_buf[256];
+    hostname_buf[sizeof(hostname_buf) - 1] = '\0';
+    if (gethostname(hostname_buf, sizeof(hostname_buf) - 1) == 0) {
+      hostname_ = hostname_buf;
+    }
+
     if (mode_ == "topic") {
       init_topic_beacon();
     } else if (mode_ == "param") {
       init_param_beacon();
+    } else if (mode_ != "none") {
+      RCLCPP_WARN(
+        node_->get_logger(),
+        "Unknown beacon_mode '%s', expected none/topic/param. Beacon disabled.",
+        mode_.c_str());
     }
   }
 
@@ -74,12 +88,11 @@ private:
     node_->declare_parameter("ros2_medkit.discovery.component_id", config_.component_id);
     node_->declare_parameter("ros2_medkit.discovery.function_ids", config_.function_ids);
     node_->declare_parameter(
-      "ros2_medkit.discovery.process_id", static_cast<int>(getpid()));
+      "ros2_medkit.discovery.process_id", static_cast<int>(pid_));
     node_->declare_parameter("ros2_medkit.discovery.process_name", node_->get_name());
 
-    char hostname_buf[256];
-    if (gethostname(hostname_buf, sizeof(hostname_buf)) == 0) {
-      node_->declare_parameter("ros2_medkit.discovery.hostname", std::string(hostname_buf));
+    if (!hostname_.empty()) {
+      node_->declare_parameter("ros2_medkit.discovery.hostname", hostname_);
     }
 
     for (const auto & [key, value] : config_.metadata) {
@@ -98,14 +111,10 @@ private:
     msg.display_name = config_.display_name;
     msg.component_id = config_.component_id;
     msg.function_ids = config_.function_ids;
-    msg.process_id = static_cast<uint32_t>(getpid());
+    msg.process_id = pid_;
     msg.process_name = node_->get_name();
+    msg.hostname = hostname_;
     msg.stamp = node_->now();
-
-    char hostname_buf[256];
-    if (gethostname(hostname_buf, sizeof(hostname_buf)) == 0) {
-      msg.hostname = hostname_buf;
-    }
 
     for (const auto & [key, value] : config_.metadata) {
       diagnostic_msgs::msg::KeyValue kv;
@@ -120,6 +129,8 @@ private:
   rclcpp::Node * node_;
   Config config_;
   std::string mode_;
+  uint32_t pid_{0};
+  std::string hostname_;
   rclcpp::Publisher<ros2_medkit_msgs::msg::MedkitDiscoveryHint>::SharedPtr beacon_pub_;
   rclcpp::TimerBase::SharedPtr beacon_timer_;
 };

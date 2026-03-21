@@ -57,6 +57,16 @@ def generate_launch_description():
 
     # Beacon mode from environment (controls both plugin loading and node behavior)
     beacon_mode = os.environ.get('BEACON_MODE', 'none')
+    valid_beacon_modes = ('none', 'topic', 'param')
+    if beacon_mode not in valid_beacon_modes:
+        import sys
+        print(
+            f"WARNING: Invalid BEACON_MODE='{beacon_mode}'. "
+            f"Valid values: {', '.join(valid_beacon_modes)}. "
+            "Falling back to 'none'.",
+            file=sys.stderr,
+        )
+        beacon_mode = 'none'
 
     # Resolve plugin paths
     graph_provider_path = _resolve_plugin_path(
@@ -84,6 +94,14 @@ def generate_launch_description():
             plugin_overrides['plugins.topic_beacon.topic'] = \
                 '/ros2_medkit/discovery'
             plugin_overrides['plugins.topic_beacon.beacon_ttl_sec'] = 10.0
+        else:
+            import sys
+            print(
+                "WARNING: BEACON_MODE=topic but topic_beacon plugin not "
+                "found. Falling back to none.",
+                file=sys.stderr,
+            )
+            beacon_mode = 'none'
     elif beacon_mode == 'param':
         param_beacon_path = _resolve_plugin_path(
             'ros2_medkit_param_beacon', 'param_beacon_plugin')
@@ -93,6 +111,14 @@ def generate_launch_description():
                 param_beacon_path
             plugin_overrides['plugins.parameter_beacon.poll_interval_sec'] = \
                 5.0
+        else:
+            import sys
+            print(
+                "WARNING: BEACON_MODE=param but param_beacon plugin not "
+                "found. Falling back to none.",
+                file=sys.stderr,
+            )
+            beacon_mode = 'none'
 
     plugin_overrides['plugins'] = active_plugins
 
