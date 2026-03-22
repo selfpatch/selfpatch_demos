@@ -70,8 +70,9 @@ public:
       std::bind(&ImuSimNode::on_parameter_change, this, std::placeholders::_1));
 
     // Initialize beacon (reads beacon_mode parameter: none/topic/param)
+    auto entity_id = this->declare_parameter("entity_id", "imu-sim");
     beacon_ = std::make_unique<BeaconHelper>(this, BeaconHelper::Config{
-      "imu-sim", "IMU Simulator", "imu-unit",
+      entity_id, "IMU Simulator", "imu-unit",
       {"sensor-monitoring"},
       {{"sensor_type", "imu"}, {"data_topic", "imu"}, {"frame_id", "imu_link"}},
     });

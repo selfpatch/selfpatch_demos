@@ -38,7 +38,7 @@ services:
     container_name: sensor_diagnostics_demo_ci
     environment:
       - ROS_DOMAIN_ID=40
-      - BEACON_MODE=${BEACON_MODE:-none}
+      - BEACON_MODE=none
     ports:
       - "8080:8080"
     command: >

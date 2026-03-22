@@ -15,42 +15,53 @@ find_package(diagnostic_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(ros2_medkit_msgs REQUIRED)
 
+# Beacon helper library (shared across sensor nodes)
+add_library(beacon_helper STATIC src/beacon_helper.cpp)
+ament_target_dependencies(beacon_helper PUBLIC
+  rclcpp
+  diagnostic_msgs
+  ros2_medkit_msgs
+)
+target_include_directories(beacon_helper PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+)
+
 # LiDAR simulator node
 add_executable(lidar_sim_node src/lidar_sim_node.cpp)
+target_link_libraries(lidar_sim_node beacon_helper)
 ament_target_dependencies(lidar_sim_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
   rcl_interfaces
-  ros2_medkit_msgs
 )
 
 # IMU simulator node
 add_executable(imu_sim_node src/imu_sim_node.cpp)
+target_link_libraries(imu_sim_node beacon_helper)
 ament_target_dependencies(imu_sim_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
-  ros2_medkit_msgs
 )
 
 # GPS simulator node
 add_executable(gps_sim_node src/gps_sim_node.cpp)
+target_link_libraries(gps_sim_node beacon_helper)
 ament_target_dependencies(gps_sim_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
-  ros2_medkit_msgs
 )
 
 # Camera simulator node
 add_executable(camera_sim_node src/camera_sim_node.cpp)
+target_link_libraries(camera_sim_node beacon_helper)
 ament_target_dependencies(camera_sim_node
   rclcpp
   sensor_msgs
   diagnostic_msgs
   rcl_interfaces
-  ros2_medkit_msgs
 )
 
 # Anomaly detector node
