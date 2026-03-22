@@ -6,14 +6,14 @@ API_BASE="${GATEWAY_URL}/api/v1"
 
 echo "Running arm self-test..."
 echo "Checking joint state broadcaster..."
-if ! RESPONSE=$(curl -sf "${API_BASE}/apps/joint-state-broadcaster" 2>/dev/null); then
+if ! curl -sf "${API_BASE}/apps/joint-state-broadcaster" > /dev/null 2>&1; then
     echo "FAIL: joint-state-broadcaster not responding"
     exit 1
 fi
 echo "OK: joint-state-broadcaster responding"
 
 echo "Checking move-group..."
-if ! RESPONSE=$(curl -sf "${API_BASE}/apps/move-group" 2>/dev/null); then
+if ! curl -sf "${API_BASE}/apps/move-group" > /dev/null 2>&1; then
     echo "FAIL: move-group not responding"
     exit 1
 fi
