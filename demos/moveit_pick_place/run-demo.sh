@@ -166,5 +166,9 @@ if [[ "$DETACH_MODE" == "true" ]]; then
     echo "   docker exec -it moveit_medkit_demo bash       # CPU"
     echo "   docker exec -it moveit_medkit_demo_nvidia bash # NVIDIA"
     echo ""
+    echo "📡 Triggers (condition-based alerts):"
+    echo "   ./setup-triggers.sh     # Create fault alert trigger"
+    echo "   ./watch-triggers.sh     # Watch trigger events (SSE stream)"
+    echo ""
     echo "🛑 To stop: ./stop-demo.sh"
 fi
