@@ -37,44 +37,21 @@ test_entity_discovery "apps" lidar-sim imu-sim gps-sim camera-sim anomaly-detect
 
 section "Data Access"
 
-if api_get "/apps/lidar-sim/data"; then
-    if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
-        pass "GET /apps/lidar-sim/data returns non-empty items"
-    else
-        fail "GET /apps/lidar-sim/data returns non-empty items" "items is empty"
-    fi
-else
-    fail "GET /apps/lidar-sim/data returns 200" "unexpected status code"
-fi
+assert_non_empty_items "/apps/lidar-sim/data"
 
 section "Configurations"
 
-if api_get "/apps/lidar-sim/configurations"; then
-    if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
-        pass "GET /apps/lidar-sim/configurations returns non-empty items"
-    else
-        fail "GET /apps/lidar-sim/configurations returns non-empty items" "items is empty"
-    fi
-    if echo "$RESPONSE" | jq -e '.items[] | select(.name == "noise_stddev")' > /dev/null 2>&1; then
-        pass "configurations contains 'noise_stddev' parameter"
-    else
-        fail "configurations contains 'noise_stddev' parameter" "not found in response"
-    fi
+assert_non_empty_items "/apps/lidar-sim/configurations"
+
+if echo "$RESPONSE" | jq -e '.items[] | select(.name == "noise_stddev")' > /dev/null 2>&1; then
+    pass "configurations contains 'noise_stddev' parameter"
 else
-    fail "GET /apps/lidar-sim/configurations returns 200" "unexpected status code"
+    fail "configurations contains 'noise_stddev' parameter" "not found in response"
 fi
 
 section "Logs"
 
-if api_get "/apps/anomaly-detector/logs"; then
-    if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
-        pass "GET /apps/anomaly-detector/logs returns non-empty items"
-    else
-        fail "GET /apps/anomaly-detector/logs returns non-empty items" "items is empty"
-    fi
-else
-    fail "GET /apps/anomaly-detector/logs returns 200" "unexpected status code"
-fi
+assert_non_empty_items "/apps/anomaly-detector/logs"
 
 section "Fault Injection"
 
