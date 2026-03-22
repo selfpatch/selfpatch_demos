@@ -1,7 +1,7 @@
 #!/bin/bash
-# Inject sensor drift
+# Run sensor diagnostics
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/../../lib/scripts-api.sh"
 
-execute_script "components" "compute-unit" "inject-drift" "Inject sensor drift"
+execute_script "components" "compute-unit" "run-diagnostics" "Run sensor diagnostics"
