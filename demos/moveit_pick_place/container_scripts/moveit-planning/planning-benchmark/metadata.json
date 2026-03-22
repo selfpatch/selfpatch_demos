@@ -1,0 +1,5 @@
+{
+  "name": "Planning Benchmark",
+  "description": "Verify MoveIt planning is functional by checking key nodes and operations",
+  "format": "bash"
+}

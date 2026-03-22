@@ -10,13 +10,13 @@ source /opt/ros/jazzy/setup.bash
 # shellcheck source=/dev/null
 source /root/demo_ws/install/setup.bash
 
-echo "🚫 Injecting COLLISION fault..."
+echo "Injecting COLLISION fault..."
 echo "   Spawning surprise obstacle in robot workspace"
 echo ""
 
 # 1. Spawn visible model in Gazebo
 # Robot base (panda_link0) is at z=0.75 in the world frame.
-# Obstacle at panda_link0 frame (0.4, 0, 0.4) → world frame (0.4, 0, 1.15)
+# Obstacle at panda_link0 frame (0.4, 0, 0.4) -> world frame (0.4, 0, 1.15)
 echo "Spawning visible red sphere in Gazebo..."
 cat > /tmp/surprise_obstacle.sdf << 'EOSDF'
 <?xml version="1.0" ?>
@@ -41,9 +41,9 @@ if ros2 run ros_gz_sim create \
     -file /tmp/surprise_obstacle.sdf \
     -name surprise_obstacle \
     -x 0.4 -y 0.0 -z 1.15 2>&1 | tail -1; then
-  echo "  ✓ Gazebo model spawned"
+  echo "  Gazebo model spawned"
 else
-  echo "  ⚠ Gazebo spawn failed (visual only — fault injection still works)"
+  echo "  Gazebo spawn failed (visual only - fault injection still works)"
 fi
 
 # 2. Add to MoveIt planning scene (so planner detects the collision)
@@ -91,10 +91,10 @@ rclpy.shutdown()
 "
 
 echo ""
-echo "✓ Collision fault injected!"
+echo "Collision fault injected!"
 echo "  A red sphere is now visible in Gazebo and registered in MoveIt planning scene."
 echo ""
-echo "Expected faults (via manipulation_monitor → FaultManager):"
+echo "Expected faults (via manipulation_monitor -> FaultManager):"
 echo "  - MOTION_PLANNING_FAILED: Cannot find collision-free path"
 echo ""
-echo "Restore with: /root/demo_ws/scripts/restore-normal.sh"
+echo "Restore with: ./restore-normal.sh (or via Scripts API)"

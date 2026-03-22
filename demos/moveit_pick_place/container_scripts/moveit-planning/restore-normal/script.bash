@@ -12,7 +12,7 @@ source /root/demo_ws/install/setup.bash
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
 
-echo "🔄 Restoring NORMAL operation..."
+echo "Restoring NORMAL operation..."
 echo ""
 
 # 1. Remove injected Gazebo models (visual objects)
@@ -72,7 +72,7 @@ sleep 5
 curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
 
 echo ""
-echo "✓ Normal operation restored!"
+echo "Normal operation restored!"
 echo ""
 if command -v jq >/dev/null 2>&1; then
   echo "Current fault status:"

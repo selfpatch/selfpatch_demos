@@ -1,0 +1,5 @@
+{
+  "name": "Restore Normal",
+  "description": "Remove all injected obstacles from Gazebo and MoveIt planning scene, clear faults",
+  "format": "bash"
+}

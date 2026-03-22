@@ -1,0 +1,5 @@
+{
+  "name": "Inject Planning Failure",
+  "description": "Add collision wall blocking the pick-place path (Gazebo + MoveIt planning scene)",
+  "format": "bash"
+}

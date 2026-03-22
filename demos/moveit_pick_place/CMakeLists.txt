@@ -22,9 +22,6 @@ install(DIRECTORY worlds/
 install(PROGRAMS
   scripts/manipulation_monitor.py
   scripts/pick_place_loop.py
-  scripts/inject-collision.sh
-  scripts/inject-planning-failure.sh
-  scripts/restore-normal.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 

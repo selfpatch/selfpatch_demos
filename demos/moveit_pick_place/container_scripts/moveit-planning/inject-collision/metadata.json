@@ -1,0 +1,5 @@
+{
+  "name": "Inject Collision",
+  "description": "Spawn a surprise obstacle in the robot workspace (Gazebo + MoveIt planning scene)",
+  "format": "bash"
+}
