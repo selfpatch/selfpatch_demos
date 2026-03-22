@@ -1,6 +1,6 @@
 #!/bin/bash
 # Check nav2 stack health: verify key apps are responding via gateway
-set -e
+set -eu
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"

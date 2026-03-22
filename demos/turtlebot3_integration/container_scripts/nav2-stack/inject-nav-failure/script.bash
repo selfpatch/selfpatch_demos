@@ -1,6 +1,6 @@
 #!/bin/bash
 # Inject navigation failure: send goal to unreachable location far outside map bounds
-set -e
+set -eu
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
@@ -24,7 +24,7 @@ echo "${RESPONSE}" | jq '.' 2>/dev/null || echo "${RESPONSE}"
 
 EXEC_ID=$(echo "${RESPONSE}" | jq -r '.execution_id // .id // empty' 2>/dev/null)
 
-if [ -n "${EXEC_ID}" ] && [ "${EXEC_ID}" != "null" ]; then
+if [ -n "${EXEC_ID}" ] && [ "${EXEC_ID}" != "null" ] && [[ "${EXEC_ID}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
     echo ""
     echo "Waiting for navigation to fail (checking status)..."
     for _ in $(seq 1 10); do

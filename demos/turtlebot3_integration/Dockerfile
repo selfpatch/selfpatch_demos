@@ -69,7 +69,7 @@ COPY config/ ${COLCON_WS}/src/turtlebot3_medkit_demo/config/
 COPY launch/ ${COLCON_WS}/src/turtlebot3_medkit_demo/launch/
 COPY scripts/ ${COLCON_WS}/src/turtlebot3_medkit_demo/scripts/
 
-# Copy scripts into auto-discovery layout for Scripts API
+# TODO(#49): Move to manifest-defined scripts once ros2_medkit#303 lands
 COPY container_scripts/ /var/lib/ros2_medkit/scripts/
 RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
 

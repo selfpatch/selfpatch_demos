@@ -48,7 +48,7 @@ COPY src/ ${COLCON_WS}/src/sensor_diagnostics_demo/src/
 COPY config/ ${COLCON_WS}/src/sensor_diagnostics_demo/config/
 COPY launch/ ${COLCON_WS}/src/sensor_diagnostics_demo/launch/
 
-# Copy scripts into auto-discovery layout for Scripts API
+# TODO(#49): Move to manifest-defined scripts once ros2_medkit#303 lands
 COPY container_scripts/ /var/lib/ros2_medkit/scripts/
 RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
 

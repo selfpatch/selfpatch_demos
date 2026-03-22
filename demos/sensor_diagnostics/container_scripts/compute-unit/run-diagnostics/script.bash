@@ -1,6 +1,6 @@
 #!/bin/bash
 # Check health of all 4 sensors by querying their data endpoints and reporting active faults
-set -e
+set -eu
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
@@ -11,8 +11,7 @@ ERRORS=0
 for sensor_path in "${SENSORS[@]}"; do
     app=$(echo "$sensor_path" | cut -d/ -f1)
     echo "Checking $app..."
-    RESPONSE=$(curl -sf "${API_BASE}/apps/${sensor_path}" 2>&1)
-    if [ $? -ne 0 ]; then
+    if ! RESPONSE=$(curl -sf "${API_BASE}/apps/${sensor_path}" 2>/dev/null); then
         echo "  FAIL: No response from $app"
         ERRORS=$((ERRORS + 1))
     else

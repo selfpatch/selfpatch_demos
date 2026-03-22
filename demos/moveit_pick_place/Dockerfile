@@ -63,7 +63,7 @@ COPY launch/ ${COLCON_WS}/src/moveit_medkit_demo/launch/
 COPY scripts/ ${COLCON_WS}/src/moveit_medkit_demo/scripts/
 COPY worlds/ ${COLCON_WS}/src/moveit_medkit_demo/worlds/
 
-# Copy scripts into auto-discovery layout for Scripts API
+# TODO(#49): Move to manifest-defined scripts once ros2_medkit#303 lands
 COPY container_scripts/ /var/lib/ros2_medkit/scripts/
 RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
 

@@ -3,6 +3,11 @@
 # Source this from host-side wrapper scripts:
 #   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 #   source "${SCRIPT_DIR}/../../lib/scripts-api.sh"
+#
+# Environment variables:
+#   GATEWAY_URL    - Gateway base URL (default: http://localhost:8080)
+#   POLL_INTERVAL  - Seconds between status polls (default: 1)
+#   MAX_WAIT       - Max seconds to wait for completion (default: 120)
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
@@ -20,7 +25,7 @@ done
 # Check gateway is reachable
 check_gateway() {
     if ! curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
-        echo "Gateway not available at ${GATEWAY_URL}"
+        echo "Gateway not available at ${GATEWAY_URL}. Is the demo running? Try: ./run-demo.sh"
         exit 1
     fi
 }
@@ -38,11 +43,9 @@ execute_script() {
 
     echo "Executing ${description} via Scripts API..."
     local result
-    result=$(curl -sf -X POST "${API_BASE}/${entity_type}/${entity_id}/scripts/${script_id}/executions" \
+    if ! result=$(curl -sf -X POST "${API_BASE}/${entity_type}/${entity_id}/scripts/${script_id}/executions" \
         -H "Content-Type: application/json" \
-        -d '{"execution_type": "now"}' 2>&1)
-
-    if [ $? -ne 0 ]; then
+        -d '{"execution_type": "now"}' 2>/dev/null); then
         echo "Failed to start script execution."
         echo "Check that the script '${script_id}' exists:"
         echo "  curl ${API_BASE}/${entity_type}/${entity_id}/scripts | jq"
@@ -60,30 +63,52 @@ execute_script() {
     echo "Execution started: $exec_id"
 
     # Poll until done
-    local elapsed=0
-    while [ $elapsed -lt $MAX_WAIT ]; do
+    local start=$SECONDS
+    while [ $((SECONDS - start)) -lt "$MAX_WAIT" ]; do
         local exec_data
-        exec_data=$(curl -sf "${API_BASE}/${entity_type}/${entity_id}/scripts/${script_id}/executions/${exec_id}")
+        exec_data=$(curl -sf "${API_BASE}/${entity_type}/${entity_id}/scripts/${script_id}/executions/${exec_id}" 2>/dev/null) || exec_data=""
+
+        if [ -z "$exec_data" ]; then
+            # Transient failure - keep polling
+            printf "." >&2
+            sleep "$POLL_INTERVAL"
+            continue
+        fi
+
         local status
         status=$(echo "$exec_data" | jq -r '.status')
 
         case "$status" in
             completed)
+                echo ""
+                # Show script output if available
+                local stdout
+                stdout=$(echo "$exec_data" | jq -r '.parameters.stdout // empty' 2>/dev/null)
+                if [ -n "$stdout" ]; then
+                    echo "$stdout"
+                fi
                 echo "Done."
                 return 0
                 ;;
             failed|terminated)
+                echo ""
                 echo "Script ${status}!"
                 echo "$exec_data" | jq -r '.error // empty' 2>/dev/null
+                local err_stdout
+                err_stdout=$(echo "$exec_data" | jq -r '.parameters.stdout // empty' 2>/dev/null)
+                if [ -n "$err_stdout" ]; then
+                    echo "$err_stdout"
+                fi
                 return 1
                 ;;
             *)
+                printf "." >&2
                 sleep "$POLL_INTERVAL"
-                elapsed=$((elapsed + POLL_INTERVAL))
                 ;;
         esac
     done
 
+    echo ""
     echo "Timeout waiting for script execution (${MAX_WAIT}s)"
     return 1
 }
