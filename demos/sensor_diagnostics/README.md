@@ -184,6 +184,57 @@ GATEWAY_URL=http://192.168.1.10:8080 ./inject-nan.sh
 | `inject-noise` | Inject high noise on LiDAR and Camera |
 | `restore-normal` | Reset all sensors and clear faults |
 
+## Triggers (Condition-Based Alerts)
+
+The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts whenever a new fault is reported.
+
+### Setup
+
+```bash
+# Terminal 1: Start the demo
+./run-demo.sh
+
+# Terminal 2: Create fault trigger and watch for events
+./setup-triggers.sh       # Creates OnChange trigger on compute-unit faults
+./watch-triggers.sh       # Connects to SSE stream (Ctrl+C to stop)
+
+# Terminal 3: Inject a fault - trigger fires!
+./inject-nan.sh
+```
+
+### How It Works
+
+1. `setup-triggers.sh` creates a trigger via `POST /api/v1/components/compute-unit/triggers`:
+   - **Resource:** `/api/v1/components/compute-unit/faults` (watches fault collection)
+   - **Condition:** `OnChange` (fires on any new or updated fault)
+   - **Multishot:** `true` (fires repeatedly, not just once)
+   - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
+2. `watch-triggers.sh` connects to the SSE event stream at the trigger's `event_source` URL
+3. When a fault is injected and detected by the gateway, the trigger fires and an SSE event is delivered
+
+### Manual API Usage
+
+```bash
+# Create a trigger
+curl -X POST http://localhost:8080/api/v1/components/compute-unit/triggers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resource": "/api/v1/components/compute-unit/faults",
+    "trigger_condition": {"condition_type": "OnChange"},
+    "multishot": true,
+    "lifetime": 3600
+  }' | jq
+
+# List triggers
+curl http://localhost:8080/api/v1/components/compute-unit/triggers | jq
+
+# Watch events (replace TRIGGER_ID)
+curl -N http://localhost:8080/api/v1/components/compute-unit/triggers/TRIGGER_ID/events
+
+# Delete a trigger
+curl -X DELETE http://localhost:8080/api/v1/components/compute-unit/triggers/TRIGGER_ID
+```
+
 ## API Examples
 
 ### Read Sensor Data

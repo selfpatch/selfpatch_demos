@@ -284,6 +284,57 @@ GATEWAY_URL=http://192.168.1.10:8080 ./inject-collision.sh
 
 The host-side wrapper scripts (`./inject-collision.sh`, etc.) call the Scripts API automatically - no `docker exec` needed. Prerequisites: `curl` and `jq` must be installed on the host.
 
+## Triggers (Condition-Based Alerts)
+
+The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on planning failure faults on the moveit-planning component.
+
+### Setup
+
+```bash
+# Terminal 1: Start the demo
+./run-demo.sh
+
+# Terminal 2: Create fault trigger and watch for events
+./setup-triggers.sh       # Creates OnChange trigger on moveit-planning faults
+./watch-triggers.sh       # Connects to SSE stream (Ctrl+C to stop)
+
+# Terminal 3: Inject a fault - trigger fires!
+./inject-planning-failure.sh
+```
+
+### How It Works
+
+1. `setup-triggers.sh` creates a trigger via `POST /api/v1/components/moveit-planning/triggers`:
+   - **Resource:** `/api/v1/components/moveit-planning/faults` (watches fault collection)
+   - **Condition:** `OnChange` (fires on any new or updated fault)
+   - **Multishot:** `true` (fires repeatedly, not just once)
+   - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
+2. `watch-triggers.sh` connects to the SSE event stream at the trigger's `event_source` URL
+3. When a fault is injected and detected by the gateway, the trigger fires and an SSE event is delivered
+
+### Manual API Usage
+
+```bash
+# Create a trigger
+curl -X POST http://localhost:8080/api/v1/components/moveit-planning/triggers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resource": "/api/v1/components/moveit-planning/faults",
+    "trigger_condition": {"condition_type": "OnChange"},
+    "multishot": true,
+    "lifetime": 3600
+  }' | jq
+
+# List triggers
+curl http://localhost:8080/api/v1/components/moveit-planning/triggers | jq
+
+# Watch events (replace TRIGGER_ID)
+curl -N http://localhost:8080/api/v1/components/moveit-planning/triggers/TRIGGER_ID/events
+
+# Delete a trigger
+curl -X DELETE http://localhost:8080/api/v1/components/moveit-planning/triggers/TRIGGER_ID
+```
+
 ## Fault Injection Scenarios
 
 The fault injection scripts run inside the container via the Scripts API. The host-side `./inject-*.sh` and `./restore-normal.sh` wrappers call the gateway REST endpoint - no `docker exec` required.
