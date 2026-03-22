@@ -1,13 +1,13 @@
 #!/bin/bash
 # Create fault-monitoring trigger for moveit pick-and-place demo
-# Alerts on planning failure faults on the moveit-planning component
+# Alerts on planning failure faults reported by the manipulation monitor
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../lib/triggers-api.sh"
 
-ENTITY_TYPE="components"
-ENTITY_ID="moveit-planning"
+ENTITY_TYPE="apps"
+ENTITY_ID="manipulation_monitor"
 
 # Check for existing active trigger
 existing=$(find_active_trigger "$ENTITY_TYPE" "$ENTITY_ID")

@@ -1,13 +1,13 @@
 #!/bin/bash
 # Create fault-monitoring trigger for sensor diagnostics demo
-# Alerts on any new fault reported on the compute-unit component
+# Alerts on any new fault reported via the diagnostic bridge
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../lib/triggers-api.sh"
 
-ENTITY_TYPE="components"
-ENTITY_ID="compute-unit"
+ENTITY_TYPE="apps"
+ENTITY_ID="diagnostic_bridge"
 
 # Check for existing active trigger
 existing=$(find_active_trigger "$ENTITY_TYPE" "$ENTITY_ID")

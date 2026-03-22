@@ -6,8 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../lib/triggers-api.sh"
 
-ENTITY_TYPE="components"
-ENTITY_ID="compute-unit"
+ENTITY_TYPE="apps"
+ENTITY_ID="diagnostic_bridge"
 
 trigger_id="${1:-}"
 
