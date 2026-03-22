@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y \
     ros-jazzy-rosbag2-storage-mcap \
     ros-jazzy-foxglove-bridge \
     libsystemd-dev \
-    sqlite3 libsqlite3-dev git curl \
+    sqlite3 libsqlite3-dev git curl jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Create persistent directories for fault storage and rosbag recordings
@@ -63,6 +63,10 @@ COPY launch/ ${COLCON_WS}/src/moveit_medkit_demo/launch/
 COPY scripts/ ${COLCON_WS}/src/moveit_medkit_demo/scripts/
 COPY worlds/ ${COLCON_WS}/src/moveit_medkit_demo/worlds/
 
+# Copy scripts into auto-discovery layout for Scripts API
+COPY container_scripts/ /var/lib/ros2_medkit/scripts/
+RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
+
 # Build ros2_medkit and demo package
 # Note: rosdep install uses || true because ros2_medkit packages are not in
 # rosdep indices (they're built from source). All system deps are already
@@ -77,14 +81,6 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
     echo "source ${COLCON_WS}/install/setup.bash" >> ~/.bashrc
-
-# Make inject/restore scripts available at a well-known path
-ENV DEMO_SCRIPTS=${COLCON_WS}/scripts
-RUN mkdir -p ${DEMO_SCRIPTS} && \
-    ln -sf ${COLCON_WS}/install/moveit_medkit_demo/lib/moveit_medkit_demo/inject-collision.sh ${DEMO_SCRIPTS}/inject-collision.sh && \
-    ln -sf ${COLCON_WS}/install/moveit_medkit_demo/lib/moveit_medkit_demo/inject-planning-failure.sh ${DEMO_SCRIPTS}/inject-planning-failure.sh && \
-    ln -sf ${COLCON_WS}/install/moveit_medkit_demo/lib/moveit_medkit_demo/restore-normal.sh ${DEMO_SCRIPTS}/restore-normal.sh
-ENV PATH="${DEMO_SCRIPTS}:${PATH}"
 
 EXPOSE 8080 8765
 

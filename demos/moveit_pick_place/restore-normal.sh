@@ -1,11 +1,7 @@
 #!/bin/bash
-# Restore Normal Operation - Remove all injected faults
+# Restore normal operation via Scripts API
 set -eu
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/../../lib/scripts-api.sh"
 
-CONTAINER="${CONTAINER_NAME:-$(docker ps --format '{{.Names}}' | grep -E '^moveit_medkit_demo(_nvidia)?(_local)?$' | head -n1)}"
-if [ -z "${CONTAINER}" ]; then
-    echo "❌ Demo container not running. Start it first: ./run-demo.sh"
-    exit 1
-fi
-
-exec docker exec -it "${CONTAINER}" restore-normal.sh
+execute_script "components" "moveit-planning" "restore-normal" "Restore normal operation"

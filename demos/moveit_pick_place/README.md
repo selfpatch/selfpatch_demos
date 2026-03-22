@@ -23,6 +23,7 @@ This demo demonstrates:
 ## Prerequisites
 
 - Docker and docker-compose
+- `curl` and `jq` installed on the host (required for host-side scripts)
 - X11 display server (for Gazebo GUI) or `--headless` mode
 - (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) — recommended for smooth Gazebo rendering
 - ~7 GB disk space for Docker image
@@ -242,19 +243,43 @@ curl -X PUT http://localhost:8080/api/v1/apps/panda-arm-controller/configuration
   -d '{"data": {"value": 0.5}}'
 ```
 
-## Fault Injection Scenarios
+## Scripts API
 
-The fault injection scripts are **baked into the Docker image** under `$DEMO_SCRIPTS/` (on `PATH`). The host-side `./inject-*.sh` and `./restore-normal.sh` wrappers auto-detect the running container and delegate via `docker exec`.
+The gateway exposes a Scripts API for the `moveit-planning` component. All fault injection and diagnostic scripts are available via REST without `docker exec`.
 
-You can also run them directly inside the container:
+### Available Scripts
+
+| Script ID | Name | Description |
+|-----------|------|-------------|
+| `inject-collision` | Inject Collision | Spawn a surprise obstacle in the robot workspace (Gazebo + MoveIt planning scene) |
+| `inject-planning-failure` | Inject Planning Failure | Add collision wall blocking the pick-place path (Gazebo + MoveIt planning scene) |
+| `restore-normal` | Restore Normal | Remove all injected obstacles and clear faults |
+| `arm-self-test` | Arm Self-Test | Check joint states via REST API, verify values are reasonable |
+| `planning-benchmark` | Planning Benchmark | Verify MoveIt planning is functional by checking key nodes and operations |
+
+### List Available Scripts
 
 ```bash
-docker exec -it moveit_medkit_demo inject-collision.sh
-docker exec -it moveit_medkit_demo inject-planning-failure.sh
-docker exec -it moveit_medkit_demo restore-normal.sh
+curl http://localhost:8080/api/v1/components/moveit-planning/scripts | jq
 ```
 
-> **Future:** When SOVD Scripts endpoints are available, these will be callable via `curl` against the gateway REST API.
+### Execute a Script via REST
+
+```bash
+# Start execution
+curl -X POST http://localhost:8080/api/v1/components/moveit-planning/scripts/inject-collision/executions \
+  -H "Content-Type: application/json" \
+  -d '{"execution_type": "now"}' | jq
+
+# Poll status (use execution ID from above response)
+curl http://localhost:8080/api/v1/components/moveit-planning/scripts/inject-collision/executions/<id> | jq
+```
+
+The host-side wrapper scripts (`./inject-collision.sh`, etc.) call the Scripts API automatically - no `docker exec` needed. Prerequisites: `curl` and `jq` must be installed on the host.
+
+## Fault Injection Scenarios
+
+The fault injection scripts run inside the container via the Scripts API. The host-side `./inject-*.sh` and `./restore-normal.sh` wrappers call the gateway REST endpoint - no `docker exec` required.
 
 ### 1. Planning Failure
 
@@ -319,17 +344,30 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 | `move-arm.sh` | **Interactive arm controller** — move to preset positions |
 | `check-entities.sh` | Explore the full SOVD entity hierarchy with sample data |
 | `check-faults.sh` | View active faults with severity summary |
-| `inject-planning-failure.sh` | Thin wrapper → `docker exec` the in-container script |
-| `inject-collision.sh` | Thin wrapper → `docker exec` the in-container script |
-| `restore-normal.sh` | Thin wrapper → `docker exec` the in-container script |
+| `inject-planning-failure.sh` | Scripts API wrapper — inject planning failure |
+| `inject-collision.sh` | Scripts API wrapper — inject collision obstacle |
+| `restore-normal.sh` | Scripts API wrapper — restore normal operation |
+| `arm-self-test.sh` | Scripts API wrapper — run arm self-test |
+| `planning-benchmark.sh` | Scripts API wrapper — run planning benchmark |
 
-### In-container (baked into Docker image, on `PATH`)
+Scripts API wrappers require `curl` and `jq` on the host and call the gateway REST endpoint directly - no `docker exec` needed.
+
+### In-container scripts (auto-discovery via Scripts API)
+
+Container scripts are stored under `/var/lib/ros2_medkit/scripts/moveit-planning/` and exposed via the gateway Scripts API.
+
+| Script ID | Description |
+|-----------|-------------|
+| `inject-collision` | Spawn visible sphere + MoveIt collision object |
+| `inject-planning-failure` | Spawn visible wall + MoveIt collision object |
+| `restore-normal` | Remove Gazebo models + MoveIt objects, clear faults |
+| `arm-self-test` | Check joint states via REST API |
+| `planning-benchmark` | Verify MoveIt planning is functional |
+
+### ROS 2 runtime scripts (baked into colcon install)
 
 | Script | Description |
 |--------|-------------|
-| `inject-planning-failure.sh` | Spawn visible wall + MoveIt collision object |
-| `inject-collision.sh` | Spawn visible sphere + MoveIt collision object |
-| `restore-normal.sh` | Remove Gazebo models + MoveIt objects, clear faults |
 | `manipulation_monitor.py` | ROS 2 node: monitors topics and reports faults |
 | `pick_place_loop.py` | ROS 2 node: continuous pick-and-place cycle |
 
