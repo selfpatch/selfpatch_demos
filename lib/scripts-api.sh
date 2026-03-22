@@ -59,6 +59,10 @@ execute_script() {
         echo "$result" | jq '.' 2>/dev/null || echo "$result"
         exit 1
     fi
+    if [[ ! "$exec_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "Unexpected execution ID format: $exec_id"
+        exit 1
+    fi
 
     echo "Execution started: $exec_id"
 

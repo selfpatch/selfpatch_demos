@@ -20,7 +20,7 @@ fi
 
 echo ""
 echo "Resetting AMCL global localization..."
-curl -s -X POST "${API_BASE}/apps/amcl/operations/reinitialize_global_localization/executions" \
+curl -sf -X POST "${API_BASE}/apps/amcl/operations/reinitialize_global_localization/executions" \
     -H "Content-Type: application/json" \
     -d '{}'
 

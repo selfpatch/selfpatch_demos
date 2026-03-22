@@ -6,7 +6,7 @@ GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
 
 echo "Reinitializing AMCL global localization (scatters particles)..."
-curl -s -X POST "${API_BASE}/apps/amcl/operations/reinitialize_global_localization/executions" \
+curl -sf -X POST "${API_BASE}/apps/amcl/operations/reinitialize_global_localization/executions" \
     -H "Content-Type: application/json" \
     -d '{}'
 
@@ -15,7 +15,7 @@ echo "Waiting for particles to scatter..."
 sleep 2
 
 echo "Sending navigation goal with high localization uncertainty..."
-curl -s -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions" \
+curl -sf -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions" \
     -H "Content-Type: application/json" \
     -d '{
     "goal": {
