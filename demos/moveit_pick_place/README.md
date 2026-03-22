@@ -240,7 +240,7 @@ curl http://localhost:8080/api/v1/apps/panda-arm-controller/configurations/gains
 # Set a parameter value
 curl -X PUT http://localhost:8080/api/v1/apps/panda-arm-controller/configurations/constraints.goal_time \
   -H 'Content-Type: application/json' \
-  -d '{"data": {"value": 0.5}}'
+  -d '{"value": 0.5}'
 ```
 
 ## Scripts API
@@ -272,7 +272,14 @@ curl -X POST http://localhost:8080/api/v1/components/moveit-planning/scripts/inj
   -d '{"execution_type": "now"}' | jq
 
 # Poll status (use execution ID from above response)
-curl http://localhost:8080/api/v1/components/moveit-planning/scripts/inject-collision/executions/<id> | jq
+curl http://localhost:8080/api/v1/components/moveit-planning/scripts/inject-collision/executions/<exec_id> | jq
+```
+
+### Override Gateway URL
+
+```bash
+# Point scripts at a non-default gateway
+GATEWAY_URL=http://192.168.1.10:8080 ./inject-collision.sh
 ```
 
 The host-side wrapper scripts (`./inject-collision.sh`, etc.) call the Scripts API automatically - no `docker exec` needed. Prerequisites: `curl` and `jq` must be installed on the host.
