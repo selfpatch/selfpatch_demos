@@ -119,7 +119,7 @@ watch_trigger_events() {
     echo "---"
 
     # Stream SSE events, filter out keepalives, pretty-print JSON data lines
-    curl -sf -N "${url}" 2>/dev/null | while IFS= read -r line; do
+    curl -sf -N --connect-timeout 10 "${url}" 2>/dev/null | while IFS= read -r line; do
         # Skip empty lines and keepalive comments
         if [ -z "$line" ] || [[ "$line" == ":"* ]]; then
             continue
@@ -141,6 +141,10 @@ watch_trigger_events() {
             fi
         fi
     done
+
+    echo ""
+    echo "SSE stream closed. The trigger may have expired or the gateway restarted."
+    echo "Re-run ./setup-triggers.sh and ./watch-triggers.sh to reconnect."
 }
 
 # Find the first active trigger for an entity
