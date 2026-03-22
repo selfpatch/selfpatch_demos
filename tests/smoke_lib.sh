@@ -123,6 +123,21 @@ wait_for_runtime_linking() {
     exit 1
 }
 
+# Helper: assert endpoint returns 200 with non-empty .items array
+# Usage: assert_non_empty_items "/apps/lidar-sim/data"
+assert_non_empty_items() {
+    local endpoint="$1"
+    if api_get "$endpoint"; then
+        if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
+            pass "GET ${endpoint} returns non-empty items"
+        else
+            fail "GET ${endpoint} returns non-empty items" "items is empty"
+        fi
+    else
+        fail "GET ${endpoint} returns 200" "unexpected status code"
+    fi
+}
+
 # Test entity discovery for a given entity type
 # Usage: test_entity_discovery "areas" "sensors processing diagnostics"
 test_entity_discovery() {

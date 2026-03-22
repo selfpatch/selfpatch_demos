@@ -39,15 +39,7 @@ test_entity_discovery "apps" turtlebot3-node robot-state-publisher amcl bt-navig
 
 section "Logs"
 
-if api_get "/apps/medkit-gateway/logs"; then
-    if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
-        pass "GET /apps/medkit-gateway/logs returns non-empty items"
-    else
-        fail "GET /apps/medkit-gateway/logs returns non-empty items" "items is empty"
-    fi
-else
-    fail "GET /apps/medkit-gateway/logs returns 200" "unexpected status code"
-fi
+assert_non_empty_items "/apps/medkit-gateway/logs"
 
 # --- Summary ---
 
