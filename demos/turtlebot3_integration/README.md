@@ -25,6 +25,7 @@ This demo demonstrates:
 - Docker and docker-compose
 - X11 display server (Linux with GUI, or XQuartz on macOS)
 - (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+- `curl` and `jq` (required for host-side scripts)
 
 ## Quick Start
 
@@ -379,7 +380,14 @@ curl -X POST http://localhost:8080/api/v1/components/nav2-stack/scripts/inject-n
 ### Check Execution Status
 
 ```bash
-curl http://localhost:8080/api/v1/components/nav2-stack/scripts/inject-nav-failure/executions/{exec_id} | jq
+curl http://localhost:8080/api/v1/components/nav2-stack/scripts/inject-nav-failure/executions/<exec_id> | jq
+```
+
+### Override Gateway URL
+
+```bash
+# Point scripts at a non-default gateway
+GATEWAY_URL=http://192.168.1.10:8080 ./inject-nav-failure.sh
 ```
 
 ### Available Scripts
@@ -508,6 +516,13 @@ demos/turtlebot3_integration/
 │   ├── turtlebot3_manifest.yaml     # SOVD manifest (entity hierarchy)
 │   ├── nav2_params.yaml             # Nav2 navigation parameters
 │   └── turtlebot3_world.yaml        # Map configuration
+├── container_scripts/
+│   └── nav2-stack/              # Scripts API auto-discovery layout
+│       ├── nav-health-check/
+│       ├── reset-navigation/
+│       ├── inject-nav-failure/
+│       ├── inject-localization-failure/
+│       └── restore-normal/
 ├── launch/
 │   └── demo.launch.py          # ROS 2 launch file
 └── scripts/

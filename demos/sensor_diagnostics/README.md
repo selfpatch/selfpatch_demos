@@ -162,7 +162,14 @@ curl -X POST http://localhost:8080/api/v1/components/compute-unit/scripts/inject
 ### Check Execution Status
 
 ```bash
-curl http://localhost:8080/api/v1/components/compute-unit/scripts/inject-nan/executions/{exec_id} | jq
+curl http://localhost:8080/api/v1/components/compute-unit/scripts/inject-nan/executions/<exec_id> | jq
+```
+
+### Override Gateway URL
+
+```bash
+# Point scripts at a non-default gateway
+GATEWAY_URL=http://192.168.1.10:8080 ./inject-nan.sh
 ```
 
 ### Available Scripts
@@ -253,7 +260,7 @@ curl http://localhost:8080/api/v1/faults | jq
 | `inject-drift.sh` | Enable sensor drift |
 | `restore-normal.sh` | Clear all faults |
 
-> **Note:** The inject and restore scripts (`inject-*.sh`, `restore-normal.sh`) are also available via the [Scripts API](#scripts-api) - callable as REST endpoints without requiring the host-side scripts.
+> **Note:** All diagnostic scripts (`inject-*.sh`, `restore-normal.sh`, `run-diagnostics.sh`, `inject-fault-scenario.sh`) are also available via the [Scripts API](#scripts-api) - callable as REST endpoints without requiring the host-side scripts.
 
 ## Sensor Parameters
 
