@@ -206,8 +206,8 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ### How It Works
 
-1. `setup-triggers.sh` creates a trigger via `POST /api/v1/components/compute-unit/triggers`:
-   - **Resource:** `/api/v1/components/compute-unit/faults` (watches fault collection)
+1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/diagnostic_bridge/triggers`:
+   - **Resource:** `/api/v1/apps/diagnostic_bridge/faults` (watches fault collection)
    - **Condition:** `OnChange` (fires on any new or updated fault)
    - **Multishot:** `true` (fires repeatedly, not just once)
    - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
@@ -218,23 +218,23 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ```bash
 # Create a trigger
-curl -X POST http://localhost:8080/api/v1/components/compute-unit/triggers \
+curl -X POST http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers \
   -H "Content-Type: application/json" \
   -d '{
-    "resource": "/api/v1/components/compute-unit/faults",
+    "resource": "/api/v1/apps/diagnostic_bridge/faults",
     "trigger_condition": {"condition_type": "OnChange"},
     "multishot": true,
     "lifetime": 3600
   }' | jq
 
 # List triggers
-curl http://localhost:8080/api/v1/components/compute-unit/triggers | jq
+curl http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers | jq
 
 # Watch events (replace TRIGGER_ID)
-curl -N http://localhost:8080/api/v1/components/compute-unit/triggers/TRIGGER_ID/events
+curl -N http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers/TRIGGER_ID/events
 
 # Delete a trigger
-curl -X DELETE http://localhost:8080/api/v1/components/compute-unit/triggers/TRIGGER_ID
+curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers/TRIGGER_ID
 ```
 
 ## API Examples

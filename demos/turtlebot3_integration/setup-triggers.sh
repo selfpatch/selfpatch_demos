@@ -1,13 +1,13 @@
 #!/bin/bash
 # Create fault-monitoring trigger for turtlebot3 integration demo
-# Alerts on navigation failure faults on the nav2-stack component
+# Alerts on navigation failure faults reported by the anomaly detector
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../lib/triggers-api.sh"
 
-ENTITY_TYPE="components"
-ENTITY_ID="nav2-stack"
+ENTITY_TYPE="apps"
+ENTITY_ID="anomaly_detector"
 
 # Check for existing active trigger
 existing=$(find_active_trigger "$ENTITY_TYPE" "$ENTITY_ID")

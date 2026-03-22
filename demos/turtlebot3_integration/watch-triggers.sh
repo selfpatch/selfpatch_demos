@@ -6,8 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../lib/triggers-api.sh"
 
-ENTITY_TYPE="components"
-ENTITY_ID="nav2-stack"
+ENTITY_TYPE="apps"
+ENTITY_ID="anomaly_detector"
 
 trigger_id="${1:-}"
 
