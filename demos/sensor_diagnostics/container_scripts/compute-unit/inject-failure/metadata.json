@@ -1,0 +1,5 @@
+{
+  "name": "Inject Failure",
+  "description": "Inject sensor failure: set failure_probability=1.0 on imu-sim",
+  "format": "bash"
+}

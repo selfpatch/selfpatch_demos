@@ -1,0 +1,5 @@
+{
+  "name": "Inject Noise",
+  "description": "Inject high noise: noise_stddev=0.5 on lidar-sim and noise_level=0.3 on camera-sim",
+  "format": "bash"
+}

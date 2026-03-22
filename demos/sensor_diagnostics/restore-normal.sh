@@ -1,69 +1,7 @@
 #!/bin/bash
-# Restore normal sensor operation (clear all faults)
+# Restore normal operation
+set -eu
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/../../lib/scripts-api.sh"
 
-GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
-API_BASE="${GATEWAY_URL}/api/v1"
-
-echo "Restoring NORMAL operation..."
-
-# LiDAR
-echo "Resetting LiDAR parameters..."
-curl -s -X PUT "${API_BASE}/apps/lidar-sim/configurations/noise_stddev" \
-  -H "Content-Type: application/json" -d '{"value": 0.01}'
-curl -s -X PUT "${API_BASE}/apps/lidar-sim/configurations/failure_probability" \
-  -H "Content-Type: application/json" -d '{"value": 0.0}'
-curl -s -X PUT "${API_BASE}/apps/lidar-sim/configurations/inject_nan" \
-  -H "Content-Type: application/json" -d '{"value": false}'
-curl -s -X PUT "${API_BASE}/apps/lidar-sim/configurations/drift_rate" \
-  -H "Content-Type: application/json" -d '{"value": 0.0}'
-
-# IMU
-echo "Resetting IMU parameters..."
-curl -s -X PUT "${API_BASE}/apps/imu-sim/configurations/accel_noise_stddev" \
-  -H "Content-Type: application/json" -d '{"value": 0.01}'
-curl -s -X PUT "${API_BASE}/apps/imu-sim/configurations/failure_probability" \
-  -H "Content-Type: application/json" -d '{"value": 0.0}'
-curl -s -X PUT "${API_BASE}/apps/imu-sim/configurations/inject_nan" \
-  -H "Content-Type: application/json" -d '{"value": false}'
-curl -s -X PUT "${API_BASE}/apps/imu-sim/configurations/drift_rate" \
-  -H "Content-Type: application/json" -d '{"value": 0.0}'
-
-# GPS
-echo "Resetting GPS parameters..."
-curl -s -X PUT "${API_BASE}/apps/gps-sim/configurations/position_noise_stddev" \
-  -H "Content-Type: application/json" -d '{"value": 2.0}'
-curl -s -X PUT "${API_BASE}/apps/gps-sim/configurations/failure_probability" \
-  -H "Content-Type: application/json" -d '{"value": 0.0}'
-curl -s -X PUT "${API_BASE}/apps/gps-sim/configurations/inject_nan" \
-  -H "Content-Type: application/json" -d '{"value": false}'
-curl -s -X PUT "${API_BASE}/apps/gps-sim/configurations/drift_rate" \
-  -H "Content-Type: application/json" -d '{"value": 0.0}'
-
-# Camera
-echo "Resetting Camera parameters..."
-curl -s -X PUT "${API_BASE}/apps/camera-sim/configurations/noise_level" \
-  -H "Content-Type: application/json" -d '{"value": 0.0}'
-curl -s -X PUT "${API_BASE}/apps/camera-sim/configurations/failure_probability" \
-  -H "Content-Type: application/json" -d '{"value": 0.0}'
-curl -s -X PUT "${API_BASE}/apps/camera-sim/configurations/inject_black_frames" \
-  -H "Content-Type: application/json" -d '{"value": false}'
-
-# Clear all faults from FaultManager
-# All sensors now publish to /diagnostics, so all faults come through diagnostic-bridge
-echo ""
-echo "Clearing all faults from FaultManager..."
-curl -s -X DELETE "${API_BASE}/apps/diagnostic-bridge/faults/LIDAR_SIM" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/diagnostic-bridge/faults/CAMERA_SIM" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/diagnostic-bridge/faults/IMU_SIM" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/diagnostic-bridge/faults/GPS_SIM" > /dev/null 2>&1
-
-# Faults from anomaly-detector (modern path for anomaly detection)
-curl -s -X DELETE "${API_BASE}/apps/anomaly-detector/faults/SENSOR_TIMEOUT" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/anomaly-detector/faults/SENSOR_NAN" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/anomaly-detector/faults/SENSOR_OUT_OF_RANGE" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/anomaly-detector/faults/RATE_DEGRADED" > /dev/null 2>&1
-curl -s -X DELETE "${API_BASE}/apps/anomaly-detector/faults/NO_FIX" > /dev/null 2>&1
-
-echo ""
-echo "✓ Normal operation restored! All fault injections and faults cleared."
-echo "  Verify with: curl ${API_BASE}/faults | jq"
+execute_script "components" "compute-unit" "restore-normal" "Restore normal operation"

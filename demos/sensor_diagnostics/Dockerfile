@@ -48,6 +48,10 @@ COPY src/ ${COLCON_WS}/src/sensor_diagnostics_demo/src/
 COPY config/ ${COLCON_WS}/src/sensor_diagnostics_demo/config/
 COPY launch/ ${COLCON_WS}/src/sensor_diagnostics_demo/launch/
 
+# Copy scripts into auto-discovery layout for Scripts API
+COPY container_scripts/ /var/lib/ros2_medkit/scripts/
+RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
+
 # Build all packages (skip test dependencies that aren't in ros-base)
 WORKDIR ${COLCON_WS}
 RUN bash -c "source /opt/ros/jazzy/setup.bash && \
