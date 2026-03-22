@@ -36,7 +36,7 @@ create_fault_trigger() {
 
     check_gateway
 
-    local resource="${API_BASE}/${entity_type}/${entity_id}/faults"
+    local resource="/api/v1/${entity_type}/${entity_id}/faults"
     local body
     body=$(jq -n \
         --arg resource "$resource" \
