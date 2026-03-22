@@ -51,7 +51,7 @@ fi
 
 section "Logs"
 
-assert_non_empty_items "/apps/anomaly-detector/logs"
+assert_non_empty_items "/apps/medkit-gateway/logs"
 
 section "Fault Injection"
 
