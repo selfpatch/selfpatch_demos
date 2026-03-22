@@ -28,6 +28,7 @@ diagnostics:
       plugins: [""]
 
       # Scripts configuration (filesystem auto-discovery)
+      # TODO(#49): Migrate to manifest-defined scripts once ros2_medkit#303 lands
       scripts:
         scripts_dir: "/var/lib/ros2_medkit/scripts"
         allow_uploads: false
