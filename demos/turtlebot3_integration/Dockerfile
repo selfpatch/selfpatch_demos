@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     git \
     curl \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone ros2_medkit from GitHub (gateway + dependencies + plugins)
@@ -67,6 +68,10 @@ COPY package.xml CMakeLists.txt ${COLCON_WS}/src/turtlebot3_medkit_demo/
 COPY config/ ${COLCON_WS}/src/turtlebot3_medkit_demo/config/
 COPY launch/ ${COLCON_WS}/src/turtlebot3_medkit_demo/launch/
 COPY scripts/ ${COLCON_WS}/src/turtlebot3_medkit_demo/scripts/
+
+# TODO(#49): Move to manifest-defined scripts once ros2_medkit#303 lands
+COPY container_scripts/ /var/lib/ros2_medkit/scripts/
+RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
 
 # Build ros2_medkit and demo package
 WORKDIR ${COLCON_WS}

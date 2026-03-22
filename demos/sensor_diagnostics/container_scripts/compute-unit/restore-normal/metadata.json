@@ -1,0 +1,5 @@
+{
+  "name": "Restore Normal",
+  "description": "Reset all sensor parameters to defaults and clear all active faults",
+  "format": "bash"
+}

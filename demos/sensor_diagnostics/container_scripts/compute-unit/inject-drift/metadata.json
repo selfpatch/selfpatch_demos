@@ -1,0 +1,5 @@
+{
+  "name": "Inject Drift",
+  "description": "Inject sensor drift: set drift_rate=0.1 on lidar-sim",
+  "format": "bash"
+}

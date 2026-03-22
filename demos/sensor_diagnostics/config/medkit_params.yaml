@@ -27,6 +27,14 @@ diagnostics:
       # Plugin configuration (set by launch file when .so paths are resolved)
       plugins: [""]
 
+      # Scripts configuration (filesystem auto-discovery)
+      # TODO(#49): Migrate to manifest-defined scripts once ros2_medkit#303 lands
+      scripts:
+        scripts_dir: "/var/lib/ros2_medkit/scripts"
+        allow_uploads: false
+        max_concurrent_executions: 3
+        default_timeout_sec: 60
+
 # Fault Manager configuration (runs in root namespace)
 fault_manager:
   ros__parameters:

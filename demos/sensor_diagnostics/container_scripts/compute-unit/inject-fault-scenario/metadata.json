@@ -1,0 +1,5 @@
+{
+  "name": "Inject Fault Scenario",
+  "description": "Inject composite fault scenario: NaN values on lidar, IMU, GPS and black frames on camera simultaneously",
+  "format": "bash"
+}

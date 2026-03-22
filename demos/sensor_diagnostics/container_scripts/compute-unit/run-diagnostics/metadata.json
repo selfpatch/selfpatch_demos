@@ -1,0 +1,5 @@
+{
+  "name": "Run Diagnostics",
+  "description": "Check health of all 4 sensors by querying their data endpoints and reporting active faults",
+  "format": "bash"
+}

@@ -25,6 +25,7 @@ This demo demonstrates:
 - Docker and docker-compose
 - X11 display server (Linux with GUI, or XQuartz on macOS)
 - (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+- `curl` and `jq` (required for host-side scripts)
 
 ## Quick Start
 
@@ -356,6 +357,49 @@ This demo uses two fault reporting paths:
 | Nav2 Controller | diagnostic_bridge | Path following errors |
 | TurtleBot3 | diagnostic_bridge | Motor/sensor issues |
 
+## Scripts API
+
+The inject and restore scripts run inside the container and are callable via the gateway REST API. This lets you trigger fault scenarios programmatically or from the web UI.
+
+> **Host prerequisites:** The host-side scripts require `curl` and `jq`.
+
+### List Available Scripts
+
+```bash
+curl http://localhost:8080/api/v1/components/nav2-stack/scripts | jq
+```
+
+### Execute a Script
+
+```bash
+curl -X POST http://localhost:8080/api/v1/components/nav2-stack/scripts/inject-nav-failure/executions \
+  -H "Content-Type: application/json" \
+  -d '{"execution_type":"now"}' | jq
+```
+
+### Check Execution Status
+
+```bash
+curl http://localhost:8080/api/v1/components/nav2-stack/scripts/inject-nav-failure/executions/<exec_id> | jq
+```
+
+### Override Gateway URL
+
+```bash
+# Point scripts at a non-default gateway
+GATEWAY_URL=http://192.168.1.10:8080 ./inject-nav-failure.sh
+```
+
+### Available Scripts
+
+| Script | Description |
+|--------|-------------|
+| `nav-health-check` | Check health of Nav2 stack |
+| `reset-navigation` | Cancel goals and reset AMCL |
+| `inject-localization-failure` | Inject AMCL localization failure |
+| `inject-nav-failure` | Inject navigation failure (unreachable goal) |
+| `restore-normal` | Reset parameters and clear faults |
+
 ## Fault Injection Scenarios
 
 This demo includes scripts to inject various fault conditions for testing fault management.
@@ -472,6 +516,13 @@ demos/turtlebot3_integration/
 │   ├── turtlebot3_manifest.yaml     # SOVD manifest (entity hierarchy)
 │   ├── nav2_params.yaml             # Nav2 navigation parameters
 │   └── turtlebot3_world.yaml        # Map configuration
+├── container_scripts/
+│   └── nav2-stack/              # Scripts API auto-discovery layout
+│       ├── nav-health-check/
+│       ├── reset-navigation/
+│       ├── inject-nav-failure/
+│       ├── inject-localization-failure/
+│       └── restore-normal/
 ├── launch/
 │   └── demo.launch.py          # ROS 2 launch file
 └── scripts/
@@ -487,9 +538,13 @@ demos/turtlebot3_integration/
 | `send-nav-goal.sh [x] [y] [yaw]` | Send navigation goal via SOVD API |
 | `check-entities.sh` | Explore SOVD entity hierarchy |
 | `check-faults.sh` | View active faults from gateway |
+| `nav-health-check.sh` | Check Nav2 stack health |
+| `reset-navigation.sh` | Cancel goals and reset AMCL |
 | `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |
 | `inject-localization-failure.sh` | Inject localization failure (AMCL reset) |
 | `restore-normal.sh` | Restore normal operation and clear faults |
+
+> **Note:** The inject, restore, and diagnostic scripts are also available via the [Scripts API](#scripts-api) - callable as REST endpoints without requiring the host-side scripts.
 
 ## Manual Setup (Alternative)
 

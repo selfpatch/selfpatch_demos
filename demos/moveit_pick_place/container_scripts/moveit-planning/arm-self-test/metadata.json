@@ -1,0 +1,5 @@
+{
+  "name": "Arm Self-Test",
+  "description": "Check joint states via REST API, verify values are reasonable",
+  "format": "bash"
+}

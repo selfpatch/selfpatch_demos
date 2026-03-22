@@ -1,0 +1,5 @@
+{
+  "name": "Inject NaN",
+  "description": "Inject NaN values on lidar-sim, imu-sim, and gps-sim simultaneously",
+  "format": "bash"
+}

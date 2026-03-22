@@ -1,0 +1,5 @@
+{
+  "name": "Reset Navigation",
+  "description": "Cancel active navigation goals and reset AMCL global localization",
+  "format": "bash"
+}

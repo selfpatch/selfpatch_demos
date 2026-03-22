@@ -3,20 +3,20 @@
 # Adds the wall to both Gazebo (visible) and MoveIt planning scene (causes faults)
 # Runs INSIDE the Docker container.
 
-set -e
+set -eu
 
 # shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
 # shellcheck source=/dev/null
 source /root/demo_ws/install/setup.bash
 
-echo "🚫 Injecting PLANNING FAILURE fault..."
+echo "Injecting PLANNING FAILURE fault..."
 echo "   Adding collision wall between pick and place positions"
 echo ""
 
 # 1. Spawn visible wall in Gazebo
 # Robot base (panda_link0) is at z=0.75 in the world frame.
-# Wall at panda_link0 frame (0.3, 0.25, 0.5) → world frame (0.3, 0.25, 1.25)
+# Wall at panda_link0 frame (0.3, 0.25, 0.5) -> world frame (0.3, 0.25, 1.25)
 # Wall dimensions: 2.0 x 0.05 x 1.0 (wide, thin, tall)
 echo "Spawning visible orange wall in Gazebo..."
 cat > /tmp/injected_wall.sdf << 'EOSDF'
@@ -42,9 +42,9 @@ if ros2 run ros_gz_sim create \
     -file /tmp/injected_wall.sdf \
     -name injected_wall \
     -x 0.3 -y 0.25 -z 1.25 2>&1 | tail -1; then
-  echo "  ✓ Gazebo model spawned"
+  echo "  Gazebo model spawned"
 else
-  echo "  ⚠ Gazebo spawn failed (visual only — fault injection still works)"
+  echo "  Gazebo spawn failed (visual only - fault injection still works)"
 fi
 
 # 2. Add to MoveIt planning scene (so planner cannot find a path)
@@ -92,10 +92,10 @@ rclpy.shutdown()
 "
 
 echo ""
-echo "✓ Planning failure injected!"
+echo "Planning failure injected!"
 echo "  An orange wall is now visible in Gazebo and registered in MoveIt planning scene."
 echo ""
-echo "Expected faults (via manipulation_monitor → FaultManager):"
-echo "  - MOTION_PLANNING_FAILED: MoveGroup goal ABORTED — no collision-free path"
+echo "Expected faults (via manipulation_monitor -> FaultManager):"
+echo "  - MOTION_PLANNING_FAILED: MoveGroup goal ABORTED - no collision-free path"
 echo ""
-echo "Restore with: /root/demo_ws/scripts/restore-normal.sh"
+echo "Restore with: ./restore-normal.sh (or via Scripts API)"
