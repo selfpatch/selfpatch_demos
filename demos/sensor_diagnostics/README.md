@@ -15,6 +15,8 @@ This demo showcases ros2_medkit's data monitoring, configuration management, and
 
 ## Quick Start
 
+> **Host prerequisites:** The host-side scripts (`check-demo.sh`, `inject-*.sh`, `restore-normal.sh`) require `curl` and `jq` to be installed on your machine.
+
 ### Using Docker (Recommended)
 
 ```bash
@@ -139,6 +141,42 @@ Sensor Topics → anomaly_detector monitors
 | `inject-failure.sh` | IMU | Modern | Complete sensor timeout |
 | `restore-normal.sh` | All | Both | Clears all faults |
 
+## Scripts API
+
+The inject and restore scripts run inside the container and are also callable directly via the gateway REST API using the Scripts endpoint. This lets you trigger fault scenarios programmatically without needing the shell scripts on the host.
+
+### List Available Scripts
+
+```bash
+curl http://localhost:8080/api/v1/components/compute-unit/scripts | jq
+```
+
+### Execute a Script
+
+```bash
+curl -X POST http://localhost:8080/api/v1/components/compute-unit/scripts/inject-nan/executions \
+  -H "Content-Type: application/json" \
+  -d '{"execution_type":"now"}' | jq
+```
+
+### Check Execution Status
+
+```bash
+curl http://localhost:8080/api/v1/components/compute-unit/scripts/inject-nan/executions/{exec_id} | jq
+```
+
+### Available Scripts
+
+| Script | Description |
+|--------|-------------|
+| `run-diagnostics` | Check health of all sensors |
+| `inject-fault-scenario` | Composite fault injection (all sensors) |
+| `inject-drift` | Inject sensor drift on LiDAR |
+| `inject-failure` | Inject sensor failure on IMU |
+| `inject-nan` | Inject NaN values on LiDAR, IMU, GPS |
+| `inject-noise` | Inject high noise on LiDAR and Camera |
+| `restore-normal` | Reset all sensors and clear faults |
+
 ## API Examples
 
 ### Read Sensor Data
@@ -207,11 +245,15 @@ curl http://localhost:8080/api/v1/faults | jq
 | `run-demo.sh` | Start Docker services (daemon mode) |
 | `stop-demo.sh` | Stop Docker services |
 | `check-demo.sh` | Interactive API demonstration and exploration |
+| `run-diagnostics.sh` | Check health of all sensors |
+| `inject-fault-scenario.sh` | Composite fault injection across all sensors |
 | `inject-noise.sh` | Inject high noise fault |
 | `inject-failure.sh` | Cause sensor timeout |
 | `inject-nan.sh` | Inject NaN values |
 | `inject-drift.sh` | Enable sensor drift |
 | `restore-normal.sh` | Clear all faults |
+
+> **Note:** The inject and restore scripts (`inject-*.sh`, `restore-normal.sh`) are also available via the [Scripts API](#scripts-api) - callable as REST endpoints without requiring the host-side scripts.
 
 ## Sensor Parameters
 
