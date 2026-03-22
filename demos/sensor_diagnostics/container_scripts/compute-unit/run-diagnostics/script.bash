@@ -11,7 +11,7 @@ ERRORS=0
 for sensor_path in "${SENSORS[@]}"; do
     app=$(echo "$sensor_path" | cut -d/ -f1)
     echo "Checking $app..."
-    if ! RESPONSE=$(curl -sf "${API_BASE}/apps/${sensor_path}" 2>/dev/null); then
+    if ! curl -sf "${API_BASE}/apps/${sensor_path}" > /dev/null 2>&1; then
         echo "  FAIL: No response from $app"
         ERRORS=$((ERRORS + 1))
     else
