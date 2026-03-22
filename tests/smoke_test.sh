@@ -64,6 +64,28 @@ else
     fail "GET /apps/lidar-sim/configurations returns 200" "unexpected status code"
 fi
 
+section "Logs"
+
+if api_get "/logs"; then
+    if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
+        pass "GET /logs returns non-empty items"
+    else
+        fail "GET /logs returns non-empty items" "items is empty"
+    fi
+else
+    fail "GET /logs returns 200" "unexpected status code"
+fi
+
+if api_get "/apps/lidar-sim/logs"; then
+    if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
+        pass "GET /apps/lidar-sim/logs returns non-empty items"
+    else
+        fail "GET /apps/lidar-sim/logs returns non-empty items" "items is empty"
+    fi
+else
+    fail "GET /apps/lidar-sim/logs returns 200" "unexpected status code"
+fi
+
 section "Fault Injection"
 
 # Inject noise fault via configuration API
