@@ -24,6 +24,7 @@ Namespace structure:
 """
 
 import os
+import sys
 
 from ament_index_python.packages import get_package_prefix
 from ament_index_python.packages import get_package_share_directory
@@ -59,7 +60,6 @@ def generate_launch_description():
     beacon_mode = os.environ.get('BEACON_MODE', 'none').strip().lower()
     valid_beacon_modes = ('none', 'topic', 'param')
     if beacon_mode not in valid_beacon_modes:
-        import sys
         print(
             f"WARNING: Invalid BEACON_MODE='{beacon_mode}'. "
             f"Valid values: {', '.join(valid_beacon_modes)}. "
@@ -93,9 +93,8 @@ def generate_launch_description():
             plugin_overrides['plugins.topic_beacon.path'] = topic_beacon_path
             plugin_overrides['plugins.topic_beacon.topic'] = \
                 '/ros2_medkit/discovery'
-            plugin_overrides['plugins.topic_beacon.beacon_ttl_sec'] = 10.0
+            plugin_overrides['plugins.topic_beacon.beacon_ttl_sec'] = 15.0
         else:
-            import sys
             print(
                 "WARNING: BEACON_MODE=topic but topic_beacon plugin not "
                 "found. Falling back to none.",
@@ -112,7 +111,6 @@ def generate_launch_description():
             plugin_overrides['plugins.parameter_beacon.poll_interval_sec'] = \
                 5.0
         else:
-            import sys
             print(
                 "WARNING: BEACON_MODE=param but param_beacon plugin not "
                 "found. Falling back to none.",

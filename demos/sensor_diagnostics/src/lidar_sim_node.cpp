@@ -83,8 +83,9 @@ public:
       std::bind(&LidarSimNode::on_parameter_change, this, std::placeholders::_1));
 
     // Initialize beacon (reads beacon_mode parameter: none/topic/param)
+    auto entity_id = this->declare_parameter("entity_id", "lidar-sim");
     beacon_ = std::make_unique<BeaconHelper>(this, BeaconHelper::Config{
-      "lidar-sim", "LiDAR Simulator", "lidar-unit",
+      entity_id, "LiDAR Simulator", "lidar-unit",
       {"sensor-monitoring"},
       {{"sensor_type", "lidar"}, {"data_topic", "scan"}, {"frame_id", "lidar_link"}},
     });

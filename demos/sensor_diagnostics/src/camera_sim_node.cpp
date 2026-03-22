@@ -74,8 +74,9 @@ public:
       std::bind(&CameraSimNode::on_parameter_change, this, std::placeholders::_1));
 
     // Initialize beacon (reads beacon_mode parameter: none/topic/param)
+    auto entity_id = this->declare_parameter("entity_id", "camera-sim");
     beacon_ = std::make_unique<BeaconHelper>(this, BeaconHelper::Config{
-      "camera-sim", "Camera Simulator", "camera-unit",
+      entity_id, "Camera Simulator", "camera-unit",
       {"sensor-monitoring"},
       {{"sensor_type", "camera"}, {"data_topic", "image_raw"}, {"frame_id", "camera_link"}},
     });

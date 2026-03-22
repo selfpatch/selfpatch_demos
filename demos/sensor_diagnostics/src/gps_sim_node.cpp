@@ -74,8 +74,9 @@ public:
       std::bind(&GpsSimNode::on_parameter_change, this, std::placeholders::_1));
 
     // Initialize beacon (reads beacon_mode parameter: none/topic/param)
+    auto entity_id = this->declare_parameter("entity_id", "gps-sim");
     beacon_ = std::make_unique<BeaconHelper>(this, BeaconHelper::Config{
-      "gps-sim", "GPS Simulator", "gps-unit",
+      entity_id, "GPS Simulator", "gps-unit",
       {"sensor-monitoring"},
       {{"sensor_type", "gps"}, {"data_topic", "fix"}, {"frame_id", "gps_link"}},
     });
