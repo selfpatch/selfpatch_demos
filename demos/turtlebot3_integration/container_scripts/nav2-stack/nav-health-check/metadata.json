@@ -1,0 +1,5 @@
+{
+  "name": "Nav2 Health Check",
+  "description": "Check nav2 stack health: verify amcl, bt-navigator, controller-server, and planner-server are responding",
+  "format": "bash"
+}

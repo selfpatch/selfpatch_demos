@@ -1,0 +1,5 @@
+{
+  "name": "Restore Normal Operation",
+  "description": "Cancel active navigation goals, restore velocity parameters to defaults, and clear all faults",
+  "format": "bash"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "Inject Localization Failure",
+  "description": "Reinitialize AMCL global localization (scatters particles) then send a navigation goal under high uncertainty",
+  "format": "bash"
+}

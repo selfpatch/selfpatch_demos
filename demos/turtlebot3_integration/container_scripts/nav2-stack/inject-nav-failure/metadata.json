@@ -1,0 +1,5 @@
+{
+  "name": "Inject Navigation Failure",
+  "description": "Send a navigation goal to an unreachable location (100, 100) far outside the turtlebot3_world map",
+  "format": "bash"
+}
