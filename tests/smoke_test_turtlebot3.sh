@@ -37,6 +37,28 @@ test_entity_discovery "areas" robot navigation diagnostics bridge
 test_entity_discovery "components" turtlebot3-base lidar-sensor nav2-stack gateway fault-manager diagnostic-bridge-unit
 test_entity_discovery "apps" turtlebot3-node robot-state-publisher amcl bt-navigator controller-server planner-server velocity-smoother medkit-gateway medkit-fault-manager diagnostic-bridge anomaly-detector
 
+section "Logs"
+
+if api_get "/logs"; then
+    if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
+        pass "GET /logs returns non-empty items"
+    else
+        fail "GET /logs returns non-empty items" "items is empty"
+    fi
+else
+    fail "GET /logs returns 200" "unexpected status code"
+fi
+
+if api_get "/apps/medkit-gateway/logs"; then
+    if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
+        pass "GET /apps/medkit-gateway/logs returns non-empty items"
+    else
+        fail "GET /apps/medkit-gateway/logs returns non-empty items" "items is empty"
+    fi
+else
+    fail "GET /apps/medkit-gateway/logs returns 200" "unexpected status code"
+fi
+
 # --- Summary ---
 
 print_summary
