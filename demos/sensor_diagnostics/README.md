@@ -194,11 +194,13 @@ The gateway supports condition-based triggers that fire when specific events occ
 # Terminal 1: Start the demo
 ./run-demo.sh
 
-# Terminal 2: Create fault trigger and watch for events
-./setup-triggers.sh       # Creates OnChange trigger on compute-unit faults
-./watch-triggers.sh       # Connects to SSE stream (Ctrl+C to stop)
+# Terminal 2: Create the fault trigger
+./setup-triggers.sh
 
-# Terminal 3: Inject a fault - trigger fires!
+# Terminal 3: Watch for trigger events (blocking - Ctrl+C to stop)
+./watch-triggers.sh
+
+# Terminal 2: Inject a fault - the trigger fires in Terminal 3!
 ./inject-nan.sh
 ```
 
@@ -310,6 +312,8 @@ curl http://localhost:8080/api/v1/faults | jq
 | `inject-nan.sh` | Inject NaN values |
 | `inject-drift.sh` | Enable sensor drift |
 | `restore-normal.sh` | Clear all faults |
+| `setup-triggers.sh` | Create OnChange fault trigger |
+| `watch-triggers.sh` | Watch trigger events via SSE stream |
 
 > **Note:** All diagnostic scripts (`inject-*.sh`, `restore-normal.sh`, `run-diagnostics.sh`, `inject-fault-scenario.sh`) are also available via the [Scripts API](#scripts-api) - callable as REST endpoints without requiring the host-side scripts.
 
