@@ -1,10 +1,10 @@
 # MoveIt 2 Pick-and-Place Integration Demo
 
-A comprehensive integration demo combining a **Panda 7-DOF robot arm** with **MoveIt 2** motion planning and **ros2_medkit** SOVD-compliant diagnostics. The robot performs continuous pick-and-place cycles in a **Gazebo Harmonic factory scene** while a manipulation monitor detects faults — planning failures, collisions — and reports them through the SOVD REST API with environment snapshots.
+A comprehensive integration demo combining a **Panda 7-DOF robot arm** with **MoveIt 2** motion planning and **ros2_medkit** SOVD-compliant diagnostics. The robot performs continuous pick-and-place cycles in a **Gazebo Harmonic factory scene** while a manipulation monitor detects faults - planning failures, collisions - and reports them through the SOVD REST API with environment snapshots.
 
 ## Status
 
-✅ **Demo Ready** — Docker-based deployment with MoveIt 2, Gazebo Harmonic physics simulation, factory environment, and full ros2_medkit stack.
+✅ **Demo Ready** - Docker-based deployment with MoveIt 2, Gazebo Harmonic physics simulation, factory environment, and full ros2_medkit stack.
 
 ## Overview
 
@@ -14,7 +14,7 @@ This demo demonstrates:
 - **Gazebo Harmonic simulation** with a realistic factory scene (conveyor belt, work table, storage, lighting)
 - **Continuous pick-and-place** loop as a realistic manipulation workload
 - **Manipulation fault monitoring** (planning failures, collision detection)
-- **Fault snapshots** — environment state captured at fault time (joint states, diagnostics)
+- **Fault snapshots** - environment state captured at fault time (joint states, diagnostics)
 - **SOVD-compliant REST API** with Areas → Components → Apps → Functions hierarchy
 - **Manifest-based entity discovery** (hybrid mode with runtime enrichment)
 - **2 fault injection scenarios** with visible Gazebo models and one-click scripts
@@ -25,7 +25,7 @@ This demo demonstrates:
 - Docker and docker-compose
 - `curl` and `jq` installed on the host (required for host-side scripts)
 - X11 display server (for Gazebo GUI) or `--headless` mode
-- (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) — recommended for smooth Gazebo rendering
+- (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) - recommended for smooth Gazebo rendering
 - ~7 GB disk space for Docker image
 
 ## Quick Start
@@ -129,37 +129,37 @@ docker exec -it moveit_medkit_demo bash      # Shell into container
 
 ```
 Areas
-├── manipulation/        — Robot arm and gripper hardware
+├── manipulation/        - Robot arm and gripper hardware
 │   Components
-│   ├── panda-arm        — 7-DOF Franka Emika Panda
+│   ├── panda-arm        - 7-DOF Franka Emika Panda
 │   │   Apps: joint-state-broadcaster, panda-arm-controller, robot-state-publisher
-│   └── panda-gripper    — 2-finger parallel gripper
+│   └── panda-gripper    - 2-finger parallel gripper
 │       Apps: panda-hand-controller
 │
-├── planning/            — MoveIt 2 motion planning stack
+├── planning/            - MoveIt 2 motion planning stack
 │   Components
-│   ├── moveit-planning  — OMPL planning pipeline
+│   ├── moveit-planning  - OMPL planning pipeline
 │   │   Apps: move-group
-│   └── pick-place-loop — Pick-and-place demo node
+│   └── pick-place-loop - Pick-and-place demo node
 │       Apps: pick-place-node
 │
-├── diagnostics/         — ros2_medkit gateway and fault management
+├── diagnostics/         - ros2_medkit gateway and fault management
 │   Components
-│   ├── gateway          — REST API
+│   ├── gateway          - REST API
 │   │   Apps: medkit-gateway
-│   └── fault-manager    — Fault aggregation
+│   └── fault-manager    - Fault aggregation
 │       Apps: medkit-fault-manager
 │
-└── bridge/              — Legacy diagnostics bridge
+└── bridge/              - Legacy diagnostics bridge
     Components
     └── diagnostic-bridge
         Apps: diagnostic-bridge-app, manipulation-monitor
 
 Functions
-├── pick-and-place       — Pick objects and place at target positions
-├── motion-planning      — Plan collision-free motion trajectories
-├── gripper-control      — Open and close the Panda gripper
-└── fault-management     — Collect and expose faults via SOVD API
+├── pick-and-place       - Pick objects and place at target positions
+├── motion-planning      - Plan collision-free motion trajectories
+├── gripper-control      - Open and close the Panda gripper
+└── fault-management     - Collect and expose faults via SOVD API
 ```
 
 ## REST API Examples
@@ -223,8 +223,8 @@ curl http://localhost:8080/api/v1/apps/manipulation-monitor/faults/MOTION_PLANNI
 ```
 
 Captured topics (background capture, always available):
-- `/joint_states` — Current joint positions at fault time
-- `/diagnostics` — Active diagnostics messages
+- `/joint_states` - Current joint positions at fault time
+- `/diagnostics` - Active diagnostics messages
 
 ### Modify Configurations via REST API
 
@@ -294,11 +294,13 @@ The gateway supports condition-based triggers that fire when specific events occ
 # Terminal 1: Start the demo
 ./run-demo.sh
 
-# Terminal 2: Create fault trigger and watch for events
-./setup-triggers.sh       # Creates OnChange trigger on moveit-planning faults
-./watch-triggers.sh       # Connects to SSE stream (Ctrl+C to stop)
+# Terminal 2: Create the fault trigger
+./setup-triggers.sh
 
-# Terminal 3: Inject a fault - trigger fires!
+# Terminal 3: Watch for trigger events (blocking - Ctrl+C to stop)
+./watch-triggers.sh
+
+# Terminal 2: Inject a fault - the trigger fires in Terminal 3!
 ./inject-planning-failure.sh
 ```
 
@@ -349,7 +351,7 @@ Blocks the robot's path with a large collision wall (visible as orange wall in G
 
 | Code | Severity | Description |
 |------|----------|-------------|
-| `MOTION_PLANNING_FAILED` | ERROR | MoveGroup goal ABORTED — no collision-free path |
+| `MOTION_PLANNING_FAILED` | ERROR | MoveGroup goal ABORTED - no collision-free path |
 
 ### 2. Collision Detection
 
@@ -397,16 +399,18 @@ Connect it to the gateway at `http://localhost:8080` to browse:
 
 | Script | Description |
 |--------|-------------|
-| `run-demo.sh` | **Start the demo** — build and launch the Docker container |
+| `run-demo.sh` | **Start the demo** - build and launch the Docker container |
 | `stop-demo.sh` | Stop demo containers |
-| `move-arm.sh` | **Interactive arm controller** — move to preset positions |
+| `move-arm.sh` | **Interactive arm controller** - move to preset positions |
 | `check-entities.sh` | Explore the full SOVD entity hierarchy with sample data |
 | `check-faults.sh` | View active faults with severity summary |
-| `inject-planning-failure.sh` | Scripts API wrapper — inject planning failure |
-| `inject-collision.sh` | Scripts API wrapper — inject collision obstacle |
-| `restore-normal.sh` | Scripts API wrapper — restore normal operation |
-| `arm-self-test.sh` | Scripts API wrapper — run arm self-test |
-| `planning-benchmark.sh` | Scripts API wrapper — run planning benchmark |
+| `inject-planning-failure.sh` | Scripts API wrapper - inject planning failure |
+| `inject-collision.sh` | Scripts API wrapper - inject collision obstacle |
+| `restore-normal.sh` | Scripts API wrapper - restore normal operation |
+| `arm-self-test.sh` | Scripts API wrapper - run arm self-test |
+| `planning-benchmark.sh` | Scripts API wrapper - run planning benchmark |
+| `setup-triggers.sh` | Create OnChange fault trigger |
+| `watch-triggers.sh` | Watch trigger events via SSE stream |
 
 Scripts API wrappers require `curl` and `jq` on the host and call the gateway REST endpoint directly - no `docker exec` needed.
 

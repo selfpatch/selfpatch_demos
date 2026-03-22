@@ -410,11 +410,13 @@ The gateway supports condition-based triggers that fire when specific events occ
 # Terminal 1: Start the demo
 ./run-demo.sh
 
-# Terminal 2: Create fault trigger and watch for events
-./setup-triggers.sh       # Creates OnChange trigger on nav2-stack faults
-./watch-triggers.sh       # Connects to SSE stream (Ctrl+C to stop)
+# Terminal 2: Create the fault trigger
+./setup-triggers.sh
 
-# Terminal 3: Inject a fault - trigger fires!
+# Terminal 3: Watch for trigger events (blocking - Ctrl+C to stop)
+./watch-triggers.sh
+
+# Terminal 2: Inject a fault - the trigger fires in Terminal 3!
 ./inject-nav-failure.sh
 ```
 
@@ -594,6 +596,8 @@ demos/turtlebot3_integration/
 | `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |
 | `inject-localization-failure.sh` | Inject localization failure (AMCL reset) |
 | `restore-normal.sh` | Restore normal operation and clear faults |
+| `setup-triggers.sh` | Create OnChange fault trigger |
+| `watch-triggers.sh` | Watch trigger events via SSE stream |
 
 > **Note:** The inject, restore, and diagnostic scripts are also available via the [Scripts API](#scripts-api) - callable as REST endpoints without requiring the host-side scripts.
 
