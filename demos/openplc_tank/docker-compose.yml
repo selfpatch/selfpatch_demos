@@ -1,0 +1,75 @@
+services:
+  # OpenPLC v4 runtime with tank simulation program
+  openplc:
+    build:
+      context: openplc/
+      dockerfile: Dockerfile
+    container_name: openplc_tank
+    ports:
+      - "4840:4840"   # OPC-UA server
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ros2_medkit Gateway with OPC-UA plugin
+  gateway:
+    build:
+      context: gateway/
+      dockerfile: Dockerfile
+      additional_contexts:
+        ros2_medkit: ../../../ros2_medkit
+        opcua_gateway_plugin: ../../../platform/commercial/opcua_gateway_plugin
+        config: config/
+    container_name: openplc_gateway
+    environment:
+      - ROS_DOMAIN_ID=50
+    ports:
+      - "8080:8080"
+    depends_on:
+      openplc:
+        condition: service_started
+    restart: unless-stopped
+
+  # SOVD Web UI
+  sovd-web-ui:
+    image: ghcr.io/selfpatch/sovd_web_ui:latest
+    container_name: sovd_web_ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+
+  # CI testing profile - headless validation
+  gateway-ci:
+    profiles: ["ci"]
+    build:
+      context: gateway/
+      dockerfile: Dockerfile
+      additional_contexts:
+        ros2_medkit: ../../../ros2_medkit
+        opcua_gateway_plugin: ../../../platform/commercial/opcua_gateway_plugin
+        config: config/
+    container_name: openplc_gateway_ci
+    environment:
+      - ROS_DOMAIN_ID=50
+    ports:
+      - "8080:8080"
+    depends_on:
+      openplc:
+        condition: service_started
+    command: >
+      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
+               source /opt/ros/jazzy/setup.bash &&
+               source /medkit_ws/install/setup.bash &&
+               source /plugin_ws/install/setup.bash &&
+               ros2 run ros2_medkit_gateway gateway_node \
+                 --ros-args --params-file /config/gateway_params.yaml &
+               sleep 15 &&
+               curl -sf http://localhost:8080/api/v1/health &&
+               curl -sf http://localhost:8080/api/v1/areas | jq '.items[] | .id' &&
+               curl -sf http://localhost:8080/api/v1/apps | jq '.items[] | .id' &&
+               echo 'CI validation passed!'"

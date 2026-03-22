@@ -1,0 +1,47 @@
+# SOVD Entity Manifest for OpenPLC Tank Demo
+# Defines the static entity tree structure
+# Dynamic data comes from the OPC-UA plugin at runtime
+
+areas:
+  - id: plc_systems
+    name: PLC Systems
+    description: PLC systems connected via OPC-UA
+
+components:
+  - id: openplc_runtime
+    name: OpenPLC Runtime
+    area: plc_systems
+    description: OpenPLC v4 runtime with OPC-UA server
+    tags:
+      - plc
+      - opcua
+      - simulation
+
+apps:
+  - id: tank_process
+    name: Tank Process
+    component_id: openplc_runtime
+    external: true
+    description: Tank simulation - level, temperature, pressure sensors with alarms
+    tags:
+      - sensors
+      - alarms
+      - tank
+
+  - id: fill_pump
+    name: Fill Pump
+    component_id: openplc_runtime
+    external: true
+    description: Fill pump with speed control (0-100%)
+    tags:
+      - actuator
+      - pump
+
+  - id: drain_valve
+    name: Drain Valve
+    component_id: openplc_runtime
+    external: true
+    description: Drain valve with position control (0-100%)
+    tags:
+      - actuator
+      - valve

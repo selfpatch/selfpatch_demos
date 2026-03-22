@@ -1,0 +1,57 @@
+# Gateway parameters for OpenPLC Tank Demo
+# Namespace: diagnostics/ros2_medkit_gateway
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      server:
+        host: "0.0.0.0"
+        port: 8080
+
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: [GET, PUT, POST, DELETE, OPTIONS]
+        allowed_headers: [Content-Type, Accept]
+        allow_credentials: false
+
+      discovery:
+        mode: "hybrid"
+        manifest_path: "/config/tank_manifest.yaml"
+        manifest_strict_validation: true
+        runtime:
+          create_synthetic_components: false
+
+      max_parallel_topic_samples: 10
+
+      # Plugin configuration
+      plugins: ["opcua"]
+      plugins.opcua.path: "/plugin_ws/install/opcua_gateway_plugin/lib/opcua_gateway_plugin/opcua_gateway_plugin.so"
+      plugins.opcua.endpoint_url: "opc.tcp://openplc:4840"
+      plugins.opcua.node_map_path: "/config/tank_nodes.yaml"
+      plugins.opcua.prefer_subscriptions: true
+      plugins.opcua.subscription_interval_ms: 500.0
+      plugins.opcua.poll_interval_ms: 1000
+
+      # Triggers
+      triggers:
+        enabled: true
+        max_triggers: 100
+
+      # Documentation
+      docs:
+        enabled: true
+
+# Fault Manager parameters
+fault_manager:
+  ros__parameters:
+    storage_type: "sqlite"
+    database_path: "/var/lib/ros2_medkit/faults.db"
+
+    confirmation_threshold: 0
+    healing_enabled: false
+    auto_confirm_after_sec: 0.0
+
+    snapshots:
+      enabled: false
+
+    rosbag:
+      enabled: false
