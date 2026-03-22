@@ -2,7 +2,7 @@
 # Restore Normal Operation - Remove all injected faults
 # Runs INSIDE the Docker container.
 
-set -e
+set -eu
 
 # shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash

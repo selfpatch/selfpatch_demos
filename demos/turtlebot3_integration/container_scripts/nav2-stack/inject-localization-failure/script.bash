@@ -1,6 +1,6 @@
 #!/bin/bash
 # Inject localization failure: reinitialize AMCL then send a navigation goal under high uncertainty
-set -e
+set -eu
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"

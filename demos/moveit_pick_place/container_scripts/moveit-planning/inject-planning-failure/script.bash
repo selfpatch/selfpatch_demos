@@ -3,7 +3,7 @@
 # Adds the wall to both Gazebo (visible) and MoveIt planning scene (causes faults)
 # Runs INSIDE the Docker container.
 
-set -e
+set -eu
 
 # shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
