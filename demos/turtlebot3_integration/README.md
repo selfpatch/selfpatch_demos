@@ -402,7 +402,7 @@ GATEWAY_URL=http://192.168.1.10:8080 ./inject-nav-failure.sh
 
 ## Triggers (Condition-Based Alerts)
 
-The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on navigation failure faults reported by the anomaly detector.
+The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on any new or updated faults reported by the anomaly detector (including navigation failures).
 
 ### Setup
 

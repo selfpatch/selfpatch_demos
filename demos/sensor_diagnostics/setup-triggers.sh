@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/../../lib/triggers-api.sh"
 
 ENTITY_TYPE="apps"
+# Uses ROS node name (underscore) - must match reporting_sources in FaultEvent
 ENTITY_ID="diagnostic_bridge"
 
 # Check for existing active trigger

@@ -286,7 +286,7 @@ The host-side wrapper scripts (`./inject-collision.sh`, etc.) call the Scripts A
 
 ## Triggers (Condition-Based Alerts)
 
-The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on planning failure faults reported by the manipulation monitor.
+The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on any new or updated faults reported by the manipulation monitor (including planning failures and collisions).
 
 ### Setup
 
