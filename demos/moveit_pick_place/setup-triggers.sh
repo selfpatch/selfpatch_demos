@@ -1,12 +1,13 @@
 #!/bin/bash
 # Create fault-monitoring trigger for moveit pick-and-place demo
-# Alerts on planning failure faults reported by the manipulation monitor
+# Alerts on any fault change reported by the manipulation monitor
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../lib/triggers-api.sh"
 
 ENTITY_TYPE="apps"
+# Uses ROS node name (underscore) - must match reporting_sources in FaultEvent
 ENTITY_ID="manipulation_monitor"
 
 # Check for existing active trigger

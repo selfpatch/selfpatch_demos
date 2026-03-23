@@ -1,12 +1,13 @@
 #!/bin/bash
 # Create fault-monitoring trigger for turtlebot3 integration demo
-# Alerts on navigation failure faults reported by the anomaly detector
+# Alerts on any fault change reported by the anomaly detector
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../lib/triggers-api.sh"
 
 ENTITY_TYPE="apps"
+# Uses ROS node name (underscore) - must match reporting_sources in FaultEvent
 ENTITY_ID="anomaly_detector"
 
 # Check for existing active trigger
