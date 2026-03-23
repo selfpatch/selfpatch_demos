@@ -50,10 +50,13 @@ create_fault_trigger() {
 
     local result
     local http_code
-    result=$(curl -s -w "\n%{http_code}" -X POST \
+    if ! result=$(curl -s -w "\n%{http_code}" -X POST \
         "${API_BASE}/${entity_type}/${entity_id}/triggers" \
         -H "Content-Type: application/json" \
-        -d "$body" 2>/dev/null) || true
+        -d "$body" 2>/dev/null); then
+        echo "Failed to reach gateway at ${GATEWAY_URL}." >&2
+        return 1
+    fi
 
     http_code=$(echo "$result" | tail -1)
     result=$(echo "$result" | sed '$d')
@@ -85,6 +88,11 @@ delete_trigger() {
     local entity_id="$2"
     local trigger_id="$3"
 
+    if [[ ! "$trigger_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "Invalid trigger ID: '${trigger_id}'" >&2
+        return 1
+    fi
+
     check_gateway
 
     local http_code
@@ -105,6 +113,11 @@ watch_trigger_events() {
     local entity_type="$1"
     local entity_id="$2"
     local trigger_id="$3"
+
+    if [[ ! "$trigger_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "Invalid trigger ID: '${trigger_id}'" >&2
+        return 1
+    fi
 
     check_gateway
 
