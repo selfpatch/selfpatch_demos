@@ -266,10 +266,13 @@ assert_triggers_crud() {
 
     # Create trigger
     echo "  Creating OnChange trigger on ${entity_type}/${entity_id}..."
+    local payload
+    payload=$(jq -n --arg resource "$resource_uri" \
+        '{resource: $resource, trigger_condition: {condition_type: "OnChange"}, multishot: true, lifetime: 60}')
     local create_response
     create_response=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}${triggers_endpoint}" \
         -H "Content-Type: application/json" \
-        -d "{\"resource\":\"${resource_uri}\",\"trigger_condition\":{\"condition_type\":\"OnChange\"},\"multishot\":true,\"lifetime\":60}" 2>/dev/null) || true
+        -d "$payload" 2>/dev/null) || true
 
     local create_http
     create_http=$(echo "$create_response" | tail -1)
@@ -334,8 +337,15 @@ assert_triggers_crud() {
     fi
 }
 
-# Print test summary and exit with appropriate code
+# Print test summary (called via EXIT trap - do not call exit here)
+SUMMARY_PRINTED=false
 print_summary() {
+    # Guard against double-printing when called as both trap and explicit call
+    if [ "$SUMMARY_PRINTED" = true ]; then
+        return
+    fi
+    SUMMARY_PRINTED=true
+
     echo ""
     echo -e "${BLUE}================================${NC}"
     local total=$((PASS_COUNT + FAIL_COUNT))
@@ -344,7 +354,7 @@ print_summary() {
     if [ "$FAIL_COUNT" -gt 0 ]; then
         echo -e "\n  ${RED}Failed tests:${FAILED_TESTS}${NC}"
         echo -e "${BLUE}================================${NC}"
-        exit 1
+        return
     fi
 
     echo -e "${BLUE}================================${NC}"

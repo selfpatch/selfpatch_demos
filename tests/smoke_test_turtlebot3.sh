@@ -2,7 +2,10 @@
 # Smoke tests for turtlebot3_integration demo
 # Runs from the host against the containerized gateway on localhost:8080
 #
-# Tests: health, entity discovery (areas, components, apps from manifest)
+# Tests: health, entity discovery (areas/components/apps/functions),
+#   discovery relationships, Linux introspection, data access, operations,
+#   configurations, scripts (list + execution), bulk data, faults, logs,
+#   trigger CRUD lifecycle
 # No fault injection - Gazebo-based demo is too complex for reliable CI fault testing
 #
 # Usage: ./tests/smoke_test_turtlebot3.sh [GATEWAY_URL]
@@ -14,6 +17,8 @@ API_BASE="${GATEWAY_URL}/api/v1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tests/smoke_lib.sh
 source "${SCRIPT_DIR}/smoke_lib.sh"
+
+trap print_summary EXIT
 
 # --- Wait for gateway startup ---
 
@@ -95,4 +100,5 @@ assert_triggers_crud "apps" "diagnostic-bridge" "/api/v1/apps/diagnostic-bridge/
 
 # --- Summary ---
 
-print_summary
+# print_summary runs via EXIT trap; exit code reflects test results
+[ "$FAIL_COUNT" -eq 0 ]

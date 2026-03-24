@@ -179,9 +179,9 @@ Each demo has automated smoke tests that verify the gateway starts and the REST 
 
 ```bash
 # Run smoke tests against a running demo (default: http://localhost:8080)
-./tests/smoke_test.sh              # Sensor diagnostics (21 tests, incl. fault injection)
-./tests/smoke_test_turtlebot3.sh   # TurtleBot3 (entity discovery)
-./tests/smoke_test_moveit.sh       # MoveIt pick-and-place (entity discovery)
+./tests/smoke_test.sh              # Sensor diagnostics (full API coverage + fault injection + beacons)
+./tests/smoke_test_turtlebot3.sh   # TurtleBot3 (discovery, data, operations, scripts, triggers, logs)
+./tests/smoke_test_moveit.sh       # MoveIt pick-and-place (discovery, data, operations, scripts, triggers, logs)
 ```
 
 CI runs all 3 demos in parallel - each job builds the Docker image, starts the container, and runs the smoke tests against it. See [CI workflow](.github/workflows/ci.yml).
