@@ -162,6 +162,178 @@ test_entity_discovery() {
     fi
 }
 
+# Test that procfs introspection data is available for an app
+# Usage: assert_procfs_introspection "lidar-sim"
+assert_procfs_introspection() {
+    local app_id="$1"
+    local endpoint="/apps/${app_id}/x-medkit-procfs"
+    if api_get "$endpoint"; then
+        if echo "$RESPONSE" | jq -e '.pid' > /dev/null 2>&1; then
+            pass "GET ${endpoint} returns procfs data with pid"
+        else
+            fail "GET ${endpoint} returns procfs data with pid" "pid field missing"
+        fi
+    else
+        fail "GET ${endpoint} returns 200" "unexpected status code"
+    fi
+}
+
+# Test that scripts are listed for a component
+# Usage: assert_scripts_list "compute-unit" "run-diagnostics"
+assert_scripts_list() {
+    local component_id="$1"
+    local expected_script="$2"
+    local endpoint="/components/${component_id}/scripts"
+    if api_get "$endpoint"; then
+        if echo "$RESPONSE" | jq -e '.items | length > 0' > /dev/null 2>&1; then
+            pass "GET ${endpoint} returns non-empty items"
+        else
+            fail "GET ${endpoint} returns non-empty items" "items is empty"
+        fi
+        if echo "$RESPONSE" | jq -e --arg s "$expected_script" '.items[] | select(.id == $s)' > /dev/null 2>&1; then
+            pass "scripts contains '${expected_script}'"
+        else
+            fail "scripts contains '${expected_script}'" "not found in response"
+        fi
+    else
+        fail "GET ${endpoint} returns 200" "unexpected status code"
+    fi
+}
+
+# Execute a script and verify it completes
+# Usage: assert_script_execution "compute-unit" "run-diagnostics" [max_wait]
+assert_script_execution() {
+    local component_id="$1"
+    local script_id="$2"
+    local max_wait="${3:-30}"
+    local exec_endpoint="/components/${component_id}/scripts/${script_id}/executions"
+
+    # Start execution
+    local exec_response
+    exec_response=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}${exec_endpoint}" \
+        -H "Content-Type: application/json" \
+        -d '{"execution_type": "now"}' 2>/dev/null) || true
+    local exec_http
+    exec_http=$(echo "$exec_response" | tail -1)
+    local exec_body
+    exec_body=$(echo "$exec_response" | sed '$d')
+
+    if [ "$exec_http" != "201" ] && [ "$exec_http" != "200" ] && [ "$exec_http" != "202" ]; then
+        fail "POST ${exec_endpoint} starts execution" "got HTTP ${exec_http}"
+        return
+    fi
+    pass "POST ${exec_endpoint} starts execution"
+
+    local exec_id
+    exec_id=$(echo "$exec_body" | jq -r '.id')
+    if [ -z "$exec_id" ] || [ "$exec_id" = "null" ]; then
+        fail "script execution returns valid id" "id is null or empty"
+        return
+    fi
+    pass "script execution returns valid id"
+
+    # Poll until completed
+    echo "  Waiting for script '${script_id}' to complete (max ${max_wait}s)..."
+    local elapsed=0
+    while [ $elapsed -lt "$max_wait" ]; do
+        if api_get "${exec_endpoint}/${exec_id}"; then
+            local status
+            status=$(echo "$RESPONSE" | jq -r '.status')
+            case "$status" in
+                completed)
+                    pass "script '${script_id}' completed successfully"
+                    return
+                    ;;
+                failed|terminated)
+                    fail "script '${script_id}' completed successfully" "status: ${status}"
+                    return
+                    ;;
+            esac
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    fail "script '${script_id}' completed successfully" "timed out after ${max_wait}s"
+}
+
+# Test trigger CRUD lifecycle on an entity
+# Usage: assert_triggers_crud "apps" "diagnostic-bridge" "/api/v1/apps/diagnostic-bridge/faults"
+assert_triggers_crud() {
+    local entity_type="$1"
+    local entity_id="$2"
+    local resource_uri="$3"
+    local triggers_endpoint="/${entity_type}/${entity_id}/triggers"
+
+    # Create trigger
+    echo "  Creating OnChange trigger on ${entity_type}/${entity_id}..."
+    local create_response
+    create_response=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}${triggers_endpoint}" \
+        -H "Content-Type: application/json" \
+        -d "{\"resource\":\"${resource_uri}\",\"trigger_condition\":{\"condition_type\":\"OnChange\"},\"multishot\":true,\"lifetime\":60}" 2>/dev/null) || true
+
+    local create_http
+    create_http=$(echo "$create_response" | tail -1)
+    local create_body
+    create_body=$(echo "$create_response" | sed '$d')
+
+    if [ "$create_http" = "201" ]; then
+        pass "POST ${triggers_endpoint} returns 201"
+    else
+        fail "POST ${triggers_endpoint} returns 201" "got HTTP ${create_http}"
+        return
+    fi
+
+    local trigger_id
+    trigger_id=$(echo "$create_body" | jq -r '.id')
+    if [ -n "$trigger_id" ] && [ "$trigger_id" != "null" ]; then
+        pass "trigger response contains valid id"
+    else
+        fail "trigger response contains valid id" "id is null or empty"
+        return
+    fi
+
+    local trigger_status
+    trigger_status=$(echo "$create_body" | jq -r '.status')
+    if [ "$trigger_status" = "active" ]; then
+        pass "trigger status is 'active'"
+    else
+        fail "trigger status is 'active'" "got '${trigger_status}'"
+    fi
+
+    # List triggers - verify it appears
+    if api_get "${triggers_endpoint}"; then
+        if echo "$RESPONSE" | jq -e --arg id "$trigger_id" '.items[] | select(.id == $id)' > /dev/null 2>&1; then
+            pass "GET ${triggers_endpoint} lists created trigger"
+        else
+            fail "GET ${triggers_endpoint} lists created trigger" "trigger ${trigger_id} not found"
+        fi
+    else
+        fail "GET ${triggers_endpoint} returns 200" "unexpected status code"
+    fi
+
+    # Delete trigger
+    local delete_status
+    delete_status=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+        "${API_BASE}${triggers_endpoint}/${trigger_id}" 2>/dev/null) || true
+
+    if [ "$delete_status" = "204" ]; then
+        pass "DELETE trigger ${trigger_id} returns 204"
+    else
+        fail "DELETE trigger ${trigger_id} returns 204" "got HTTP ${delete_status}"
+    fi
+
+    # Verify trigger is gone
+    if api_get "${triggers_endpoint}"; then
+        if ! echo "$RESPONSE" | jq -e --arg id "$trigger_id" '.items[] | select(.id == $id)' > /dev/null 2>&1; then
+            pass "trigger no longer listed after deletion"
+        else
+            fail "trigger no longer listed after deletion" "still found in list"
+        fi
+    else
+        fail "GET ${triggers_endpoint} returns 200 after delete" "unexpected status code"
+    fi
+}
+
 # Print test summary and exit with appropriate code
 print_summary() {
     echo ""
