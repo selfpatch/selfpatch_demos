@@ -33,9 +33,9 @@ else
     fail "GET /health returns 200" "unexpected status code"
 fi
 
-test_entity_discovery "areas" sensors processing diagnostics
-test_entity_discovery "components" lidar-unit imu-unit gps-unit camera-unit
-test_entity_discovery "apps" lidar-sim imu-sim gps-sim camera-sim anomaly-detector
+test_entity_discovery "areas" sensors processing diagnostics bridge
+test_entity_discovery "components" lidar-unit imu-unit gps-unit camera-unit compute-unit gateway fault-manager diagnostic-bridge-unit
+test_entity_discovery "apps" lidar-sim imu-sim gps-sim camera-sim anomaly-detector medkit-gateway medkit-fault-manager diagnostic-bridge
 test_entity_discovery "functions" sensor-monitoring anomaly-detection fault-management
 
 section "Discovery Relationships"
