@@ -36,10 +36,56 @@ fi
 test_entity_discovery "areas" robot navigation diagnostics bridge
 test_entity_discovery "components" turtlebot3-base lidar-sensor nav2-stack gateway fault-manager diagnostic-bridge-unit
 test_entity_discovery "apps" turtlebot3-node robot-state-publisher amcl bt-navigator controller-server planner-server velocity-smoother medkit-gateway medkit-fault-manager diagnostic-bridge anomaly-detector
+test_entity_discovery "functions" autonomous-navigation robot-control fault-management
+
+section "Discovery Relationships"
+
+assert_non_empty_items "/areas/robot/components"
+
+section "Linux Introspection"
+
+assert_procfs_introspection "medkit-gateway"
+
+section "Data Access"
+
+assert_non_empty_items "/apps/medkit-gateway/data"
+
+section "Operations"
+
+assert_non_empty_items "/apps/medkit-fault-manager/operations"
+
+section "Configurations"
+
+assert_non_empty_items "/apps/medkit-gateway/configurations"
+
+section "Scripts"
+
+assert_scripts_list "nav2-stack" "nav-health-check"
+assert_script_execution "nav2-stack" "nav-health-check" 30
+
+section "Bulk Data"
+
+if api_get "/apps/diagnostic-bridge/bulk-data"; then
+    pass "GET /apps/diagnostic-bridge/bulk-data returns 200"
+else
+    fail "GET /apps/diagnostic-bridge/bulk-data returns 200" "unexpected status code"
+fi
+
+section "Faults"
+
+if api_get "/faults"; then
+    pass "GET /faults returns 200"
+else
+    fail "GET /faults returns 200" "unexpected status code"
+fi
 
 section "Logs"
 
 assert_non_empty_items "/apps/medkit-gateway/logs"
+
+section "Triggers"
+
+assert_triggers_crud "apps" "diagnostic-bridge" "/api/v1/apps/diagnostic-bridge/faults"
 
 # --- Summary ---
 

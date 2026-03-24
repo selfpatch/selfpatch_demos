@@ -34,6 +34,15 @@ fi
 test_entity_discovery "areas" sensors processing diagnostics
 test_entity_discovery "components" lidar-unit imu-unit gps-unit camera-unit
 test_entity_discovery "apps" lidar-sim imu-sim gps-sim camera-sim anomaly-detector
+test_entity_discovery "functions" sensor-monitoring anomaly-detection fault-management
+
+section "Discovery Relationships"
+
+assert_non_empty_items "/areas/sensors/components"
+
+section "Linux Introspection"
+
+assert_procfs_introspection "lidar-sim"
 
 section "Data Access"
 
@@ -47,6 +56,24 @@ if echo "$RESPONSE" | jq -e '.items[] | select(.name == "noise_stddev")' > /dev/
     pass "configurations contains 'noise_stddev' parameter"
 else
     fail "configurations contains 'noise_stddev' parameter" "not found in response"
+fi
+
+section "Operations"
+
+assert_non_empty_items "/apps/medkit-fault-manager/operations"
+
+section "Scripts"
+
+assert_scripts_list "compute-unit" "run-diagnostics"
+assert_script_execution "compute-unit" "run-diagnostics" 30
+
+section "Bulk Data"
+
+# Bulk data endpoint should return 200 with categories list (may be empty without faults)
+if api_get "/apps/diagnostic-bridge/bulk-data"; then
+    pass "GET /apps/diagnostic-bridge/bulk-data returns 200"
+else
+    fail "GET /apps/diagnostic-bridge/bulk-data returns 200" "unexpected status code"
 fi
 
 section "Logs"
@@ -175,6 +202,35 @@ if api_get "/apps/diagnostic-bridge/triggers"; then
     fi
 else
     fail "GET /apps/diagnostic-bridge/triggers returns 200 after delete" "unexpected status code"
+fi
+
+section "Beacon Discovery"
+
+# Beacon data is exposed at vendor extension endpoints:
+#   /apps/{id}/x-medkit-topic-beacon  (BEACON_MODE=topic)
+#   /apps/{id}/x-medkit-param-beacon  (BEACON_MODE=param)
+# When BEACON_MODE=none (CI default), these endpoints return 404.
+beacon_found=false
+for beacon_type in topic-beacon param-beacon; do
+    if api_get "/apps/lidar-sim/x-medkit-${beacon_type}"; then
+        beacon_found=true
+        pass "GET /apps/lidar-sim/x-medkit-${beacon_type} returns 200"
+        if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
+            pass "beacon response contains 'status' field"
+        else
+            fail "beacon response contains 'status' field" "field missing"
+        fi
+        if echo "$RESPONSE" | jq -e '.entity_id' > /dev/null 2>&1; then
+            pass "beacon response contains 'entity_id' field"
+        else
+            fail "beacon response contains 'entity_id' field" "field missing"
+        fi
+        break
+    fi
+done
+if [ "$beacon_found" = false ]; then
+    # Not a failure - beacons are optional depending on BEACON_MODE
+    echo -e "  ${BLUE}SKIP${NC} beacon not active (BEACON_MODE=none or plugin not loaded)"
 fi
 
 # --- Summary ---
