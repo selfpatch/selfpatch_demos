@@ -144,12 +144,23 @@ test_entity_discovery() {
     local entity_type="$1"
     shift
     local entity_ids=("$@")
+    local expected_count=${#entity_ids[@]}
     local label
     label="${entity_type^}"
 
     section "Entity Discovery - ${label}"
 
     if api_get "/${entity_type}"; then
+        # Verify exact count - catches duplicate/synthetic entities leaking through
+        local actual_count
+        actual_count=$(echo "$RESPONSE" | jq '.items | length')
+        if [ "$actual_count" = "$expected_count" ]; then
+            pass "${entity_type} count is ${expected_count}"
+        else
+            local actual_ids
+            actual_ids=$(echo "$RESPONSE" | jq -r '[.items[].id] | sort | join(", ")')
+            fail "${entity_type} count is ${expected_count}" "got ${actual_count}: ${actual_ids}"
+        fi
         for entity_id in "${entity_ids[@]}"; do
             if echo "$RESPONSE" | items_contain_id "$entity_id"; then
                 pass "${entity_type} contains '${entity_id}'"
