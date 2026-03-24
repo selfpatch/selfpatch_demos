@@ -51,7 +51,13 @@ assert_non_empty_items "/apps/medkit-gateway/data"
 
 section "Operations"
 
-assert_non_empty_items "/apps/medkit-fault-manager/operations"
+# fault_manager services may take extra time to be discovered via runtime graph introspection
+echo "  Waiting for fault-manager operations to appear (max 30s)..."
+if poll_until "/apps/medkit-fault-manager/operations" '.items | length > 0' 30; then
+    pass "GET /apps/medkit-fault-manager/operations returns non-empty items"
+else
+    fail "GET /apps/medkit-fault-manager/operations returns non-empty items" "items still empty after 30s"
+fi
 
 section "Configurations"
 
