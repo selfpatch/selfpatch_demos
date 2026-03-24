@@ -2,7 +2,10 @@
 # Smoke tests for moveit_pick_place demo
 # Runs from the host against the containerized gateway on localhost:8080
 #
-# Tests: health, entity discovery (areas, components, apps from manifest)
+# Tests: health, entity discovery (areas/components/apps/functions),
+#   discovery relationships, Linux introspection, data access, operations,
+#   configurations, scripts (list + execution), bulk data, faults, logs,
+#   trigger CRUD lifecycle
 # Uses demo.launch.py (fake hardware, no Gazebo) for CI stability
 #
 # Usage: ./tests/smoke_test_moveit.sh [GATEWAY_URL]
@@ -14,6 +17,8 @@ API_BASE="${GATEWAY_URL}/api/v1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tests/smoke_lib.sh
 source "${SCRIPT_DIR}/smoke_lib.sh"
+
+trap print_summary EXIT
 
 # --- Wait for gateway startup ---
 
@@ -94,4 +99,5 @@ assert_triggers_crud "apps" "diagnostic-bridge-app" "/api/v1/apps/diagnostic-bri
 
 # --- Summary ---
 
-print_summary
+# print_summary runs via EXIT trap; exit code reflects test results
+[ "$FAIL_COUNT" -eq 0 ]

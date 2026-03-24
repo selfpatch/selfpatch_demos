@@ -12,6 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tests/smoke_lib.sh
 source "${SCRIPT_DIR}/smoke_lib.sh"
 
+trap print_summary EXIT
+
 # --- Wait for gateway startup ---
 
 wait_for_gateway 90
@@ -149,66 +151,7 @@ fi
 
 section "Triggers"
 
-# Create a trigger on diagnostic-bridge faults
-echo "  Creating OnChange fault trigger..."
-TRIGGER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/apps/diagnostic-bridge/triggers" \
-    -H "Content-Type: application/json" \
-    -d '{"resource":"/api/v1/apps/diagnostic-bridge/faults","trigger_condition":{"condition_type":"OnChange"},"multishot":true,"lifetime":60}' 2>/dev/null) || true
-
-TRIGGER_HTTP=$(echo "$TRIGGER_RESPONSE" | tail -1)
-TRIGGER_BODY=$(echo "$TRIGGER_RESPONSE" | sed '$d')
-
-if [ "$TRIGGER_HTTP" = "201" ]; then
-    pass "POST /apps/diagnostic-bridge/triggers returns 201"
-else
-    fail "POST /apps/diagnostic-bridge/triggers returns 201" "got HTTP $TRIGGER_HTTP"
-fi
-
-TRIGGER_ID=$(echo "$TRIGGER_BODY" | jq -r '.id')
-if [ -n "$TRIGGER_ID" ] && [ "$TRIGGER_ID" != "null" ]; then
-    pass "trigger response contains valid id"
-else
-    fail "trigger response contains valid id" "id is null or empty"
-fi
-
-TRIGGER_STATUS=$(echo "$TRIGGER_BODY" | jq -r '.status')
-if [ "$TRIGGER_STATUS" = "active" ]; then
-    pass "trigger status is 'active'"
-else
-    fail "trigger status is 'active'" "got '$TRIGGER_STATUS'"
-fi
-
-# List triggers - verify it appears
-if api_get "/apps/diagnostic-bridge/triggers"; then
-    if echo "$RESPONSE" | jq -e --arg id "$TRIGGER_ID" '.items[] | select(.id == $id)' > /dev/null 2>&1; then
-        pass "GET /apps/diagnostic-bridge/triggers lists created trigger"
-    else
-        fail "GET /apps/diagnostic-bridge/triggers lists created trigger" "trigger $TRIGGER_ID not found"
-    fi
-else
-    fail "GET /apps/diagnostic-bridge/triggers returns 200" "unexpected status code"
-fi
-
-# Delete trigger
-TRIGGER_DELETE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-    "${API_BASE}/apps/diagnostic-bridge/triggers/${TRIGGER_ID}" 2>/dev/null) || true
-
-if [ "$TRIGGER_DELETE_STATUS" = "204" ]; then
-    pass "DELETE /apps/diagnostic-bridge/triggers/$TRIGGER_ID returns 204"
-else
-    fail "DELETE /apps/diagnostic-bridge/triggers/$TRIGGER_ID returns 204" "got HTTP $TRIGGER_DELETE_STATUS"
-fi
-
-# Verify trigger is gone
-if api_get "/apps/diagnostic-bridge/triggers"; then
-    if ! echo "$RESPONSE" | jq -e --arg id "$TRIGGER_ID" '.items[] | select(.id == $id)' > /dev/null 2>&1; then
-        pass "trigger no longer listed after deletion"
-    else
-        fail "trigger no longer listed after deletion" "still found in list"
-    fi
-else
-    fail "GET /apps/diagnostic-bridge/triggers returns 200 after delete" "unexpected status code"
-fi
+assert_triggers_crud "apps" "diagnostic-bridge" "/api/v1/apps/diagnostic-bridge/faults"
 
 section "Beacon Discovery"
 
@@ -241,4 +184,5 @@ fi
 
 # --- Summary ---
 
-print_summary
+# print_summary runs via EXIT trap; exit code reflects test results
+[ "$FAIL_COUNT" -eq 0 ]
