@@ -25,6 +25,12 @@ diagnostics:
         manifest_strict_validation: true
         runtime:
           create_synthetic_components: false  # Manifest defines components
+          create_synthetic_areas: false  # Manifest defines areas
+        merge_pipeline:
+          gap_fill:
+            allow_heuristic_areas: false  # Manifest defines all areas
+            allow_heuristic_components: false  # Manifest defines all components
+            allow_heuristic_apps: false  # Manifest defines all apps
 
       # Plugin configuration (set by launch file when .so paths are resolved)
       plugins: [""]
