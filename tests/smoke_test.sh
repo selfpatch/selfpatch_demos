@@ -84,6 +84,14 @@ else
     fail "GET /apps/diagnostic-bridge/bulk-data returns 200" "unexpected status code"
 fi
 
+section "Faults"
+
+if api_get "/faults"; then
+    pass "GET /faults returns 200"
+else
+    fail "GET /faults returns 200" "unexpected status code"
+fi
+
 section "Logs"
 
 assert_non_empty_items "/apps/medkit-gateway/logs"
