@@ -1,0 +1,5 @@
+{
+  "name": "inject-gripper-jam",
+  "description": "Inject gripper jam (gripper controller stuck)",
+  "format": "bash"
+}

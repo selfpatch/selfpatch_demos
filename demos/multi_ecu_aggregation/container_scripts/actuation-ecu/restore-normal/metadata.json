@@ -1,0 +1,5 @@
+{
+  "name": "restore-normal",
+  "description": "Reset all actuation parameters to defaults and clear faults",
+  "format": "bash"
+}
