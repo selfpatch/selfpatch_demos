@@ -18,7 +18,7 @@ diagnostics:
           create_synthetic_areas: false
 
       aggregation:
-        enabled: false
+        enabled: true
         announce: true
         mdns_service: "_medkit._tcp.local"
 
