@@ -1,0 +1,58 @@
+# SOVD Manifest for Planning ECU
+# Defines path planning, behavior, and task scheduling entities
+manifest_version: "1.0"
+
+metadata:
+  name: "planning-ecu"
+  description: "Planning subsystem - path planning and behavior control"
+  version: "0.1.0"
+
+config:
+  unmanifested_nodes: warn
+  inherit_runtime_resources: true
+
+components:
+  - id: robot-alpha
+    name: "Robot Alpha"
+    type: "mobile-robot"
+
+  - id: planning-ecu
+    name: "Planning ECU"
+    type: "compute-unit"
+    parent_component_id: robot-alpha
+
+apps:
+  - id: path-planner
+    name: "Path Planner"
+    category: "planning"
+    is_located_on: planning-ecu
+    ros_binding:
+      node_name: path_planner
+      namespace: /planning
+
+  - id: behavior-planner
+    name: "Behavior Planner"
+    category: "planning"
+    is_located_on: planning-ecu
+    ros_binding:
+      node_name: behavior_planner
+      namespace: /planning
+
+  - id: task-scheduler
+    name: "Task Scheduler"
+    category: "planning"
+    is_located_on: planning-ecu
+    ros_binding:
+      node_name: task_scheduler
+      namespace: /planning
+
+functions:
+  - id: autonomous-navigation
+    name: "Autonomous Navigation"
+    category: "navigation"
+    hosted_by: [path-planner, behavior-planner]
+
+  - id: task-execution
+    name: "Task Execution"
+    category: "execution"
+    hosted_by: [task-scheduler, behavior-planner]
