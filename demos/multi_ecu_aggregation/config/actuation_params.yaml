@@ -1,6 +1,8 @@
 # ros2_medkit gateway configuration for Actuation ECU
 # Aggregation disabled but announces via mDNS for peer discovery
-actuation:
+
+# Gateway runs in /diagnostics namespace
+diagnostics:
   ros2_medkit_gateway:
     ros__parameters:
       server:
@@ -27,7 +29,8 @@ actuation:
       scripts:
         scripts_dir: "/var/lib/ros2_medkit/scripts"
 
-  # Actuation node parameters
+# Actuation node parameters (namespace: /actuation)
+actuation:
   motor_controller:
     ros__parameters:
       torque_noise: 0.01

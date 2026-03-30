@@ -1,6 +1,8 @@
 # ros2_medkit gateway configuration for Planning ECU
 # No aggregation - this ECU is a peer, not an aggregator
-planning:
+
+# Gateway runs in /diagnostics namespace
+diagnostics:
   ros2_medkit_gateway:
     ros__parameters:
       server:
@@ -22,7 +24,8 @@ planning:
       scripts:
         scripts_dir: "/var/lib/ros2_medkit/scripts"
 
-  # Planning node parameters
+# Planning node parameters (namespace: /planning)
+planning:
   path_planner:
     ros__parameters:
       planning_delay_ms: 0

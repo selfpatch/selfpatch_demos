@@ -1,6 +1,8 @@
 # ros2_medkit gateway configuration for Perception ECU
 # This ECU acts as the primary aggregator, pulling data from planning and actuation ECUs
-perception:
+
+# Gateway runs in /diagnostics namespace
+diagnostics:
   ros2_medkit_gateway:
     ros__parameters:
       server:
@@ -31,7 +33,8 @@ perception:
       scripts:
         scripts_dir: "/var/lib/ros2_medkit/scripts"
 
-  # Perception node parameters
+# Perception node parameters (namespace: /perception)
+perception:
   lidar_driver:
     ros__parameters:
       scan_rate: 10.0
