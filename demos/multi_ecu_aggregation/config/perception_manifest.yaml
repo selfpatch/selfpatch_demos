@@ -8,7 +8,7 @@ metadata:
   version: "0.1.0"
 
 config:
-  unmanifested_nodes: warn
+  unmanifested_nodes: hide
   inherit_runtime_resources: true
 
 components:
