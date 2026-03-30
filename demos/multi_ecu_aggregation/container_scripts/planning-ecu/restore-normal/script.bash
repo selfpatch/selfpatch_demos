@@ -1,0 +1,26 @@
+#!/bin/bash
+# Reset all planning node parameters to defaults
+set -eu
+
+source /opt/ros/jazzy/setup.bash
+source /root/demo_ws/install/setup.bash
+
+ERRORS=0
+
+# Path planner
+ros2 param set /planning/path_planner planning_delay_ms 0 || ERRORS=$((ERRORS + 1))
+ros2 param set /planning/path_planner failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+
+# Behavior planner
+ros2 param set /planning/behavior_planner inject_wrong_direction false || ERRORS=$((ERRORS + 1))
+ros2 param set /planning/behavior_planner failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+
+# Task scheduler
+ros2 param set /planning/task_scheduler inject_stuck false || ERRORS=$((ERRORS + 1))
+ros2 param set /planning/task_scheduler failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+
+if [ $ERRORS -gt 0 ]; then
+    echo "{\"status\": \"partial\", \"errors\": $ERRORS}"
+    exit 1
+fi
+echo '{"status": "restored", "ecu": "planning"}'
