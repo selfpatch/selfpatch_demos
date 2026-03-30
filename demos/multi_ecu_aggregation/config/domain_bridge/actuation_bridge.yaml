@@ -1,0 +1,6 @@
+name: actuation-bridge
+from_domain: 20
+to_domain: 30
+topics:
+  /planning/commands:
+    type: "geometry_msgs/msg/Twist"

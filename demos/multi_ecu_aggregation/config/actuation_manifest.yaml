@@ -1,0 +1,63 @@
+# SOVD Manifest for Actuation ECU
+# Defines motor, joint, and gripper control entities
+manifest_version: "1.0"
+
+metadata:
+  name: "actuation-ecu"
+  description: "Actuation subsystem - motors, joints, and grippers"
+  version: "0.1.0"
+
+config:
+  unmanifested_nodes: warn
+  inherit_runtime_resources: true
+
+components:
+  - id: robot-alpha
+    name: "Robot Alpha"
+    type: "mobile-robot"
+
+  - id: actuation-ecu
+    name: "Actuation ECU"
+    type: "compute-unit"
+    parent_component_id: robot-alpha
+
+apps:
+  - id: motor-controller
+    name: "Motor Controller"
+    category: "actuation"
+    is_located_on: actuation-ecu
+    ros_binding:
+      node_name: motor_controller
+      namespace: /actuation
+
+  - id: joint-driver
+    name: "Joint Driver"
+    category: "actuation"
+    is_located_on: actuation-ecu
+    ros_binding:
+      node_name: joint_driver
+      namespace: /actuation
+
+  - id: gripper-controller
+    name: "Gripper Controller"
+    category: "actuation"
+    is_located_on: actuation-ecu
+    ros_binding:
+      node_name: gripper_controller
+      namespace: /actuation
+
+functions:
+  - id: autonomous-navigation
+    name: "Autonomous Navigation"
+    category: "navigation"
+    hosted_by: [motor-controller, joint-driver]
+
+  - id: obstacle-avoidance
+    name: "Obstacle Avoidance"
+    category: "safety"
+    hosted_by: [motor-controller, gripper-controller]
+
+  - id: task-execution
+    name: "Task Execution"
+    category: "execution"
+    hosted_by: [motor-controller, joint-driver, gripper-controller]
