@@ -38,3 +38,4 @@ docker-compose.local.yml
 .env
 .venv/
 venv/
+demos/multi_ecu_aggregation/launch/__pycache__/

@@ -8,7 +8,7 @@ metadata:
   version: "0.1.0"
 
 config:
-  unmanifested_nodes: hide
+  unmanifested_nodes: ignore
   inherit_runtime_resources: true
 
 components:
@@ -45,6 +45,31 @@ apps:
     ros_binding:
       node_name: task_scheduler
       namespace: /planning
+
+  # Infrastructure apps
+  - id: medkit-gateway
+    name: "Medkit Gateway"
+    category: "infrastructure"
+    is_located_on: planning-ecu
+    ros_binding:
+      node_name: ros2_medkit_gateway
+      namespace: /diagnostics
+
+  - id: medkit-fault-manager
+    name: "Fault Manager"
+    category: "infrastructure"
+    is_located_on: planning-ecu
+    ros_binding:
+      node_name: fault_manager
+      namespace: /
+
+  - id: medkit-diagnostic-bridge
+    name: "Diagnostic Bridge"
+    category: "infrastructure"
+    is_located_on: planning-ecu
+    ros_binding:
+      node_name: diagnostic_bridge
+      namespace: /bridge
 
 functions:
   - id: autonomous-navigation
