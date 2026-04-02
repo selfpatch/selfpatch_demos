@@ -60,6 +60,7 @@ public:
         "Parameter 'driver_rate' must be positive; using default 50.0 Hz instead of %.3f",
         rate);
       rate = 50.0;
+      driver_rate_ = rate;
     }
     auto period = std::chrono::duration<double>(1.0 / rate);
     timer_ = this->create_wall_timer(
