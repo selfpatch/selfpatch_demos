@@ -1,5 +1,5 @@
 // Copyright 2026 selfpatch
-// Licensed under the Apache License, Version 2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /// @file object_detector.cpp
 /// @brief Timer-based object detector that subscribes to filtered point cloud

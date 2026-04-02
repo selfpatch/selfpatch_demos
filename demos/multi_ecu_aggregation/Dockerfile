@@ -68,4 +68,4 @@ EXPOSE 8080
 
 # ECU_LAUNCH env var selects which launch file to run
 ENV ECU_LAUNCH=perception.launch.py
-CMD ["bash", "-c", "mkdir -p /var/lib/ros2_medkit/rosbags && source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && ros2 launch multi_ecu_demo ${ECU_LAUNCH}"]
+CMD ["bash", "-c", "mkdir -p /var/lib/ros2_medkit/rosbags && source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && ros2 launch multi_ecu_demo \"${ECU_LAUNCH}\""]
