@@ -261,7 +261,7 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<actuation::GripperControllerNode>());
+  rclcpp::spin(std::make_shared<multi_ecu_demo::GripperControllerNode>());
   rclcpp::shutdown();
   return 0;
 }

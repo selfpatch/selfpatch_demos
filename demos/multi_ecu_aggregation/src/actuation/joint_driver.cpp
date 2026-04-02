@@ -281,7 +281,7 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<actuation::JointDriverNode>());
+  rclcpp::spin(std::make_shared<multi_ecu_demo::JointDriverNode>());
   rclcpp::shutdown();
   return 0;
 }
