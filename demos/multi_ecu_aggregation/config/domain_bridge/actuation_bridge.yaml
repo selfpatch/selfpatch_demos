@@ -1,4 +1,4 @@
-name: actuation-bridge
+name: actuation_bridge
 from_domain: 20
 to_domain: 30
 topics:
