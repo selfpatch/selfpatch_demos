@@ -78,6 +78,7 @@ fi
 # Pull images if --update flag is set
 if [[ "$UPDATE_IMAGES" == "true" ]]; then
     echo "Pulling latest images..."
+    # shellcheck disable=SC2086
     ${COMPOSE_CMD} pull
     echo ""
 fi
@@ -99,6 +100,7 @@ fi
 if ! ${COMPOSE_CMD} build ${BUILD_ARGS}; then
     echo ""
     echo "Docker build failed! Stopping any partially created containers..."
+    # shellcheck disable=SC2086
     ${COMPOSE_CMD} down 2>/dev/null || true
     exit 1
 fi

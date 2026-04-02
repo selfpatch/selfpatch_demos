@@ -108,7 +108,17 @@ private:
           this->get_logger(), "Failure probability changed to %.2f",
           failure_probability_);
       } else if (param.get_name() == "driver_rate") {
-        driver_rate_ = param.as_double();
+        double rate = param.as_double();
+        if (rate <= 0.0) {
+          result.successful = false;
+          result.reason = "driver_rate must be positive";
+          return result;
+        }
+        driver_rate_ = rate;
+        auto period = std::chrono::duration<double>(1.0 / rate);
+        timer_ = this->create_wall_timer(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+          std::bind(&JointDriverNode::publish_joint_state, this));
         RCLCPP_INFO(this->get_logger(), "Driver rate changed to %.1f Hz", driver_rate_);
       }
     }

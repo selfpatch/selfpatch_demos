@@ -100,7 +100,17 @@ private:
           this->get_logger(), "Failure probability changed to %.2f",
           failure_probability_);
       } else if (param.get_name() == "gripper_rate") {
-        gripper_rate_ = param.as_double();
+        double rate = param.as_double();
+        if (rate <= 0.0) {
+          result.successful = false;
+          result.reason = "gripper_rate must be positive";
+          return result;
+        }
+        gripper_rate_ = rate;
+        auto period = std::chrono::duration<double>(1.0 / rate);
+        timer_ = this->create_wall_timer(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+          std::bind(&GripperControllerNode::publish_gripper_state, this));
         RCLCPP_INFO(this->get_logger(), "Gripper rate changed to %.1f Hz", gripper_rate_);
       }
     }
