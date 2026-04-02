@@ -61,6 +61,7 @@ public:
         "Parameter 'gripper_rate' must be positive; using default 10.0 Hz instead of %.3f",
         rate);
       rate = 10.0;
+      gripper_rate_ = rate;
     }
     auto period = std::chrono::duration<double>(1.0 / rate);
     timer_ = this->create_wall_timer(
