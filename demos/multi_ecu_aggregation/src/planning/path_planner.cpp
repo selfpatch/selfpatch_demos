@@ -1,5 +1,5 @@
 // Copyright 2026 selfpatch
-// Licensed under the Apache License, Version 2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /// @file path_planner.cpp
 /// @brief Path planner node for the Planning ECU
@@ -125,7 +125,9 @@ private:
   {
     plan_count_++;
 
-    // Artificial planning delay
+    // Intentional blocking sleep to simulate slow computation pipeline.
+    // This blocks the single-threaded executor, preventing parameter changes
+    // and other callbacks from being processed during the delay.
     if (planning_delay_ms_ > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(planning_delay_ms_));
     }

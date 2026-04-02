@@ -26,4 +26,13 @@ if [ $ERRORS -gt 0 ]; then
     echo "{\"status\": \"partial\", \"errors\": $ERRORS}"
     exit 1
 fi
+
+# Clear faults
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+API_BASE="${GATEWAY_URL}/api/v1"
+echo "Clearing faults..."
+curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
+sleep 2
+curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
+
 echo '{"status": "restored", "ecu": "actuation"}'

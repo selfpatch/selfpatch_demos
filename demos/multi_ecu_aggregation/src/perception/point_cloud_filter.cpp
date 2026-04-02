@@ -1,5 +1,5 @@
 // Copyright 2026 selfpatch
-// Licensed under the Apache License, Version 2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /// @file point_cloud_filter.cpp
 /// @brief Subscribes to LaserScan, converts to PointCloud2, and publishes filtered points
@@ -98,7 +98,8 @@ private:
   {
     msg_count_++;
 
-    // Artificial processing delay
+    // Intentional blocking sleep to simulate slow processing pipeline.
+    // This blocks the single-threaded executor during the delay.
     if (delay_ms_ > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms_));
     }

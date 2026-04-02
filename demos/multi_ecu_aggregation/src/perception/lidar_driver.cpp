@@ -1,5 +1,5 @@
 // Copyright 2026 selfpatch
-// Licensed under the Apache License, Version 2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /// @file lidar_driver.cpp
 /// @brief Simulated 2D LiDAR scanner with configurable fault injection

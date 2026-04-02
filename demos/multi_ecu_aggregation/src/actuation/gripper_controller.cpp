@@ -1,5 +1,5 @@
 // Copyright 2026 selfpatch
-// Licensed under the Apache License, Version 2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /// @file gripper_controller.cpp
 /// @brief Gripper controller node for Actuation ECU
@@ -24,7 +24,7 @@
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 
-namespace actuation
+namespace multi_ecu_demo
 {
 
 class GripperControllerNode : public rclcpp::Node
@@ -256,7 +256,7 @@ private:
   uint64_t msg_count_{0};
 };
 
-}  // namespace actuation
+}  // namespace multi_ecu_demo
 
 int main(int argc, char ** argv)
 {

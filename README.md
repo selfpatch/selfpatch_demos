@@ -14,11 +14,12 @@ This repository contains example integrations and demos that show how ros2_medki
 can be used to add SOVD-compliant diagnostics and fault management to ROS 2-based robots and systems.
 
 Each demo builds on real-world scenarios, progressing from simple sensor monitoring
-to complete mobile robot integration:
+to complete mobile robot integration and multi-ECU peer aggregation:
 
-- **Sensor Diagnostics** — Lightweight demo focusing on data monitoring and fault injection
-- **TurtleBot3 Integration** — Full-featured demo with Nav2 navigation, showing entity hierarchy and real-time control
-- **MoveIt Pick-and-Place** — Panda 7-DOF arm manipulation with MoveIt 2, fault monitoring for planning, controllers, and joint limits
+- **Sensor Diagnostics** - Lightweight demo focusing on data monitoring and fault injection
+- **TurtleBot3 Integration** - Full-featured demo with Nav2 navigation, showing entity hierarchy and real-time control
+- **MoveIt Pick-and-Place** - Panda 7-DOF arm manipulation with MoveIt 2, fault monitoring for planning, controllers, and joint limits
+- **Multi-ECU Aggregation** - Peer aggregation with 3 ECUs (perception, planning, actuation), mDNS discovery, and cross-ECU functions
 
 **Key Capabilities Demonstrated:**
 
@@ -29,8 +30,11 @@ to complete mobile robot integration:
 - ✅ Fault management and injection
 - ✅ Manifest-based entity discovery
 - ✅ Legacy diagnostics bridge support
+- ✅ Multi-ECU peer aggregation
+- ✅ mDNS-based ECU discovery
+- ✅ Cross-ECU function grouping
 
-Both demos support:
+All demos support:
 
 - REST API access via SOVD protocol
 - Web UI for visualization ([ros2_medkit_web_ui](https://github.com/selfpatch/ros2_medkit_web_ui))
@@ -44,6 +48,7 @@ Both demos support:
 | [Sensor Diagnostics](demos/sensor_diagnostics/) | Lightweight sensor diagnostics demo (no Gazebo required) | Data monitoring, fault injection, dual fault reporting paths | ✅ Ready |
 | [TurtleBot3 Integration](demos/turtlebot3_integration/) | Full ros2_medkit integration with TurtleBot3 and Nav2 | SOVD-compliant API, manifest-based discovery, fault management | ✅ Ready |
 | [MoveIt Pick-and-Place](demos/moveit_pick_place/) | Panda 7-DOF arm with MoveIt 2 manipulation and ros2_medkit | Planning fault detection, controller monitoring, joint limits | ✅ Ready |
+| [Multi-ECU Aggregation](demos/multi_ecu_aggregation/) | Multi-ECU peer aggregation with 3 ECUs (perception, planning, actuation), mDNS discovery, cross-ECU functions | Peer aggregation, mDNS discovery, cross-ECU functions | ✅ Ready |
 
 ### Quick Start
 
@@ -123,6 +128,28 @@ cd demos/moveit_pick_place
 - 5 fault injection scenarios with one-click scripts
 - SOVD-compliant REST API with rich entity hierarchy (4 areas, 7 components)
 
+#### Multi-ECU Aggregation Demo (Advanced - Peer Aggregation)
+
+Multi-ECU demo with 3 independent ECUs aggregated via mDNS discovery:
+
+```bash
+cd demos/multi_ecu_aggregation
+./run-demo.sh
+./check-demo.sh  # Verify all 3 ECUs are connected
+# Gateway at http://localhost:8080, Web UI at http://localhost:3000
+
+# To stop
+./stop-demo.sh
+```
+
+**Features:**
+
+- 3 independent ECUs (perception, planning, actuation) each running ros2_medkit
+- Peer aggregation via mDNS-based automatic ECU discovery
+- Cross-ECU function grouping across the full system
+- Unified SOVD-compliant REST API spanning all ECUs
+- Web UI for browsing aggregated entity hierarchy
+
 ## Getting Started
 
 ### Prerequisites
@@ -144,7 +171,7 @@ Each demo has its own README with specific instructions. See above Quick Start,
 or follow the detailed README in each demo directory:
 
 ```bash
-cd demos/sensor_diagnostics  # or turtlebot3_integration
+cd demos/sensor_diagnostics  # or turtlebot3_integration, moveit_pick_place, multi_ecu_aggregation
 # Follow the README.md in that directory
 ```
 
@@ -184,7 +211,7 @@ Each demo has automated smoke tests that verify the gateway starts and the REST 
 ./tests/smoke_test_moveit.sh       # MoveIt pick-and-place (discovery, data, operations, scripts, triggers, logs)
 ```
 
-CI runs all 3 demos in parallel - each job builds the Docker image, starts the container, and runs the smoke tests against it. See [CI workflow](.github/workflows/ci.yml).
+CI runs all 4 demos in parallel - each job builds the Docker image, starts the container, and runs the smoke tests against it. See [CI workflow](.github/workflows/ci.yml).
 
 ## Related Projects
 
