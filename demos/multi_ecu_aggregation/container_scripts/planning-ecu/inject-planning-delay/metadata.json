@@ -1,0 +1,5 @@
+{
+  "name": "inject-planning-delay",
+  "description": "Inject path planning delay (5000ms processing time)",
+  "format": "bash"
+}

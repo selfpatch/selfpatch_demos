@@ -1,0 +1,53 @@
+# ros2_medkit gateway configuration for Planning ECU
+# No aggregation - this ECU is a peer, not an aggregator
+
+# Gateway runs in /diagnostics namespace
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      server:
+        host: "0.0.0.0"
+        port: 8080
+
+      discovery:
+        mode: "hybrid"
+        manifest_path: ""  # Set via launch argument
+        manifest_strict_validation: true
+        runtime:
+          create_synthetic_components: false
+          create_synthetic_areas: false
+
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
+
+      scripts:
+        scripts_dir: "/var/lib/ros2_medkit/scripts"
+
+# Planning node parameters (namespace: /planning)
+planning:
+  path_planner:
+    ros__parameters:
+      planning_delay_ms: 0
+      failure_probability: 0.0
+      planning_rate: 5.0
+
+  behavior_planner:
+    ros__parameters:
+      inject_wrong_direction: false
+      failure_probability: 0.0
+      command_rate: 10.0
+
+  task_scheduler:
+    ros__parameters:
+      inject_stuck: false
+      failure_probability: 0.0
+      schedule_rate: 1.0
+
+# Fault Manager configuration (runs in root namespace)
+fault_manager:
+  ros__parameters:
+    storage_type: "sqlite"
+    database_path: "/var/lib/ros2_medkit/faults.db"
+    snapshots:
+      enabled: false

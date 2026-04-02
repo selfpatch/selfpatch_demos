@@ -1,0 +1,91 @@
+# SOVD Manifest for Perception ECU
+# Defines sensor and detection entities for the perception subsystem
+manifest_version: "1.0"
+
+metadata:
+  name: "perception-ecu"
+  description: "Perception subsystem - sensors and detection"
+  version: "0.1.0"
+
+config:
+  unmanifested_nodes: ignore
+  inherit_runtime_resources: true
+
+components:
+  - id: robot-alpha
+    name: "Robot Alpha"
+    type: "mobile-robot"
+
+  - id: perception-ecu
+    name: "Perception ECU"
+    type: "compute-unit"
+    parent_component_id: robot-alpha
+
+apps:
+  - id: lidar-driver
+    name: "LiDAR Driver"
+    category: "sensor"
+    is_located_on: perception-ecu
+    ros_binding:
+      node_name: lidar_driver
+      namespace: /perception
+
+  - id: camera-driver
+    name: "Camera Driver"
+    category: "sensor"
+    is_located_on: perception-ecu
+    ros_binding:
+      node_name: camera_driver
+      namespace: /perception
+
+  - id: point-cloud-filter
+    name: "Point Cloud Filter"
+    category: "processing"
+    is_located_on: perception-ecu
+    ros_binding:
+      node_name: point_cloud_filter
+      namespace: /perception
+
+  - id: object-detector
+    name: "Object Detector"
+    category: "processing"
+    is_located_on: perception-ecu
+    ros_binding:
+      node_name: object_detector
+      namespace: /perception
+
+  # Infrastructure apps (gateway, fault manager, diagnostic bridge)
+  - id: medkit-gateway
+    name: "Medkit Gateway"
+    category: "infrastructure"
+    is_located_on: perception-ecu
+    ros_binding:
+      node_name: ros2_medkit_gateway
+      namespace: /diagnostics
+
+  - id: medkit-fault-manager
+    name: "Fault Manager"
+    category: "infrastructure"
+    is_located_on: perception-ecu
+    ros_binding:
+      node_name: fault_manager
+      namespace: /
+
+  - id: medkit-diagnostic-bridge
+    name: "Diagnostic Bridge"
+    category: "infrastructure"
+    is_located_on: perception-ecu
+    ros_binding:
+      node_name: diagnostic_bridge
+      namespace: /bridge
+
+functions:
+  - id: autonomous-navigation
+    name: "Autonomous Navigation"
+    category: "navigation"
+    hosted_by: [object-detector, point-cloud-filter]
+
+  - id: obstacle-avoidance
+    name: "Obstacle Avoidance"
+    category: "safety"
+    hosted_by: [lidar-driver, object-detector]

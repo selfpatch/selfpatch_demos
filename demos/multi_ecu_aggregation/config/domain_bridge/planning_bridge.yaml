@@ -1,0 +1,6 @@
+name: planning_bridge
+from_domain: 10
+to_domain: 20
+topics:
+  /perception/detections:
+    type: "vision_msgs/msg/Detection2DArray"

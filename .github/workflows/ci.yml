@@ -116,3 +116,50 @@ jobs:
         if: always()
         working-directory: demos/moveit_pick_place
         run: docker compose --profile ci down
+
+  build-and-test-multi-ecu:
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Show triggering source
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          SHA="${{ github.event.client_payload.sha }}"
+          RUN_URL="${{ github.event.client_payload.run_url }}"
+          echo "## Triggered by ros2_medkit" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${SHA:-unknown}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$RUN_URL" ]; then
+            echo "- Run: [View triggering run]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Run: (URL not provided)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and start multi-ECU demo
+        working-directory: demos/multi_ecu_aggregation
+        run: docker compose --profile ci up -d --build perception-ecu-ci planning-ecu-ci actuation-ecu-ci
+
+      - name: Run smoke tests
+        run: ./tests/smoke_test_multi_ecu.sh
+
+      - name: Show perception ECU logs on failure
+        if: failure()
+        working-directory: demos/multi_ecu_aggregation
+        run: docker compose --profile ci logs perception-ecu-ci --tail=200
+
+      - name: Show planning ECU logs on failure
+        if: failure()
+        working-directory: demos/multi_ecu_aggregation
+        run: docker compose --profile ci logs planning-ecu-ci --tail=200
+
+      - name: Show actuation ECU logs on failure
+        if: failure()
+        working-directory: demos/multi_ecu_aggregation
+        run: docker compose --profile ci logs actuation-ecu-ci --tail=200
+
+      - name: Teardown
+        if: always()
+        working-directory: demos/multi_ecu_aggregation
+        run: docker compose --profile ci down

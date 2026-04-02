@@ -1,0 +1,5 @@
+{
+  "name": "restore-normal",
+  "description": "Reset all perception parameters to defaults and clear faults",
+  "format": "bash"
+}

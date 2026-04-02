@@ -1,0 +1,107 @@
+services:
+  # Perception ECU - cameras, lidar, object detection (domain 10)
+  perception-ecu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ecu-demo:local
+    container_name: perception_ecu
+    hostname: perception-ecu
+    ports:
+      - "8080:8080"
+    environment:
+      - ROS_DOMAIN_ID=10
+      - ECU_LAUNCH=perception.launch.py
+    networks: [medkit-net]
+    stdin_open: true
+    tty: true
+
+  # Planning ECU - path planning, behavior planning, task scheduling (domain 20)
+  planning-ecu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ecu-demo:local
+    container_name: planning_ecu
+    hostname: planning-ecu
+    environment:
+      - ROS_DOMAIN_ID=20
+      - ECU_LAUNCH=planning.launch.py
+    networks: [medkit-net]
+    stdin_open: true
+    tty: true
+
+  # Actuation ECU - motor control, joint drivers, gripper (domain 30)
+  actuation-ecu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ecu-demo:local
+    container_name: actuation_ecu
+    hostname: actuation-ecu
+    environment:
+      - ROS_DOMAIN_ID=30
+      - ECU_LAUNCH=actuation.launch.py
+    networks: [medkit-net]
+    stdin_open: true
+    tty: true
+
+  # Web UI for visualization (connects to perception ECU gateway)
+  medkit-web-ui:
+    image: ghcr.io/selfpatch/ros2_medkit_web_ui:latest
+    container_name: multi_ecu_web_ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - perception-ecu
+    networks: [medkit-net]
+
+  # --- CI services (headless, no web UI) ---
+
+  # Perception ECU for CI testing
+  perception-ecu-ci:
+    profiles: ["ci"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ecu-demo:local
+    container_name: perception_ecu_ci
+    hostname: perception-ecu
+    ports:
+      - "8080:8080"
+    environment:
+      - ROS_DOMAIN_ID=10
+      - ECU_LAUNCH=perception.launch.py
+    networks: [medkit-net]
+
+  # Planning ECU for CI testing
+  planning-ecu-ci:
+    profiles: ["ci"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ecu-demo:local
+    container_name: planning_ecu_ci
+    hostname: planning-ecu
+    environment:
+      - ROS_DOMAIN_ID=20
+      - ECU_LAUNCH=planning.launch.py
+    networks: [medkit-net]
+
+  # Actuation ECU for CI testing
+  actuation-ecu-ci:
+    profiles: ["ci"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ecu-demo:local
+    container_name: actuation_ecu_ci
+    hostname: actuation-ecu
+    environment:
+      - ROS_DOMAIN_ID=30
+      - ECU_LAUNCH=actuation.launch.py
+    networks: [medkit-net]
+
+networks:
+  medkit-net:
+    driver: bridge

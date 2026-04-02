@@ -1,0 +1,80 @@
+# ros2_medkit gateway configuration for Perception ECU
+# This ECU acts as the primary aggregator, pulling data from planning and actuation ECUs
+
+# Gateway runs in /diagnostics namespace
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      server:
+        host: "0.0.0.0"
+        port: 8080
+
+      discovery:
+        mode: "hybrid"
+        manifest_path: ""  # Set via launch argument
+        manifest_strict_validation: true
+        runtime:
+          create_synthetic_components: false
+          create_synthetic_areas: false
+
+      aggregation:
+        enabled: true
+        timeout_ms: 3000
+        announce: false
+        discover: true
+        mdns_service: "_medkit._tcp.local"
+        peer_urls: ["http://planning-ecu:8080"]
+        peer_names: ["planning-ecu"]
+
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
+
+      scripts:
+        scripts_dir: "/var/lib/ros2_medkit/scripts"
+
+# Perception node parameters (namespace: /perception)
+perception:
+  lidar_driver:
+    ros__parameters:
+      scan_rate: 10.0
+      range_min: 0.12
+      range_max: 3.5
+      angle_min: -3.14159
+      angle_max: 3.14159
+      num_readings: 360
+      noise_stddev: 0.01
+      failure_probability: 0.0
+      inject_nan: false
+      drift_rate: 0.0
+
+  camera_driver:
+    ros__parameters:
+      rate: 30.0
+      width: 640
+      height: 480
+      noise_level: 0.0
+      failure_probability: 0.0
+      inject_black_frames: false
+      brightness: 128
+
+  point_cloud_filter:
+    ros__parameters:
+      drop_rate: 0.0
+      delay_ms: 0
+      failure_probability: 0.0
+
+  object_detector:
+    ros__parameters:
+      false_positive_rate: 0.0
+      miss_rate: 0.0
+      failure_probability: 0.0
+      detection_rate: 5.0
+
+# Fault Manager configuration (runs in root namespace)
+fault_manager:
+  ros__parameters:
+    storage_type: "sqlite"
+    database_path: "/var/lib/ros2_medkit/faults.db"
+    snapshots:
+      enabled: false

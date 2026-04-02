@@ -1,0 +1,5 @@
+{
+  "name": "inject-sensor-failure",
+  "description": "Inject LiDAR sensor failure (high failure probability)",
+  "format": "bash"
+}
