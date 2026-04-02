@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone ros2_medkit from GitHub (gateway + dependencies + plugins)
-ARG ROS2_MEDKIT_REF=feat/entity-model-and-aggregation
+ARG ROS2_MEDKIT_REF=main
 WORKDIR ${COLCON_WS}/src
 RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} https://github.com/selfpatch/ros2_medkit.git && \
     mv ros2_medkit/src/ros2_medkit_cmake . && \
