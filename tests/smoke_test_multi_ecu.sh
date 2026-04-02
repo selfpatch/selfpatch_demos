@@ -47,27 +47,29 @@ fi
 
 section "Entity Discovery - Components"
 
-# The aggregator should see: robot-alpha (shared parent) and local perception-ecu at minimum.
-# Peer ECU components (planning-ecu, actuation-ecu) may or may not be aggregated
-# depending on gateway version and aggregation config.
+# robot-alpha is the top-level parent component shared across all 3 ECUs
 if api_get "/components"; then
-    for comp_id in robot-alpha perception-ecu; do
+    if echo "$RESPONSE" | items_contain_id "robot-alpha"; then
+        pass "components contains 'robot-alpha'"
+    else
+        fail "components contains 'robot-alpha'" "not found in response"
+    fi
+else
+    fail "GET /components returns 200" "unexpected status code"
+fi
+
+# ECU components are sub-components of robot-alpha (parent_component_id set)
+# They appear under /components/robot-alpha/subcomponents, not /components
+if api_get "/components/robot-alpha/subcomponents"; then
+    for comp_id in perception-ecu planning-ecu actuation-ecu; do
         if echo "$RESPONSE" | items_contain_id "$comp_id"; then
-            pass "components contains '${comp_id}'"
+            pass "subcomponents contains '${comp_id}'"
         else
-            fail "components contains '${comp_id}'" "not found in response"
-        fi
-    done
-    # Check peer ECU components (informational - may not be aggregated)
-    for comp_id in planning-ecu actuation-ecu; do
-        if echo "$RESPONSE" | items_contain_id "$comp_id"; then
-            pass "components contains '${comp_id}'"
-        else
-            echo "  SKIP components contains '${comp_id}' (peer component not aggregated)"
+            fail "subcomponents contains '${comp_id}'" "not found in response"
         fi
     done
 else
-    fail "GET /components returns 200" "unexpected status code"
+    fail "GET /components/robot-alpha/subcomponents returns 200" "unexpected status code"
 fi
 
 section "Entity Discovery - Apps"
