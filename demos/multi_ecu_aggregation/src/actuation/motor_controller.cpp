@@ -96,7 +96,17 @@ private:
           this->get_logger(), "Failure probability changed to %.2f",
           failure_probability_);
       } else if (param.get_name() == "status_rate") {
-        status_rate_ = param.as_double();
+        double rate = param.as_double();
+        if (rate <= 0.0) {
+          result.successful = false;
+          result.reason = "status_rate must be positive";
+          return result;
+        }
+        status_rate_ = rate;
+        auto period = std::chrono::duration<double>(1.0 / rate);
+        timer_ = this->create_wall_timer(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+          std::bind(&MotorControllerNode::publish_motor_status, this));
         RCLCPP_INFO(this->get_logger(), "Status rate changed to %.1f Hz", status_rate_);
       }
     }

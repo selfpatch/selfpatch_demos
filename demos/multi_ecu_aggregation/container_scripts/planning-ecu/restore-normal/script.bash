@@ -2,7 +2,9 @@
 # Reset all planning node parameters to defaults
 set -eu
 
+# shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
+# shellcheck source=/dev/null
 source /root/demo_ws/install/setup.bash
 
 ERRORS=0

@@ -1,5 +1,5 @@
 # ros2_medkit gateway configuration for Actuation ECU
-# Aggregation disabled but announces via mDNS for peer discovery
+# Announces via mDNS for peer discovery by the primary aggregator
 
 # Gateway runs in /diagnostics namespace
 diagnostics:

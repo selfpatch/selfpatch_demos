@@ -99,7 +99,17 @@ private:
         RCLCPP_INFO(
           this->get_logger(), "Failure probability changed to %.2f", failure_probability_);
       } else if (param.get_name() == "command_rate") {
-        command_rate_ = param.as_double();
+        double rate = param.as_double();
+        if (rate <= 0.0) {
+          result.successful = false;
+          result.reason = "command_rate must be positive";
+          return result;
+        }
+        command_rate_ = rate;
+        auto period = std::chrono::duration<double>(1.0 / rate);
+        timer_ = this->create_wall_timer(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+          std::bind(&BehaviorPlanner::compute_command, this));
         RCLCPP_INFO(this->get_logger(), "Command rate changed to %.1f Hz", command_rate_);
       }
     }

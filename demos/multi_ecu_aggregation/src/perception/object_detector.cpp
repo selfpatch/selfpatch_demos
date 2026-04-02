@@ -302,7 +302,7 @@ private:
   double detection_rate_;
 
   // State tracking
-  rclcpp::Time last_cloud_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_cloud_time_{0, 0, RCL_SYSTEM_TIME};
   uint32_t last_cloud_points_{0};
 
   // Statistics
