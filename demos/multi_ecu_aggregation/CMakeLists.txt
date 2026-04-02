@@ -31,7 +31,7 @@ ament_target_dependencies(object_detector rclcpp sensor_msgs vision_msgs diagnos
 
 # --- Planning ECU nodes ---
 add_executable(path_planner src/planning/path_planner.cpp)
-ament_target_dependencies(path_planner rclcpp nav_msgs vision_msgs diagnostic_msgs rcl_interfaces)
+ament_target_dependencies(path_planner rclcpp nav_msgs geometry_msgs vision_msgs diagnostic_msgs rcl_interfaces)
 
 add_executable(behavior_planner src/planning/behavior_planner.cpp)
 ament_target_dependencies(behavior_planner rclcpp nav_msgs geometry_msgs diagnostic_msgs rcl_interfaces)
