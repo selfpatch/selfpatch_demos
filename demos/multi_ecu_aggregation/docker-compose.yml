@@ -57,6 +57,8 @@ services:
     networks: [medkit-net]
 
   # --- CI services (headless, no web UI) ---
+  # NOTE: CI and default profiles are mutually exclusive - do not start both
+  # simultaneously. CI services reuse hostnames for config compatibility.
 
   # Perception ECU for CI testing
   perception-ecu-ci:
