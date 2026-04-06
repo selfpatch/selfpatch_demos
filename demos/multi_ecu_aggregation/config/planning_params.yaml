@@ -17,6 +17,9 @@ diagnostics:
           create_synthetic_components: false
           create_synthetic_areas: false
 
+      aggregation:
+        enabled: false
+
       cors:
         allowed_origins: ["*"]
         allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
