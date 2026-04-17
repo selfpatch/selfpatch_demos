@@ -1,0 +1,175 @@
+# Mosaico fleet demo: 3 robots, 3 bridges, 1 Mosaico archive.
+#
+# Shows cross-robot forensic queries that a folder of .mcap files cannot do.
+#
+# Robots:
+#   robot-01  warehouse aisle A   port 18081   ROS_DOMAIN_ID=41
+#   robot-02  warehouse aisle B   port 18082   ROS_DOMAIN_ID=42
+#   robot-03  outdoor yard        port 18083   ROS_DOMAIN_ID=43
+#
+# Each robot gets its own bridge that ingests fault snapshots into
+# the shared mosaicod with robot_id metadata.
+#
+# Why one bridge per robot in this demo:
+#   - Keeps each `MEDKIT_URL`, `ROBOT_ID` and `FAULT_CODE_ALLOWLIST` a
+#     static env var instead of a per-event lookup table.
+#   - Simple failure isolation: one bridge crashing does not delay
+#     ingest for the other robots.
+#   - Makes the SSE subscription / reconnect loop single-threaded and
+#     easy to read.
+# In a real fleet (tens to hundreds of robots) either a single async
+# bridge subscribing to N gateways in parallel, or a bridge running as
+# a sidecar on each gateway host, would scale better. For 3 robots the
+# per-bridge layout is the clearest way to show the pipeline.
+
+name: mosaico-fleet
+
+services:
+  # ── Shared infrastructure ──
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mosaico
+    volumes:
+      - fleet_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mosaico"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [fleet_net]
+
+  mosaicod:
+    image: ghcr.io/mosaico-labs/mosaicod:v0.3.0
+    environment:
+      MOSAICOD_DB_URL: postgres://postgres:password@postgres:5432/mosaico
+      RUST_LOG: info
+    command: [run, --host, 0.0.0.0, --port, "6726", --local-store, /data/store]
+    volumes:
+      - fleet_store:/data/store
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports: ["16726:6726"]
+    networks: [fleet_net]
+
+  # ── Robot 01: Warehouse Aisle A ──
+  robot-01:
+    build:
+      context: ../sensor_diagnostics
+      dockerfile: Dockerfile
+    container_name: fleet_robot_01
+    environment:
+      ROS_DOMAIN_ID: "41"
+      BEACON_MODE: none
+    ports: ["18081:8080"]
+    volumes:
+      - ./medkit_overrides/medkit_params.yaml:/root/demo_ws/install/sensor_diagnostics_demo/share/sensor_diagnostics_demo/config/medkit_params.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    networks: [fleet_net]
+
+  bridge-01:
+    build: { context: ./bridge }
+    container_name: fleet_bridge_01
+    environment:
+      MEDKIT_URL: http://robot-01:8080
+      MOSAICO_HOST: mosaicod
+      MOSAICO_PORT: "6726"
+      ROBOT_ID: robot-01-warehouse-A
+      SOURCE_DEMO: fleet_demo
+      LOG_LEVEL: INFO
+      POST_FAULT_WAIT_SEC: "15"
+      FAULT_CODE_ALLOWLIST: "LIDAR_SIM"
+    depends_on:
+      robot-01: { condition: service_healthy }
+      mosaicod: { condition: service_started }
+    networks: [fleet_net]
+
+  # ── Robot 02: Warehouse Aisle B ──
+  robot-02:
+    build:
+      context: ../sensor_diagnostics
+      dockerfile: Dockerfile
+    container_name: fleet_robot_02
+    environment:
+      ROS_DOMAIN_ID: "42"
+      BEACON_MODE: none
+    ports: ["18082:8080"]
+    volumes:
+      - ./medkit_overrides/medkit_params.yaml:/root/demo_ws/install/sensor_diagnostics_demo/share/sensor_diagnostics_demo/config/medkit_params.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    networks: [fleet_net]
+
+  bridge-02:
+    build: { context: ./bridge }
+    container_name: fleet_bridge_02
+    environment:
+      MEDKIT_URL: http://robot-02:8080
+      MOSAICO_HOST: mosaicod
+      MOSAICO_PORT: "6726"
+      ROBOT_ID: robot-02-warehouse-B
+      SOURCE_DEMO: fleet_demo
+      LOG_LEVEL: INFO
+      POST_FAULT_WAIT_SEC: "15"
+      FAULT_CODE_ALLOWLIST: "LIDAR_SIM"
+    depends_on:
+      robot-02: { condition: service_healthy }
+      mosaicod: { condition: service_started }
+    networks: [fleet_net]
+
+  # ── Robot 03: Outdoor Yard ──
+  robot-03:
+    build:
+      context: ../sensor_diagnostics
+      dockerfile: Dockerfile
+    container_name: fleet_robot_03
+    environment:
+      ROS_DOMAIN_ID: "43"
+      BEACON_MODE: none
+    ports: ["18083:8080"]
+    volumes:
+      - ./medkit_overrides/medkit_params.yaml:/root/demo_ws/install/sensor_diagnostics_demo/share/sensor_diagnostics_demo/config/medkit_params.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    networks: [fleet_net]
+
+  bridge-03:
+    build: { context: ./bridge }
+    container_name: fleet_bridge_03
+    environment:
+      MEDKIT_URL: http://robot-03:8080
+      MOSAICO_HOST: mosaicod
+      MOSAICO_PORT: "6726"
+      ROBOT_ID: robot-03-outdoor-yard
+      SOURCE_DEMO: fleet_demo
+      LOG_LEVEL: INFO
+      POST_FAULT_WAIT_SEC: "15"
+      FAULT_CODE_ALLOWLIST: "LIDAR_SIM"
+    depends_on:
+      robot-03: { condition: service_healthy }
+      mosaicod: { condition: service_started }
+    networks: [fleet_net]
+
+volumes:
+  fleet_pgdata:
+  fleet_store:
+
+networks:
+  fleet_net:
+    name: mosaico_fleet_net
+    driver: bridge

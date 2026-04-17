@@ -1,0 +1,112 @@
+# Mosaico integration demo: medkit fault snapshot -> Mosaico ingest.
+#
+# Stack:
+#   postgres   - Mosaico metadata store (internal only)
+#   mosaicod   - Apache Arrow Flight server (port 16726 on host)
+#   sensor-demo - ros2_medkit gateway + simulated sensors + diagnostic_bridge
+#                 + fault_manager (port 18080 on host).
+#                 Built from sibling sensor_diagnostics/ Dockerfile.
+#                 medkit_params.yaml is override-mounted to flip auto_cleanup.
+#   bridge     - subscribes /faults/stream SSE, downloads bag via REST,
+#                ingests to mosaicod via mosaicolabs SDK over Arrow Flight.
+#
+# Host ports avoid 8080/6726/5432/3000 so the stack does not collide with
+# anything else that might be running on the dev host.
+
+name: mosaico-integration
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mosaico
+    volumes:
+      - mosaico_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mosaico"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - mosaico_net
+
+  mosaicod:
+    image: ghcr.io/mosaico-labs/mosaicod:v0.3.0
+    environment:
+      MOSAICOD_DB_URL: postgres://postgres:password@postgres:5432/mosaico
+      RUST_LOG: info
+    command:
+      - run
+      - --host
+      - 0.0.0.0
+      - --port
+      - "6726"
+      - --local-store
+      - /data/store
+    volumes:
+      - mosaico_store:/data/store
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "16726:6726"
+    networks:
+      - mosaico_net
+
+  sensor-demo:
+    build:
+      context: ../sensor_diagnostics
+      dockerfile: Dockerfile
+    container_name: mosaico_sensor_demo
+    environment:
+      ROS_DOMAIN_ID: "40"
+      BEACON_MODE: none
+    ports:
+      - "18080:8080"
+    volumes:
+      # Override medkit_params.yaml to flip auto_cleanup defensively.
+      # Install path follows the sensor_diagnostics Dockerfile's
+      # COLCON_WS=/root/demo_ws + ROS install layout.
+      - ./medkit_overrides/medkit_params.yaml:/root/demo_ws/install/sensor_diagnostics_demo/share/sensor_diagnostics_demo/config/medkit_params.yaml:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8080/api/v1/health > /dev/null || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    networks:
+      - mosaico_net
+
+  bridge:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    container_name: mosaico_bridge
+    environment:
+      MEDKIT_URL: http://sensor-demo:8080
+      MOSAICO_HOST: mosaicod
+      MOSAICO_PORT: "6726"
+      ROBOT_ID: sensor_demo_001
+      SOURCE_DEMO: sensor_diagnostics
+      LOG_LEVEL: INFO
+      DOWNLOAD_DIR: /tmp/mosaico_bridge
+    depends_on:
+      sensor-demo:
+        condition: service_healthy
+      mosaicod:
+        condition: service_started
+    networks:
+      - mosaico_net
+
+volumes:
+  mosaico_pgdata:
+  mosaico_store:
+
+networks:
+  mosaico_net:
+    name: mosaico_net
+    driver: bridge
