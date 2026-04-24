@@ -63,9 +63,9 @@ License-safe: mosaicod runs as the unmodified upstream Docker image. The bridge 
 - 24/7 recording of the same four topics: ~6 GB/robot/day.
 - At ~5 confirmed faults/robot/day the catalog holds ~10 MB/robot/day.
 
-## Mosaico SDK pin
+## Mosaico SDK
 
-PR #368 (ROS adapters for the `futures` ontology) merged on 2026-04-13 as commit `b3867be`. We validated end-to-end against the PR while it was in draft; post-merge no demo-side change was required. The subsequent `mosaicolabs==0.3.2` PyPI wheel is missing the `futures` subpackage from the distributed artifact, so the bridge `Dockerfile` installs directly from the repo at `b3867be` until a packaging-fixed release ships. The notebook still needs `import mosaicolabs.models.futures.laser` at the top to register the ontology on the read side.
+The bridge and notebook both use `mosaicolabs>=0.4.0` from PyPI. Release 0.4.0 (2026-04-21) is the first wheel that includes the `futures` subpackage (`LaserScan` ontology) required by this demo. The notebook still needs `import mosaicolabs.models.futures.laser` at the top to register the ontology on the read side; Mosaico team is looking into whether a shorter top-level import will suffice in a future SDK release.
 
 ## Integration notes
 
@@ -76,7 +76,7 @@ PR #368 (ROS adapters for the `futures` ontology) merged on 2026-04-13 as commit
 
 ## Troubleshooting
 
-- `docker compose build bridge` fails the LaserScan sanity import → the pinned Mosaico commit is no longer fetchable or the source layout has moved. Update `MOSAICO_PIN` in `bridge/Dockerfile` to a current `main` commit that still contains `mosaicolabs/models/futures/laser.py`.
+- `docker compose build bridge` fails the LaserScan sanity import → the installed `mosaicolabs` wheel no longer ships the `futures.laser` module. Check the version constraint in `bridge/requirements.txt` and pin back to a known-good release.
 - Bridge logs `No entity owns bulk-data for fault X (probed N candidates)` → the post-fault timer has not fired yet. Wait a few seconds and re-trigger.
 - Notebook raises `No ontology registered with tag 'laser_scan'` → the ontology import cell was skipped; re-run it.
 - `docker compose pull mosaicod` is slow on first run → the upstream image is ~110 MB, distroless.

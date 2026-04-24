@@ -337,6 +337,10 @@ def ingest_to_mosaico(bag_path: Path, fault: FaultEvent) -> Optional[str]:
         f"{SOURCE_DEMO}_{ROBOT_ID}_{fault.fault_code}"
         f"_{int(fault.timestamp_sec)}_{fault.event_id}"
     )
+    # captured_at_seconds is stored as float so it can be used in Mosaico
+    # QuerySequence().with_user_metadata(key, gt=X, lt=Y) range filters.
+    # captured_at_iso is kept alongside it for human-readable inspection
+    # in list_sequences() output.
     metadata = {
         "robot_id": ROBOT_ID,
         "fault_code": fault.fault_code,
@@ -345,6 +349,7 @@ def ingest_to_mosaico(bag_path: Path, fault: FaultEvent) -> Optional[str]:
         "fault_description": fault.description or "",
         "fault_status": fault.status,
         "reporting_sources": ",".join(fault.reporting_sources),
+        "captured_at_seconds": float(fault.timestamp_sec),
         "captured_at_iso": datetime.fromtimestamp(
             fault.timestamp_sec, tz=timezone.utc
         ).isoformat(),
