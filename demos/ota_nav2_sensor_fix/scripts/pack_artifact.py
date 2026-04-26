@@ -145,8 +145,64 @@ def create_tarball(
     return out_path
 
 
-def run(**kwargs) -> int:
-    raise NotImplementedError
+def colcon_build(workspace: Path, package: str) -> None:
+    cmd = ["colcon", "build", "--packages-select", package, "--symlink-install"]
+    completed = subprocess.run(cmd, cwd=workspace, check=False)
+    if completed.returncode != 0:
+        raise SystemExit(f"colcon build failed for {package}")
+
+
+def run(
+    *,
+    package: str,
+    version: str,
+    kind: Kind,
+    target_component: str,
+    executable: str,
+    notes: str,
+    duration: int,
+    out_dir: str,
+    catalog: str,
+    skip_build: bool,
+    workspace: str,
+) -> int:
+    if kind == "install" and not executable:
+        sys.stderr.write("--executable is required for install\n")
+        raise SystemExit(2)
+
+    out_dir_p = Path(out_dir)
+    catalog_p = Path(catalog)
+    workspace_p = Path(workspace)
+
+    size_bytes = 0
+    if kind != "uninstall":
+        if not skip_build:
+            colcon_build(workspace_p, package)
+        install_dir = workspace_p / "install" / package
+        if not install_dir.exists():
+            sys.stderr.write(f"install dir missing: {install_dir}\n")
+            raise SystemExit(3)
+        tarball = create_tarball(
+            package=package,
+            version=version,
+            install_dir=install_dir,
+            out_dir=out_dir_p,
+        )
+        size_bytes = tarball.stat().st_size
+
+    entry = build_entry(
+        package=package,
+        version=version,
+        kind=kind,
+        target_component=target_component,
+        executable=executable,
+        notes=notes,
+        duration=duration,
+        size_bytes=size_bytes,
+    )
+    merge_catalog(catalog_p, entry)
+    print(f"packed {entry['id']}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
