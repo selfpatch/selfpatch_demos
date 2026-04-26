@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.16)
 project(ota_update_plugin CXX)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+  add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wconversion)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)

@@ -76,6 +76,9 @@ void OtaUpdatePlugin::configure(const nlohmann::json & config) {
   catalog_url_ = config.value("catalog_url", "http://ota_update_server:9000");
   staging_dir_ = config.value("staging_dir", "/tmp/ota_staging");
   install_dir_ = config.value("install_dir", "/ws/install");
+  if (!catalog_client_) {
+    catalog_client_ = std::make_unique<CatalogClient>(catalog_url_);
+  }
 }
 
 void OtaUpdatePlugin::set_context(ros2_medkit_gateway::PluginContext & /*context*/) {
@@ -83,9 +86,6 @@ void OtaUpdatePlugin::set_context(ros2_medkit_gateway::PluginContext & /*context
 }
 
 void OtaUpdatePlugin::poll_and_register_catalog() {
-  if (!catalog_client_) {
-    catalog_client_ = std::make_unique<CatalogClient>(catalog_url_);
-  }
   auto fetched = catalog_client_->fetch_catalog();
   if (!fetched) {
     std::fprintf(stderr, "[ota_update_plugin] catalog fetch failed: %s\n", fetched.error().c_str());
@@ -184,9 +184,6 @@ tl::expected<void, UpdateBackendErrorInfo> OtaUpdatePlugin::prepare(
   const std::string staged_path = staging_dir_ + "/" + id + ".tar.gz";
 
   reporter.set_progress(10);
-  if (!catalog_client_) {
-    catalog_client_ = std::make_unique<CatalogClient>(catalog_url_);
-  }
   auto dl = catalog_client_->download_artifact(url, staged_path);
   if (!dl) {
     return tl::make_unexpected(UpdateBackendErrorInfo{UpdateBackendError::Internal, "download failed: " + dl.error()});

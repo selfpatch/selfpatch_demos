@@ -113,17 +113,29 @@ tl::expected<int, std::string> ProcessRunner::kill_by_executable(const std::stri
 }
 
 tl::expected<int, std::string> ProcessRunner::spawn(const std::string & executable_path) {
+  // Double-fork so the grandchild is reparented to init and never becomes a
+  // zombie in the gateway process. The intermediate child exits immediately
+  // and is reaped here.
   pid_t pid = fork();
   if (pid < 0) {
     return tl::make_unexpected(std::string("fork failed: ") + std::strerror(errno));
   }
   if (pid == 0) {
-    // Child: detach from controlling terminal.
-    setsid();
-    execl(executable_path.c_str(), executable_path.c_str(), nullptr);
-    std::fprintf(stderr, "execl %s failed: %s\n", executable_path.c_str(), std::strerror(errno));
-    _exit(127);
+    pid_t grandchild = fork();
+    if (grandchild < 0) {
+      _exit(126);
+    }
+    if (grandchild == 0) {
+      setsid();
+      execl(executable_path.c_str(), executable_path.c_str(), nullptr);
+      std::fprintf(stderr, "execl %s failed: %s\n", executable_path.c_str(),
+                   std::strerror(errno));
+      _exit(127);
+    }
+    _exit(0);
   }
+  int status = 0;
+  ::waitpid(pid, &status, 0);
   return static_cast<int>(pid);
 }
 
