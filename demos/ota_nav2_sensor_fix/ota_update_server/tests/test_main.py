@@ -35,3 +35,21 @@ def test_catalog_returns_file_contents(client, artifacts_dir):
     resp = client.get("/catalog")
     assert resp.status_code == 200
     assert resp.json() == payload
+
+
+def test_artifact_returns_file(client, artifacts_dir):
+    (artifacts_dir / "fixed_lidar-2.1.0.tar.gz").write_bytes(b"BIN")
+    resp = client.get("/artifacts/fixed_lidar-2.1.0.tar.gz")
+    assert resp.status_code == 200
+    assert resp.content == b"BIN"
+
+
+def test_artifact_404_when_missing(client):
+    resp = client.get("/artifacts/missing.tar.gz")
+    assert resp.status_code == 404
+
+
+def test_artifact_rejects_path_traversal(client, artifacts_dir):
+    (artifacts_dir.parent / "secret.txt").write_text("hush")
+    resp = client.get("/artifacts/..%2Fsecret.txt")
+    assert resp.status_code in (400, 404)
