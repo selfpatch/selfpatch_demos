@@ -109,3 +109,29 @@ def test_build_entry_uninstall_kind():
     assert "updated_components" not in entry
     assert "x_medkit_artifact_url" not in entry
     assert "x_medkit_executable" not in entry
+
+
+def test_merge_catalog_creates_file(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    entry = {"id": "a", "name": "a"}
+    pack_artifact.merge_catalog(catalog, entry)
+    data = json.loads(catalog.read_text())
+    assert data == [entry]
+
+
+def test_merge_catalog_appends(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps([{"id": "a", "name": "a"}]))
+    entry = {"id": "b", "name": "b"}
+    pack_artifact.merge_catalog(catalog, entry)
+    data = json.loads(catalog.read_text())
+    assert [e["id"] for e in data] == ["a", "b"]
+
+
+def test_merge_catalog_replaces_same_id(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps([{"id": "a", "name": "old"}]))
+    entry = {"id": "a", "name": "new"}
+    pack_artifact.merge_catalog(catalog, entry)
+    data = json.loads(catalog.read_text())
+    assert data == [entry]

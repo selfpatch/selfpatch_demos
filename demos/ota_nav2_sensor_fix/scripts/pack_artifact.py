@@ -115,6 +115,18 @@ def build_entry(
     return entry
 
 
+def merge_catalog(catalog_path: Path, entry: dict) -> None:
+    catalog_path = Path(catalog_path)
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    if catalog_path.exists():
+        data = json.loads(catalog_path.read_text())
+    else:
+        data = []
+    data = [e for e in data if e.get("id") != entry["id"]]
+    data.append(entry)
+    catalog_path.write_text(json.dumps(data, indent=2) + "\n")
+
+
 def run(**kwargs) -> int:
     raise NotImplementedError
 
