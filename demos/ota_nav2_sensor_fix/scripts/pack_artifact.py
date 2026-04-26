@@ -169,6 +169,9 @@ def run(
     if kind == "install" and not executable:
         sys.stderr.write("--executable is required for install\n")
         raise SystemExit(2)
+    if kind != "uninstall" and not version:
+        sys.stderr.write(f"--version is required for kind={kind}\n")
+        raise SystemExit(2)
 
     out_dir_p = Path(out_dir)
     catalog_p = Path(catalog)

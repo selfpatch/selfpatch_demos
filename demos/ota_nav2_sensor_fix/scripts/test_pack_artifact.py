@@ -9,10 +9,6 @@ import pytest
 import pack_artifact
 
 
-def test_imports():
-    assert hasattr(pack_artifact, "main")
-
-
 def test_main_requires_package():
     with pytest.raises(SystemExit):
         pack_artifact.main([])
@@ -224,3 +220,83 @@ def test_run_install_requires_executable(tmp_path):
             skip_build=True,
             workspace=str(tmp_path / "ws"),
         )
+
+
+def test_run_update_requires_version(tmp_path):
+    with pytest.raises(SystemExit):
+        pack_artifact.run(
+            package="fixed_lidar",
+            version="",
+            kind="update",
+            target_component="scan_sensor_node",
+            executable="fixed_lidar_node",
+            notes="",
+            duration=10,
+            out_dir=str(tmp_path / "out"),
+            catalog=str(tmp_path / "out" / "catalog.json"),
+            skip_build=True,
+            workspace=str(tmp_path / "ws"),
+        )
+
+
+def test_run_install_kind_e2e(tmp_path):
+    workspace = tmp_path / "ws"
+    install = workspace / "install" / "obstacle_classifier_v2" / "lib"
+    install.mkdir(parents=True)
+    (install / "obstacle_classifier_node").write_text("bin")
+    out_dir = tmp_path / "artifacts"
+    catalog = out_dir / "catalog.json"
+
+    rc = pack_artifact.run(
+        package="obstacle_classifier_v2",
+        version="1.0.0",
+        kind="install",
+        target_component="obstacle_classifier",
+        executable="obstacle_classifier_node",
+        notes="extra safety",
+        duration=15,
+        out_dir=str(out_dir),
+        catalog=str(catalog),
+        skip_build=True,
+        workspace=str(workspace),
+    )
+
+    assert rc == 0
+    assert (out_dir / "obstacle_classifier_v2-1.0.0.tar.gz").exists()
+    data = json.loads(catalog.read_text())
+    assert data[0]["id"] == "obstacle_classifier_v2_1_0_0"
+    assert data[0]["added_components"] == ["obstacle_classifier"]
+    assert data[0]["x_medkit_executable"] == "obstacle_classifier_node"
+
+
+def test_colcon_build_invokes_subprocess(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeCompleted:
+        returncode = 0
+
+    def fake_run(cmd, cwd, check):
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        captured["check"] = check
+        return FakeCompleted()
+
+    monkeypatch.setattr(pack_artifact.subprocess, "run", fake_run)
+    pack_artifact.colcon_build(tmp_path, "broken_lidar")
+
+    assert captured["cmd"] == [
+        "colcon", "build", "--packages-select", "broken_lidar", "--symlink-install"
+    ]
+    assert captured["cwd"] == tmp_path
+    assert captured["check"] is False
+
+
+def test_colcon_build_raises_on_nonzero(tmp_path, monkeypatch):
+    class FakeCompleted:
+        returncode = 1
+
+    monkeypatch.setattr(
+        pack_artifact.subprocess, "run", lambda *_args, **_kwargs: FakeCompleted()
+    )
+    with pytest.raises(SystemExit):
+        pack_artifact.colcon_build(tmp_path, "broken_lidar")
