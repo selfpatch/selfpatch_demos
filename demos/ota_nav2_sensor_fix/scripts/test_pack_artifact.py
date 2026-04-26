@@ -57,8 +57,10 @@ def test_build_entry_update_kind():
         size_bytes=2048,
     )
     assert entry["id"] == "fixed_lidar_2_1_0"
-    assert entry["name"] == "fixed_lidar 2.1.0"
-    assert entry["version"] == "2.1.0"
+    assert entry["update_name"] == "fixed_lidar 2.1.0"
+    assert "name" not in entry, "use update_name (SOVD spec) not name"
+    assert entry["x_medkit_version"] == "2.1.0"
+    assert "version" not in entry, "version is not a SOVD field; use x_medkit_version"
     assert entry["automated"] is False
     assert entry["origins"] == ["remote"]
     assert entry["notes"] == "fix noise"

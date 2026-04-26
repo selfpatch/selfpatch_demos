@@ -95,14 +95,20 @@ def build_entry(
 ) -> dict:
     entry: dict = {
         "id": slug(package, version) if kind != "uninstall" else f"{package}_remove",
-        "name": f"{package} {version}".strip(),
+        # SOVD ISO 17978-3 mandates "update_name". Earlier drafts of this
+        # script wrote "name" - the gateway passes that through to clients
+        # but spec-compliant consumers (web UI, Foxglove panel) expect
+        # update_name.
+        "update_name": f"{package} {version}".strip(),
         "automated": False,
         "origins": ["remote"],
         "notes": notes,
         "duration": duration,
     }
     if version:
-        entry["version"] = version
+        # SOVD spec does not define a top-level version field on update
+        # detail, so we expose it as a vendor extension.
+        entry["x_medkit_version"] = version
     if size_bytes > 0:
         entry["size"] = max(1, size_bytes // 1024)
 
