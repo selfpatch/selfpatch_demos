@@ -127,6 +127,24 @@ def merge_catalog(catalog_path: Path, entry: dict) -> None:
     catalog_path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def create_tarball(
+    *,
+    package: str,
+    version: str,
+    install_dir: Path,
+    out_dir: Path,
+) -> Path:
+    install_dir = Path(install_dir)
+    if not install_dir.exists():
+        raise FileNotFoundError(f"install dir does not exist: {install_dir}")
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{package}-{version}.tar.gz"
+    with tarfile.open(out_path, "w:gz") as tf:
+        tf.add(install_dir, arcname=package)
+    return out_path
+
+
 def run(**kwargs) -> int:
     raise NotImplementedError
 

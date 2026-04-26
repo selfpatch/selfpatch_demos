@@ -135,3 +135,21 @@ def test_merge_catalog_replaces_same_id(tmp_path):
     pack_artifact.merge_catalog(catalog, entry)
     data = json.loads(catalog.read_text())
     assert data == [entry]
+
+
+def test_create_tarball(tmp_path):
+    install = tmp_path / "install" / "fixed_lidar"
+    (install / "lib").mkdir(parents=True)
+    (install / "lib" / "fixed_lidar_node").write_text("binary")
+    out_dir = tmp_path / "artifacts"
+    out_path = pack_artifact.create_tarball(
+        package="fixed_lidar",
+        version="2.1.0",
+        install_dir=install,
+        out_dir=out_dir,
+    )
+    assert out_path == out_dir / "fixed_lidar-2.1.0.tar.gz"
+    assert out_path.exists()
+    with tarfile.open(out_path) as tf:
+        names = tf.getnames()
+    assert "fixed_lidar/lib/fixed_lidar_node" in names
