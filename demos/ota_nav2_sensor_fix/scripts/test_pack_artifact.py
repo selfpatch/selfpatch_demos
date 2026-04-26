@@ -70,6 +70,22 @@ def test_build_entry_update_kind():
     assert entry["x_medkit_target_package"] == "fixed_lidar"
     assert entry["x_medkit_executable"] == "fixed_lidar_node"
     assert entry["x_medkit_artifact_url"] == "/artifacts/fixed_lidar-2.1.0.tar.gz"
+    assert "x_medkit_replaces_executable" not in entry
+
+
+def test_build_entry_update_kind_with_replaces():
+    entry = pack_artifact.build_entry(
+        package="fixed_lidar",
+        version="2.1.0",
+        kind="update",
+        target_component="scan_sensor_node",
+        executable="fixed_lidar_node",
+        replaces_executable="broken_lidar_node",
+        notes="",
+        duration=10,
+        size_bytes=1024,
+    )
+    assert entry["x_medkit_replaces_executable"] == "broken_lidar_node"
 
 
 def test_build_entry_install_kind():
