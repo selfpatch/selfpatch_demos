@@ -19,9 +19,9 @@ done
 mkdir -p "$ARTIFACTS"
 rm -f "$ARTIFACTS/catalog.json"
 
-PACK="$SCRIPT_DIR/.venv/bin/python $SCRIPT_DIR/pack_artifact.py"
+PACK=("$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/pack_artifact.py")
 
-env -i PATH=/usr/bin:/bin HOME="$HOME" $PACK \
+env -i PATH=/usr/bin:/bin HOME="$HOME" "${PACK[@]}" \
   --package fixed_lidar --version 2.1.0 \
   --kind update --target-component scan_sensor_node \
   --executable fixed_lidar_node \
@@ -29,7 +29,7 @@ env -i PATH=/usr/bin:/bin HOME="$HOME" $PACK \
   --skip-build --workspace "$WS" \
   --out-dir "$ARTIFACTS" --catalog "$ARTIFACTS/catalog.json"
 
-env -i PATH=/usr/bin:/bin HOME="$HOME" $PACK \
+env -i PATH=/usr/bin:/bin HOME="$HOME" "${PACK[@]}" \
   --package obstacle_classifier_v2 --version 1.0.0 \
   --kind install --target-component obstacle_classifier \
   --executable obstacle_classifier_node \
@@ -37,7 +37,7 @@ env -i PATH=/usr/bin:/bin HOME="$HOME" $PACK \
   --skip-build --workspace "$WS" \
   --out-dir "$ARTIFACTS" --catalog "$ARTIFACTS/catalog.json"
 
-env -i PATH=/usr/bin:/bin HOME="$HOME" $PACK \
+env -i PATH=/usr/bin:/bin HOME="$HOME" "${PACK[@]}" \
   --package broken_lidar_legacy --version "" \
   --kind uninstall --target-component broken_lidar_legacy \
   --notes "Clean up deprecated package" \
