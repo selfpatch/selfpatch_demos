@@ -32,14 +32,25 @@ namespace ota_update_plugin {
 
 namespace {
 
-std::string proc_comm(int pid) {
-  std::ifstream f("/proc/" + std::to_string(pid) + "/comm");
+// /proc/<pid>/comm is truncated to 15 characters by the kernel, which causes
+// false negatives for any executable whose basename is longer (e.g.
+// "broken_lidar_node" -> "broken_lidar_no"). Read /proc/<pid>/cmdline
+// instead - its first NUL-separated arg holds the full path / argv[0].
+std::string proc_cmdline_arg0(int pid) {
+  std::ifstream f("/proc/" + std::to_string(pid) + "/cmdline", std::ios::binary);
   if (!f) {
     return {};
   }
-  std::string line;
-  std::getline(f, line);
-  return line;
+  std::string buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  if (buf.empty()) {
+    return {};
+  }
+  // argv[0] runs to the first NUL.
+  const auto nul = buf.find('\0');
+  std::string arg0 = (nul == std::string::npos) ? buf : buf.substr(0, nul);
+  // Take the basename so callers pass executable_basename without a path.
+  const auto slash = arg0.rfind('/');
+  return (slash == std::string::npos) ? arg0 : arg0.substr(slash + 1);
 }
 
 bool is_pid_dir(const char * name) {
@@ -67,7 +78,7 @@ std::vector<int> ProcessRunner::pgrep(const std::string & executable_basename) {
     if (pid <= 0) {
       continue;
     }
-    if (proc_comm(pid) == executable_basename) {
+    if (proc_cmdline_arg0(pid) == executable_basename) {
       out.push_back(pid);
     }
   }
