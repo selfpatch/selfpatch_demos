@@ -25,6 +25,7 @@ env -i PATH=/usr/bin:/bin HOME="$HOME" "${PACK[@]}" \
   --package fixed_lidar --version 2.1.0 \
   --kind update --target-component scan_sensor_node \
   --executable fixed_lidar_node \
+  --replaces-executable broken_lidar_node \
   --notes "Fix /scan noise filter" \
   --skip-build --workspace "$WS" \
   --out-dir "$ARTIFACTS" --catalog "$ARTIFACTS/catalog.json"

@@ -39,6 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Executable name inside install/<package>/lib (required for install).",
     )
+    parser.add_argument(
+        "--replaces-executable",
+        default="",
+        help=(
+            "For kind=update: name of the OLD executable to kill before "
+            "spawning --executable. Defaults to --executable when omitted."
+        ),
+    )
     parser.add_argument("--notes", default="", help="Free-text notes for the catalog entry.")
     parser.add_argument(
         "--duration",
@@ -83,6 +91,7 @@ def build_entry(
     notes: str,
     duration: int,
     size_bytes: int,
+    replaces_executable: str = "",
 ) -> dict:
     entry: dict = {
         "id": slug(package, version) if kind != "uninstall" else f"{package}_remove",
@@ -111,6 +120,9 @@ def build_entry(
             entry["x_medkit_executable"] = executable
     else:
         entry["x_medkit_target_package"] = package
+
+    if kind == "update" and replaces_executable:
+        entry["x_medkit_replaces_executable"] = replaces_executable
 
     return entry
 
@@ -165,6 +177,7 @@ def run(
     catalog: str,
     skip_build: bool,
     workspace: str,
+    replaces_executable: str = "",
 ) -> int:
     if kind == "install" and not executable:
         sys.stderr.write("--executable is required for install\n")
@@ -202,6 +215,7 @@ def run(
         notes=notes,
         duration=duration,
         size_bytes=size_bytes,
+        replaces_executable=replaces_executable,
     )
     merge_catalog(catalog_p, entry)
     print(f"packed {entry['id']}")
