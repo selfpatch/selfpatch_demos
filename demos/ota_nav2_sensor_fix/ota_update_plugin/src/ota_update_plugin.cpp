@@ -225,8 +225,13 @@ tl::expected<void, UpdateBackendErrorInfo> OtaUpdatePlugin::execute(
       return tl::make_unexpected(
           UpdateBackendErrorInfo{UpdateBackendError::InvalidInput, "missing x_medkit_executable"});
     }
+    // For an update across packages (e.g. broken_lidar -> fixed_lidar) the
+    // OLD process binary lives in a different package than the NEW one we
+    // are about to spawn, so its basename differs from `executable`. Honor
+    // x_medkit_replaces_executable when present, fall back to executable.
+    const std::string kill_target = metadata.value("x_medkit_replaces_executable", executable);
     reporter.set_progress(20);
-    auto kr = process_runner_->kill_by_executable(executable);
+    auto kr = process_runner_->kill_by_executable(kill_target);
     if (!kr) {
       return tl::make_unexpected(UpdateBackendErrorInfo{UpdateBackendError::Internal, "kill failed: " + kr.error()});
     }

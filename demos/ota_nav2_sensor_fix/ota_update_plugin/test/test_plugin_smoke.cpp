@@ -24,6 +24,7 @@
 
 #include "catalog_client.hpp"
 #include "ota_update_plugin/ota_update_plugin.hpp"
+#include "process_runner.hpp"
 
 namespace {
 
@@ -44,6 +45,29 @@ class FakeCatalogClient : public ota_update_plugin::CatalogClient {
     std::ofstream o(out, std::ios::binary);
     o << artifact_to_return;
     return out;
+  }
+};
+
+/// ProcessRunner stub: records the basename passed to kill_by_executable so a
+/// test can verify the plugin honors x_medkit_replaces_executable. Returns 0
+/// signalled processes (no-op kill) and an error from spawn so execute() halts
+/// before touching the (nonexistent) install dir.
+class RecordingProcessRunner : public ota_update_plugin::ProcessRunner {
+ public:
+  std::string last_kill_target;
+
+  std::vector<int> pgrep(const std::string & /*executable_basename*/) override {
+    return {};
+  }
+
+  tl::expected<int, std::string> kill_by_executable(const std::string & executable_basename,
+                                                    int /*timeout_ms*/ = 2000) override {
+    last_kill_target = executable_basename;
+    return 0;
+  }
+
+  tl::expected<int, std::string> spawn(const std::string & /*executable_path*/) override {
+    return tl::make_unexpected(std::string("stub: spawn intentionally not implemented"));
   }
 };
 
@@ -138,4 +162,63 @@ TEST(OtaUpdatePluginSmoke, PrepareUninstallSkipsDownload) {
   auto rc = plugin.prepare("rm", reporter);
   EXPECT_TRUE(rc);
   EXPECT_EQ(info.progress.value_or(-1), 100);
+}
+
+TEST(OtaUpdatePluginSmoke, ExecuteUpdateUsesReplacesExecutableForKill) {
+  ota_update_plugin::OtaUpdatePlugin plugin;
+  plugin.configure({{"staging_dir", ::testing::TempDir() + "/replaces_test"}});
+  plugin.set_catalog_client_for_test(std::make_unique<FakeCatalogClient>("http://x"));
+  auto runner = std::make_unique<RecordingProcessRunner>();
+  RecordingProcessRunner * runner_raw = runner.get();
+  plugin.set_process_runner_for_test(std::move(runner));
+
+  // Update entry with separate old + new executable basenames.
+  ASSERT_TRUE(plugin.register_update({
+      {"id", "u_replaces"},
+      {"updated_components", {"scan_sensor_node"}},
+      {"x_medkit_artifact_url", "/artifacts/fixed.tgz"},
+      {"x_medkit_target_package", "fixed_lidar"},
+      {"x_medkit_executable", "fixed_lidar_node"},
+      {"x_medkit_replaces_executable", "broken_lidar_node"},
+  }));
+
+  ros2_medkit_gateway::UpdateStatusInfo info;
+  std::mutex mu;
+  auto reporter = make_reporter(info, mu);
+  ASSERT_TRUE(plugin.prepare("u_replaces", reporter));
+
+  // execute() will fail at extract_and_swap (the staged tarball is not a real
+  // gzipped archive) but the kill step runs first - that is what we are
+  // checking here.
+  auto rc = plugin.execute("u_replaces", reporter);
+  (void)rc;
+  EXPECT_EQ(runner_raw->last_kill_target, "broken_lidar_node");
+}
+
+TEST(OtaUpdatePluginSmoke, ExecuteUpdateFallsBackToExecutableWhenReplacesMissing) {
+  ota_update_plugin::OtaUpdatePlugin plugin;
+  plugin.configure({{"staging_dir", ::testing::TempDir() + "/replaces_fallback"}});
+  plugin.set_catalog_client_for_test(std::make_unique<FakeCatalogClient>("http://x"));
+  auto runner = std::make_unique<RecordingProcessRunner>();
+  RecordingProcessRunner * runner_raw = runner.get();
+  plugin.set_process_runner_for_test(std::move(runner));
+
+  // Update entry without x_medkit_replaces_executable - kill should target
+  // the same name as x_medkit_executable.
+  ASSERT_TRUE(plugin.register_update({
+      {"id", "u_no_replaces"},
+      {"updated_components", {"scan_sensor_node"}},
+      {"x_medkit_artifact_url", "/artifacts/scan.tgz"},
+      {"x_medkit_target_package", "scan_pkg"},
+      {"x_medkit_executable", "scan_node"},
+  }));
+
+  ros2_medkit_gateway::UpdateStatusInfo info;
+  std::mutex mu;
+  auto reporter = make_reporter(info, mu);
+  ASSERT_TRUE(plugin.prepare("u_no_replaces", reporter));
+
+  auto rc = plugin.execute("u_no_replaces", reporter);
+  (void)rc;
+  EXPECT_EQ(runner_raw->last_kill_target, "scan_node");
 }
