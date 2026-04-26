@@ -153,3 +153,75 @@ def test_create_tarball(tmp_path):
     with tarfile.open(out_path) as tf:
         names = tf.getnames()
     assert "fixed_lidar/lib/fixed_lidar_node" in names
+
+
+def test_run_update_kind_e2e(tmp_path, monkeypatch):
+    workspace = tmp_path / "ws"
+    install = workspace / "install" / "fixed_lidar" / "lib"
+    install.mkdir(parents=True)
+    (install / "fixed_lidar_node").write_text("bin")
+    out_dir = tmp_path / "artifacts"
+    catalog = out_dir / "catalog.json"
+
+    rc = pack_artifact.run(
+        package="fixed_lidar",
+        version="2.1.0",
+        kind="update",
+        target_component="scan_sensor_node",
+        executable="fixed_lidar_node",
+        notes="fix",
+        duration=10,
+        out_dir=str(out_dir),
+        catalog=str(catalog),
+        skip_build=True,
+        workspace=str(workspace),
+    )
+
+    assert rc == 0
+    assert (out_dir / "fixed_lidar-2.1.0.tar.gz").exists()
+    data = json.loads(catalog.read_text())
+    assert data[0]["id"] == "fixed_lidar_2_1_0"
+    assert data[0]["updated_components"] == ["scan_sensor_node"]
+
+
+def test_run_uninstall_skips_tarball(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    out_dir = tmp_path / "artifacts"
+    catalog = out_dir / "catalog.json"
+
+    rc = pack_artifact.run(
+        package="broken_lidar_legacy",
+        version="",
+        kind="uninstall",
+        target_component="broken_lidar_legacy",
+        executable="",
+        notes="cleanup",
+        duration=5,
+        out_dir=str(out_dir),
+        catalog=str(catalog),
+        skip_build=True,
+        workspace=str(workspace),
+    )
+
+    assert rc == 0
+    assert not list(out_dir.glob("*.tar.gz"))
+    data = json.loads(catalog.read_text())
+    assert data[0]["removed_components"] == ["broken_lidar_legacy"]
+
+
+def test_run_install_requires_executable(tmp_path):
+    with pytest.raises(SystemExit):
+        pack_artifact.run(
+            package="obstacle_classifier_v2",
+            version="1.0.0",
+            kind="install",
+            target_component="obstacle_classifier",
+            executable="",
+            notes="",
+            duration=10,
+            out_dir=str(tmp_path / "out"),
+            catalog=str(tmp_path / "out" / "catalog.json"),
+            skip_build=True,
+            workspace=str(tmp_path / "ws"),
+        )
