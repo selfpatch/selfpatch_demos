@@ -20,7 +20,7 @@ def create_app(artifacts_dir: Path) -> FastAPI:
             return []
         return json.loads(catalog_file.read_text())
 
-    @app.get("/artifacts/{filename}")
+    @app.get("/artifacts/{filename}", response_class=FileResponse)
     def artifact(filename: str) -> FileResponse:
         if "/" in filename or ".." in filename:
             raise HTTPException(status_code=400, detail="invalid filename")
