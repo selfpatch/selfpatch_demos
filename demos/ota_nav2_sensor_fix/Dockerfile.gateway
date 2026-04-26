@@ -45,7 +45,7 @@ WORKDIR /ws
 RUN apt-get update
 RUN . /opt/ros/jazzy/setup.sh && \
     rosdep install --from-paths src --ignore-src -r -y --rosdistro=jazzy && \
-    colcon build --symlink-install \
+    colcon build \
       --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     rm -rf /var/lib/apt/lists/*
 
@@ -54,9 +54,14 @@ FROM ros:jazzy
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-rclcpp \
+      ros-jazzy-rclcpp-lifecycle \
       ros-jazzy-sensor-msgs \
       ros-jazzy-visualization-msgs \
       ros-jazzy-launch-ros \
+      ros-jazzy-test-msgs \
+      libcpp-httplib-dev \
+      libsystemd-dev \
+      nlohmann-json3-dev \
       curl \
       procps \
     && rm -rf /var/lib/apt/lists/*

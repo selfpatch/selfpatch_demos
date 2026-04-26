@@ -15,7 +15,7 @@ services:
     container_name: ota_demo_gateway
     networks: [otanet]
     ports:
-      - "8080:8080"
+      - "${OTA_GATEWAY_PORT:-8080}:8080"
     environment:
       ROS_DOMAIN_ID: 42
     depends_on:
@@ -24,13 +24,12 @@ services:
   ota_update_server:
     image: selfpatch/ota_update_server:dev
     build:
-      context: ./ota_update_server
+      context: .
+      dockerfile: ota_update_server/Dockerfile
     container_name: ota_demo_update_server
     networks: [otanet]
     ports:
       - "9000:9000"
-    volumes:
-      - ./artifacts:/artifacts:ro
 
 networks:
   otanet:

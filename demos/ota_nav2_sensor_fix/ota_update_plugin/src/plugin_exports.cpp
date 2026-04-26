@@ -23,3 +23,11 @@ extern "C" GATEWAY_PLUGIN_EXPORT int plugin_api_version() {
 extern "C" GATEWAY_PLUGIN_EXPORT ros2_medkit_gateway::GatewayPlugin * create_plugin() {
   return new ota_update_plugin::OtaUpdatePlugin();
 }
+
+// Explicit cross-cast so the gateway's plugin_loader can resolve the
+// UpdateProvider interface without relying on dynamic_cast across the
+// dlopen boundary (which is fragile when typeinfo isn't shared).
+extern "C" GATEWAY_PLUGIN_EXPORT ros2_medkit_gateway::UpdateProvider *
+get_update_provider(ros2_medkit_gateway::GatewayPlugin * plugin) {
+  return dynamic_cast<ota_update_plugin::OtaUpdatePlugin *>(plugin);
+}
