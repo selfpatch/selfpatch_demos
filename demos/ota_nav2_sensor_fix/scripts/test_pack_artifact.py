@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import tarfile
-from pathlib import Path
 
 import pytest
 
@@ -155,7 +154,7 @@ def test_create_tarball(tmp_path):
     assert "fixed_lidar/lib/fixed_lidar_node" in names
 
 
-def test_run_update_kind_e2e(tmp_path, monkeypatch):
+def test_run_update_kind_e2e(tmp_path):
     workspace = tmp_path / "ws"
     install = workspace / "install" / "fixed_lidar" / "lib"
     install.mkdir(parents=True)
