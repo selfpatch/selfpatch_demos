@@ -22,7 +22,12 @@
 
 #include <nlohmann/json.hpp>
 #include <ros2_medkit_gateway/plugins/gateway_plugin.hpp>
+// UpdateProvider lives at providers/ in newer gateway revisions and updates/ in older ones.
+#if __has_include(<ros2_medkit_gateway/providers/update_provider.hpp>)
 #include <ros2_medkit_gateway/providers/update_provider.hpp>
+#else
+#include <ros2_medkit_gateway/updates/update_provider.hpp>
+#endif
 
 namespace ota_update_plugin {
 
