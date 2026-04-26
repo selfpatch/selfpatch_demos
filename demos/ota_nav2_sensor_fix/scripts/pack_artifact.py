@@ -69,6 +69,52 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def slug(package: str, version: str) -> str:
+    return f"{package}_{version.replace('.', '_')}" if version else package
+
+
+def build_entry(
+    *,
+    package: str,
+    version: str,
+    kind: Kind,
+    target_component: str,
+    executable: str,
+    notes: str,
+    duration: int,
+    size_bytes: int,
+) -> dict:
+    entry: dict = {
+        "id": slug(package, version) if kind != "uninstall" else f"{package}_remove",
+        "name": f"{package} {version}".strip(),
+        "automated": False,
+        "origins": ["remote"],
+        "notes": notes,
+        "duration": duration,
+    }
+    if version:
+        entry["version"] = version
+    if size_bytes > 0:
+        entry["size"] = max(1, size_bytes // 1024)
+
+    if kind == "update":
+        entry["updated_components"] = [target_component]
+    elif kind == "install":
+        entry["added_components"] = [target_component]
+    else:  # uninstall
+        entry["removed_components"] = [target_component]
+
+    if kind != "uninstall":
+        entry["x_medkit_artifact_url"] = f"/artifacts/{package}-{version}.tar.gz"
+        entry["x_medkit_target_package"] = package
+        if executable:
+            entry["x_medkit_executable"] = executable
+    else:
+        entry["x_medkit_target_package"] = package
+
+    return entry
+
+
 def run(**kwargs) -> int:
     raise NotImplementedError
 
