@@ -2,9 +2,10 @@
 # Apache 2.0
 #
 # Two-service stack: the gateway (with ota_update_plugin baked in plus the
-# demo nodes the plugin will manage) and the FastAPI artifact server. nav2
-# and Foxglove are intentionally out of scope here - see README for how to
-# bring your own.
+# nav2 + TB3 + headless Gazebo + foxglove_bridge orchestration) and the
+# FastAPI artifact server. The gateway image is hefty (~5GB) because it bakes
+# the simulator in - the trade-off is `docker compose up` produces a robot
+# Foxglove can render, no external sim setup required.
 
 services:
   gateway:
@@ -19,6 +20,13 @@ services:
       - "${OTA_FOXGLOVE_BRIDGE_PORT:-8765}:8765"
     environment:
       ROS_DOMAIN_ID: 42
+      HEADLESS: "true"
+      TURTLEBOT3_MODEL: burger
+    # Gazebo / DDS appreciate generous shared memory; without this
+    # /dev/shm fills and gz-sim tends to wedge on shutdown.
+    shm_size: "2gb"
+    tty: true
+    stdin_open: true
     depends_on:
       - ota_update_server
 
