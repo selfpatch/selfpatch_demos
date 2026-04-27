@@ -1,9 +1,11 @@
 #!/bin/bash
 # OTA over SOVD - nav2 sensor-fix demo runner.
 # Brings up the gateway (with the dev-grade ota_update_plugin baked in) and
-# the FastAPI artifact server. The gateway entrypoint also launches
-# broken_lidar (publishes /scan with a phantom obstacle) and
-# broken_lidar_legacy (uninstall target).
+# the FastAPI artifact server. The gateway image bundles a full TurtleBot3 +
+# Nav2 + headless Gazebo stack and runs foxglove_bridge on :8765, so the
+# demo is self-contained: broken_lidar publishes /scan with a phantom
+# obstacle that nav2 + a Foxglove 3D panel both react to. The OTA flow
+# swaps broken_lidar -> fixed_lidar and the phantom disappears.
 
 set -eu
 
@@ -26,7 +28,8 @@ usage() {
     echo "  -h, --help         Show this help message"
     echo ""
     echo "Environment:"
-    echo "  OTA_GATEWAY_PORT   Host port for gateway HTTP API (default: 8080)"
+    echo "  OTA_GATEWAY_PORT           Host port for gateway HTTP API (default: 8080)"
+    echo "  OTA_FOXGLOVE_BRIDGE_PORT   Host port for foxglove_bridge WebSocket (default: 8765)"
     echo ""
     echo "Examples:"
     echo "  $0                       # Daemon mode (default)"
@@ -142,7 +145,8 @@ echo "  Web UI (ros2_medkit_web_ui):"
 echo "    npm install && npm run dev"
 echo "    open http://localhost:5173 -> Connect -> ${GATEWAY_URL}"
 echo ""
-echo "  Foxglove Studio (ros2_medkit_foxglove_extension):"
-echo "    cd ros2_medkit_foxglove_extension && npm install && npm run local-install"
-echo "    Open Foxglove -> add panel 'ros2_medkit Updates'"
-echo "    Set baseUrl in panel settings to ${GATEWAY_URL}/api/v1"
+echo "  Foxglove Studio (recommended for the 3D narrative):"
+echo "    Open connection -> Foxglove WebSocket -> ws://localhost:${OTA_FOXGLOVE_BRIDGE_PORT:-8765}"
+echo "    Add a 3D panel: TurtleBot3 in the world, /scan cone shows the phantom"
+echo "    Install ros2_medkit_foxglove_extension (npm run local-install) for the"
+echo "    'ros2_medkit Updates' panel; set baseUrl to ${GATEWAY_URL}/api/v1"
