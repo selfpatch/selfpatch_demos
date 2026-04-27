@@ -26,8 +26,9 @@ update package metadata.
 ./run-demo.sh
 ```
 
-The first run pulls `ros:jazzy` and builds the gateway from source - takes
-~10 minutes. Subsequent runs reuse the layer cache.
+The first run pulls `ros:jazzy`, installs the TurtleBot3 + Nav2 + gz-sim
+runtime (~3 GB) and builds the gateway from source - takes ~15-20 minutes
+on a fresh cache. Subsequent runs reuse the layer cache.
 
 In another terminal, drive the demo:
 
@@ -42,7 +43,10 @@ In another terminal, drive the demo:
 Each trigger script issues SOVD `PUT /updates/{id}/prepare` then `/execute`
 and prints the resulting status plus the live process list.
 
-If host port 8080 is taken, override with `OTA_GATEWAY_PORT=8081 ./run-demo.sh`.
+Port overrides (set as env vars before `./run-demo.sh`):
+
+- `OTA_GATEWAY_PORT` - gateway HTTP API (default `8080`)
+- `OTA_FOXGLOVE_BRIDGE_PORT` - foxglove_bridge WebSocket (default `8765`)
 
 Tear down: `docker compose down`.
 
