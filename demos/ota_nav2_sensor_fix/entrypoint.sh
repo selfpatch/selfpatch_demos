@@ -18,6 +18,13 @@ source /ws/install/setup.bash
 ros2 run broken_lidar broken_lidar_node &
 ros2 run broken_lidar_legacy broken_lidar_legacy &
 
+# foxglove_bridge: WebSocket server on :8765 so Foxglove Studio can
+# subscribe to /scan, /tf, and any topic the demo nodes publish. Required
+# for the visual narrative (3D scene + phantom obstacle); the SOVD Updates
+# panel itself only needs the gateway HTTP API.
+ros2 run foxglove_bridge foxglove_bridge \
+  --ros-args -p port:=8765 -p address:=0.0.0.0 &
+
 # Foreground gateway. Pass the config file directly to the gateway_node
 # executable (the gateway.launch.py wrapper does not expose a config_file
 # argument, so we invoke the executable directly to thread our YAML in).

@@ -119,8 +119,9 @@ fi
 echo ""
 echo "Demo is up."
 echo ""
-echo "  Gateway HTTP API:  ${GATEWAY_URL}/api/v1/"
-echo "  Update server:     http://localhost:9000/catalog"
+echo "  Gateway HTTP API:    ${GATEWAY_URL}/api/v1/"
+echo "  Foxglove WebSocket:  ws://localhost:${OTA_FOXGLOVE_BRIDGE_PORT:-8765}"
+echo "  Update server:       http://localhost:9000/catalog"
 echo ""
 echo "Registered updates:"
 if command -v jq >/dev/null 2>&1; then
