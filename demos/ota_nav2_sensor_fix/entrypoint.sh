@@ -15,6 +15,12 @@ source /ws/install/setup.bash
 # Demo nodes the plugin will swap (broken_lidar -> fixed_lidar) and
 # uninstall (broken_lidar_legacy). obstacle_classifier_v2 is installed
 # fresh by the demo and not started here.
+# Fault manager: serves /fault_manager/* services that the gateway's
+# /faults endpoint calls. Without it /faults hangs because the gateway
+# blocks waiting for the service. Default parameters are fine for the
+# demo (in-memory store, no persistence).
+ros2 run ros2_medkit_fault_manager fault_manager_node &
+
 ros2 run broken_lidar broken_lidar_node &
 ros2 run broken_lidar_legacy broken_lidar_legacy &
 
