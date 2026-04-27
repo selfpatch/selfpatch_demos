@@ -48,35 +48,44 @@ Tear down: `docker compose down`.
 
 ## Foxglove Studio visualization
 
-The gateway container also runs `foxglove_bridge` on port `8765` so
-Foxglove Studio can subscribe to ROS 2 topics (e.g. `/scan` from
-broken_lidar / fixed_lidar).
+The gateway container bakes in a TurtleBot3 burger + Nav2 stack running on
+top of headless Gazebo. `foxglove_bridge` runs on port `8765` and exposes
+the full topic set: `/tf`, `/tf_static`, `/scan`, `/odom`, `/map`,
+`/cmd_vel`, `/global_costmap/costmap`, `/local_costmap/costmap`, etc. - so a
+Foxglove **3D** panel renders the actual robot in the world out of the box.
 
 1. Open Foxglove Studio -> **Open connection** -> **Foxglove WebSocket** ->
-   `ws://localhost:8765`. You should see `/scan` and other topics in the
-   Topics panel.
-2. Install the [`ros2_medkit_foxglove_extension`](https://github.com/selfpatch/ros2_medkit_foxglove_extension)
+   `ws://localhost:8765`. The Topics panel should list all of the topics
+   above.
+2. Drop in a **3D** panel. You should see the TB3 burger sitting in the
+   default `turtlebot3_world.world` map, with the laser scan cone visible.
+   Before the OTA update, ray index 180 reports a phantom 1 m return - the
+   "obstacle" the demo's narrative pivots on.
+3. Install the [`ros2_medkit_foxglove_extension`](https://github.com/selfpatch/ros2_medkit_foxglove_extension)
    (`npm run local-install` in that repo, or drag-and-drop the `.foxe`
    onto Foxglove). It ships three panels: Entity Browser, Faults Dashboard,
    and **ros2_medkit Updates**.
-3. Add the **ros2_medkit Updates** panel and set its `baseUrl` to
+4. Add the **ros2_medkit Updates** panel and set its `baseUrl` to
    `http://localhost:8080/api/v1` (or the port you picked via
-   `OTA_GATEWAY_PORT`).
-4. Click **Prepare** and **Execute** in the Updates panel - the same SOVD
-   endpoints `trigger-update.sh` hits, with progress feedback in the panel
-   and live `/scan` updates in the 3D scene.
+   `OTA_GATEWAY_PORT`). Click **Prepare** then **Execute** for
+   `fixed_lidar_2_1_0`. The 3D panel should show the phantom return
+   disappearing as `broken_lidar` is killed and `fixed_lidar` starts.
 
-## Adding nav2 / a sim
+### Driving the robot to make the narrative reproducible
 
-This demo intentionally omits a nav2 sim from the compose so the stack stays
-small and reliably reproducible. To make the visual story complete:
+The demo doesn't auto-publish a navigation goal - that keeps it deterministic
+for CI. To trigger the "robot stuck on phantom obstacle" beat manually:
 
-- Bring up your favourite turtlebot3 sim (`turtlebot3_gazebo`) and point it
-  at `ROS_DOMAIN_ID=42` to share the DDS namespace with the gateway.
-- The broken_lidar node publishes a phantom return on `/scan` ~1m straight
-  ahead. nav2's costmap will trace it as an obstacle and the planner will
-  refuse to drive forward. After the update flow, fixed_lidar publishes a
-  clean scan and the path planner unblocks.
+```bash
+# From the host (or any container on the same ROS_DOMAIN_ID=42):
+ros2 topic pub --once /goal_pose geometry_msgs/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: 1.5, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}'
+```
+
+Foxglove's **3D** panel also has a built-in "Publish" tool - select pose
+mode, click a point ahead of the robot, and Foxglove publishes `/goal_pose`
+for you. Before the update, Nav2 refuses to drive through the phantom return;
+after `trigger-update.sh`, the robot completes the goal.
 
 ## Disclosures
 

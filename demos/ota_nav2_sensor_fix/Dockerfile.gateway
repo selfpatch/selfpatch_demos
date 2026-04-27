@@ -52,6 +52,10 @@ RUN . /opt/ros/jazzy/setup.sh && \
 
 FROM ros:jazzy
 
+# Runtime dependencies. Beyond the gateway/plugin bare minimum we also pull in
+# TurtleBot3, Nav2, and gz-sim so the container can self-host the visual demo
+# (TB3 + headless Gazebo + Nav2) - no external sim required, the OTA story
+# becomes "Foxglove sees a stuck robot, run an update, robot unsticks".
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-rclcpp \
       ros-jazzy-rclcpp-lifecycle \
@@ -60,6 +64,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-launch-ros \
       ros-jazzy-test-msgs \
       ros-jazzy-foxglove-bridge \
+      ros-jazzy-turtlebot3-gazebo \
+      ros-jazzy-turtlebot3-msgs \
+      ros-jazzy-turtlebot3-description \
+      ros-jazzy-turtlebot3-navigation2 \
+      ros-jazzy-nav2-bringup \
+      ros-jazzy-nav2-bt-navigator \
+      ros-jazzy-nav2-controller \
+      ros-jazzy-nav2-planner \
+      ros-jazzy-nav2-behaviors \
+      ros-jazzy-nav2-costmap-2d \
+      ros-jazzy-nav2-lifecycle-manager \
+      ros-jazzy-nav2-map-server \
+      ros-jazzy-nav2-amcl \
+      ros-jazzy-ros-gz-sim \
+      ros-jazzy-ros-gz-bridge \
+      ros-jazzy-rmw-cyclonedds-cpp \
       libcpp-httplib-dev \
       libsystemd-dev \
       nlohmann-json3-dev \
@@ -72,7 +92,17 @@ COPY gateway_config.yaml /etc/ros2_medkit/gateway_config.yaml
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-ENV ROS_DOMAIN_ID=42
+# Default TB3 model + gz-sim resource path so spawn_turtlebot3 + gz can find
+# the burger URDF/world models without the launch file having to set them.
+# RMW: jazzy's apt-shipped nav2_msgs fastrtps typesupport pulls
+# eprosima::fastcdr::Cdr::serialize(uint32_t), which the bundled
+# ros-jazzy-fastcdr 2.2.5 does NOT export - amcl/controller_server segfault
+# at startup. Switch to cyclonedds, which doesn't use the broken typesupport.
+ENV ROS_DOMAIN_ID=42 \
+    TURTLEBOT3_MODEL=burger \
+    GAZEBO_MODEL_PATH=/opt/ros/jazzy/share/turtlebot3_gazebo/models \
+    HEADLESS=true \
+    RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 EXPOSE 8080 8765
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
