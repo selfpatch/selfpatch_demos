@@ -184,31 +184,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install pack_artifact dev deps
-        working-directory: demos/ota_nav2_sensor_fix/scripts
-        run: |
-          python -m venv .venv
-          .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install pytest
-
-      - name: Set up ROS 2 Jazzy (host) for build_artifacts.sh
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common curl
-          sudo add-apt-repository universe -y
-          sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y ros-jazzy-ros-base python3-colcon-common-extensions
-
-      - name: Build artifacts (catalog + tarballs)
+      - name: Build artifacts (catalog + tarballs) inside ros:jazzy
         working-directory: demos/ota_nav2_sensor_fix
-        run: ./scripts/build_artifacts.sh
+        run: |
+          docker run --rm \
+            -v "$PWD":/work \
+            -w /work \
+            ros:jazzy \
+            bash -c '
+              set -eu
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                python3-colcon-common-extensions \
+                python3-catkin-pkg \
+                python3-venv \
+                python3-pip \
+                build-essential \
+                cmake \
+                ros-jazzy-rclcpp \
+                ros-jazzy-sensor-msgs \
+                ros-jazzy-visualization-msgs
+              cd scripts
+              python3 -m venv .venv
+              .venv/bin/pip install --upgrade pip
+              .venv/bin/pip install pytest
+              cd ..
+              ./scripts/build_artifacts.sh
+            '
+          # Restore ownership of files the container created as root.
+          sudo chown -R "$USER:$USER" .
 
       - name: Build and start OTA demo
         working-directory: demos/ota_nav2_sensor_fix
