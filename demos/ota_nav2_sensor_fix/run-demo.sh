@@ -103,7 +103,7 @@ fi
 
 echo ""
 echo "[3/3] Waiting for gateway to come up..."
-for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
     if curl -fsS "${GATEWAY_URL}/api/v1/health" >/dev/null 2>&1; then
         break
     fi
