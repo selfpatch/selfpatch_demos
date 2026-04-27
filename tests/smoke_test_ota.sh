@@ -76,13 +76,19 @@ fi
 
 section "UpdateProvider plugin loaded"
 
-if docker logs "$GATEWAY_CONTAINER" 2>&1 | grep -q "Update backend provided by plugin"; then
+# Capture logs into a variable rather than piping `docker logs | grep -q`.
+# With `set -o pipefail` and a large log (nav2 lifecycle prints ~500 lines),
+# grep -q exits early on first match, SIGPIPEs docker logs, and the pipeline
+# returns 141 - which `if` reads as "no match" even when the line was found.
+GATEWAY_LOGS=$(docker logs "$GATEWAY_CONTAINER" 2>&1 || true)
+
+if printf '%s\n' "$GATEWAY_LOGS" | grep -q "Update backend provided by plugin"; then
     pass "gateway log says: 'Update backend provided by plugin'"
 else
     fail "gateway log says: 'Update backend provided by plugin'" "log line missing"
 fi
 
-if docker logs "$GATEWAY_CONTAINER" 2>&1 | grep -q "Updates enabled but no UpdateProvider plugin loaded"; then
+if printf '%s\n' "$GATEWAY_LOGS" | grep -q "Updates enabled but no UpdateProvider plugin loaded"; then
     fail "no 'no UpdateProvider' warning" "warning was logged"
 else
     pass "no 'no UpdateProvider' warning"
@@ -158,6 +164,30 @@ section "Initial process state"
 assert_process_running "/lib/broken_lidar/broken_lidar_node" "broken_lidar_node running before update"
 assert_process_running "broken_lidar_legacy" "broken_lidar_legacy running before uninstall"
 
+section "/scan SetRemap regression (only broken_lidar publishes, not gz-bridge)"
+
+# The launch wraps spawn_turtlebot3 in a SetRemap('/scan' -> '/scan_sim') so
+# the gz-bridge ends up on /scan_sim, leaving broken_lidar as the sole
+# publisher on /scan. If that remap regresses, both publishers stomp each
+# other and nav2 sees garbage. Use ros2 topic info -v inside the container
+# (host runner has no ROS install) and assert exactly one publisher whose
+# node name is NOT ros_gz_bridge.
+SCAN_INFO=$(docker exec "$GATEWAY_CONTAINER" bash -lc \
+    'source /opt/ros/jazzy/setup.bash && ros2 topic info /scan -v' 2>/dev/null || true)
+
+PUB_COUNT=$(printf '%s\n' "$SCAN_INFO" | grep -c "Endpoint type: PUBLISHER" || true)
+if [ "$PUB_COUNT" = "1" ]; then
+    pass "/scan has exactly 1 publisher"
+else
+    fail "/scan has exactly 1 publisher" "got ${PUB_COUNT} publishers - SetRemap regressed?"
+fi
+
+if printf '%s\n' "$SCAN_INFO" | grep -q "ros_gz_bridge"; then
+    fail "/scan publisher is not ros_gz_bridge" "gz-bridge is publishing on /scan (SetRemap broken)"
+else
+    pass "/scan publisher is not ros_gz_bridge"
+fi
+
 section "Update flow: PUT /updates/fixed_lidar_2_1_0/prepare + /execute"
 
 curl -fsS -X PUT -H 'Content-Type: application/json' -d '{}' \
@@ -188,3 +218,22 @@ curl -fsS -X PUT -H 'Content-Type: application/json' -d '{}' \
 sleep 5
 
 assert_process_running "obstacle_classifier_node" "obstacle_classifier_node spawned after install"
+
+section "Uninstall flow: PUT /updates/broken_lidar_legacy_remove/prepare + /execute"
+
+curl -fsS -X PUT -H 'Content-Type: application/json' -d '{}' \
+    "${API_BASE}/updates/broken_lidar_legacy_remove/prepare" >/dev/null
+sleep 4
+curl -fsS -X PUT -H 'Content-Type: application/json' -d '{}' \
+    "${API_BASE}/updates/broken_lidar_legacy_remove/execute" >/dev/null
+sleep 5
+
+if api_get "/updates/broken_lidar_legacy_remove/status"; then
+    if echo "$RESPONSE" | jq -e '.status == "completed"' >/dev/null 2>&1; then
+        pass "broken_lidar_legacy_remove status is completed"
+    else
+        fail "broken_lidar_legacy_remove status is completed" "got $(echo "$RESPONSE" | jq -c .)"
+    fi
+fi
+
+assert_process_gone "/lib/broken_lidar_legacy/broken_lidar_legacy" "broken_lidar_legacy killed after uninstall"
