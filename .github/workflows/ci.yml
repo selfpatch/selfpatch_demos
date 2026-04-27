@@ -163,3 +163,71 @@ jobs:
         if: always()
         working-directory: demos/multi_ecu_aggregation
         run: docker compose --profile ci down
+
+  build-and-test-ota:
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Show triggering source
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          SHA="${{ github.event.client_payload.sha }}"
+          RUN_URL="${{ github.event.client_payload.run_url }}"
+          echo "## Triggered by ros2_medkit" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${SHA:-unknown}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$RUN_URL" ]; then
+            echo "- Run: [View triggering run]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Run: (URL not provided)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pack_artifact dev deps
+        working-directory: demos/ota_nav2_sensor_fix/scripts
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install pytest
+
+      - name: Set up ROS 2 Jazzy (host) for build_artifacts.sh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common curl
+          sudo add-apt-repository universe -y
+          sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y ros-jazzy-ros-base python3-colcon-common-extensions
+
+      - name: Build artifacts (catalog + tarballs)
+        working-directory: demos/ota_nav2_sensor_fix
+        run: ./scripts/build_artifacts.sh
+
+      - name: Build and start OTA demo
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose up -d --build
+
+      - name: Run smoke tests
+        run: ./tests/smoke_test_ota.sh
+
+      - name: Show gateway logs on failure
+        if: failure()
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose logs gateway --tail=200
+
+      - name: Show update server logs on failure
+        if: failure()
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose logs ota_update_server --tail=200
+
+      - name: Teardown
+        if: always()
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose down
