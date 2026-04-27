@@ -46,13 +46,25 @@ If host port 8080 is taken, override with `OTA_GATEWAY_PORT=8081 ./run-demo.sh`.
 
 Tear down: `docker compose down`.
 
-## Adding a Foxglove visualization
+## Foxglove Studio visualization
 
-Install the `ros2_medkit_foxglove_extension` (which now ships an Updates
-panel - see https://github.com/selfpatch/ros2_medkit_foxglove_extension)
-in your local Foxglove Studio, then point it at
-`http://localhost:8080/api/v1`. The Updates panel exposes Prepare and
-Execute buttons next to each catalog entry.
+The gateway container also runs `foxglove_bridge` on port `8765` so
+Foxglove Studio can subscribe to ROS 2 topics (e.g. `/scan` from
+broken_lidar / fixed_lidar).
+
+1. Open Foxglove Studio -> **Open connection** -> **Foxglove WebSocket** ->
+   `ws://localhost:8765`. You should see `/scan` and other topics in the
+   Topics panel.
+2. Install the [`ros2_medkit_foxglove_extension`](https://github.com/selfpatch/ros2_medkit_foxglove_extension)
+   (`npm run local-install` in that repo, or drag-and-drop the `.foxe`
+   onto Foxglove). It ships three panels: Entity Browser, Faults Dashboard,
+   and **ros2_medkit Updates**.
+3. Add the **ros2_medkit Updates** panel and set its `baseUrl` to
+   `http://localhost:8080/api/v1` (or the port you picked via
+   `OTA_GATEWAY_PORT`).
+4. Click **Prepare** and **Execute** in the Updates panel - the same SOVD
+   endpoints `trigger-update.sh` hits, with progress feedback in the panel
+   and live `/scan` updates in the 3D scene.
 
 ## Adding nav2 / a sim
 

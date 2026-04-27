@@ -59,6 +59,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-visualization-msgs \
       ros-jazzy-launch-ros \
       ros-jazzy-test-msgs \
+      ros-jazzy-foxglove-bridge \
       libcpp-httplib-dev \
       libsystemd-dev \
       nlohmann-json3-dev \
@@ -73,5 +74,5 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV ROS_DOMAIN_ID=42
 
-EXPOSE 8080
+EXPOSE 8080 8765
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
