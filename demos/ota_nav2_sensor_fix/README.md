@@ -22,31 +22,27 @@ update package metadata.
 ## Quickstart
 
 ```bash
-# 1. Build artifacts (compiles fixed_lidar + obstacle_classifier_v2,
-#    generates catalog.json + tarballs).
-./scripts/build_artifacts.sh
-
-# 2. Start the stack (gateway + plugin + demo nodes + update server).
-docker compose up --build
+# Build artifacts + start gateway, plugin, demo nodes, update server.
+./run-demo.sh
 ```
+
+The first run pulls `ros:jazzy` and builds the gateway from source - takes
+~10 minutes. Subsequent runs reuse the layer cache.
 
 In another terminal, drive the demo:
 
 ```bash
-# List the registered updates.
-curl -s http://localhost:8080/api/v1/updates | jq '.[].id'
-
-# Run an update: prepare downloads the artifact, execute swaps + restarts.
-curl -X PUT http://localhost:8080/api/v1/updates/fixed_lidar_2_1_0/prepare
-curl -X PUT http://localhost:8080/api/v1/updates/fixed_lidar_2_1_0/execute
-
-# Install a new package.
-curl -X PUT http://localhost:8080/api/v1/updates/obstacle_classifier_v2_1_0_0/prepare
-curl -X PUT http://localhost:8080/api/v1/updates/obstacle_classifier_v2_1_0_0/execute
-
-# Uninstall a deprecated one.
-curl -X PUT http://localhost:8080/api/v1/updates/broken_lidar_legacy_remove/execute
+./check-demo.sh           # show registered updates + live process state
+./trigger-update.sh       # broken_lidar -> fixed_lidar (the headline scene)
+./trigger-install.sh      # install obstacle_classifier_v2 from scratch
+./trigger-uninstall.sh    # remove broken_lidar_legacy
+./stop-demo.sh            # tear down
 ```
+
+Each trigger script issues SOVD `PUT /updates/{id}/prepare` then `/execute`
+and prints the resulting status plus the live process list.
+
+If host port 8080 is taken, override with `OTA_GATEWAY_PORT=8081 ./run-demo.sh`.
 
 Tear down: `docker compose down`.
 
