@@ -25,15 +25,18 @@ ros2_medkit_gateway:
       max_age_seconds: 86400
 
     discovery:
-      mode: "runtime_only"
+      # Hybrid: manifest defines areas/components/apps/functions, runtime
+      # fills in topics/services/params and surfaces OTA-installed nodes
+      # (e.g. obstacle_classifier_v2 after trigger-install.sh) without
+      # needing a manifest entry for them.
+      mode: "hybrid"
+      manifest_path: "/etc/ros2_medkit/manifest.yaml"
+      manifest_strict_validation: false
       runtime:
-        # The demo's nav2 nodes don't share a meaningful namespace - they
-        # all live at root with a few `/global_costmap`, `/local_costmap`
-        # exceptions. Letting the gateway auto-synthesize Functions from
-        # those namespaces produces single-host "global_costmap" /
-        # "local_costmap" / "root" Functions that don't represent any
-        # logical capability. Disable the auto-gen here; without a
-        # manifest the Functions tree section just stays empty.
+        # Manifest defines components, no need for synthetic ones.
+        create_synthetic_components: false
+        # Manifest defines functions; the auto-gen-from-namespaces path
+        # produces single-host noise because the nav2 stack lives at /.
         create_functions_from_namespaces: false
 
     # Enable /updates endpoints; provider supplied by ota_update_plugin below.

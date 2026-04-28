@@ -93,6 +93,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /ws/install /ws/install
 COPY gateway_config.yaml /etc/ros2_medkit/gateway_config.yaml
+COPY manifest.yaml /etc/ros2_medkit/manifest.yaml
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
