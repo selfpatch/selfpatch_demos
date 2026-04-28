@@ -15,7 +15,11 @@
 FROM ros:jazzy AS builder
 
 ARG GATEWAY_REPO=https://github.com/selfpatch/ros2_medkit.git
-ARG GATEWAY_REF=main
+# Pin to the component-logs aggregation fix branch until the upstream PR
+# lands on main; without it the per-component Logs tab in the Foxglove
+# extension shows zero entries because the synthetic component prefix
+# match returns empty for fqn-less components.
+ARG GATEWAY_REF=fix/component-logs-aggregation
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git \

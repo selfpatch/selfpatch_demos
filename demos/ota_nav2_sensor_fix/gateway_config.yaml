@@ -26,6 +26,15 @@ ros2_medkit_gateway:
 
     discovery:
       mode: "runtime_only"
+      runtime:
+        # The demo's nav2 nodes don't share a meaningful namespace - they
+        # all live at root with a few `/global_costmap`, `/local_costmap`
+        # exceptions. Letting the gateway auto-synthesize Functions from
+        # those namespaces produces single-host "global_costmap" /
+        # "local_costmap" / "root" Functions that don't represent any
+        # logical capability. Disable the auto-gen here; without a
+        # manifest the Functions tree section just stays empty.
+        create_functions_from_namespaces: false
 
     # Enable /updates endpoints; provider supplied by ota_update_plugin below.
     updates:
