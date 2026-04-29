@@ -26,12 +26,18 @@ ros2_medkit_gateway:
 
     discovery:
       # Hybrid: manifest defines areas/components/apps/functions, runtime
-      # fills in topics/services/params and surfaces OTA-installed nodes
-      # (e.g. obstacle_classifier_v2 after trigger-install.sh) without
-      # needing a manifest entry for them.
+      # fills in topics/services/params, and OTA-deployed apps land via
+      # manifest fragments dropped in fragments_dir below.
       mode: "hybrid"
       manifest_path: "/etc/ros2_medkit/manifest.yaml"
       manifest_strict_validation: false
+      manifest:
+        # ota_update_plugin writes one fragment per Install operation
+        # here and calls notify_entities_changed; the gateway re-merges
+        # the base manifest + every yaml in this dir on each reload.
+        # Path is shared with the plugin via plugins.ota_update_plugin
+        # .fragments_dir below - keep them in lockstep.
+        fragments_dir: "/etc/ros2_medkit/manifest_fragments"
       runtime:
         # Manifest defines components, no need for synthetic ones.
         create_synthetic_components: false
@@ -48,3 +54,6 @@ ros2_medkit_gateway:
     plugins.ota_update_plugin.catalog_url: "http://ota_update_server:9000"
     plugins.ota_update_plugin.staging_dir: "/tmp/ota_staging"
     plugins.ota_update_plugin.install_dir: "/ws/install"
+    # Same path the gateway has under discovery.manifest.fragments_dir.
+    # Plugin drops one yaml per Install and removes it on Uninstall.
+    plugins.ota_update_plugin.fragments_dir: "/etc/ros2_medkit/manifest_fragments"
