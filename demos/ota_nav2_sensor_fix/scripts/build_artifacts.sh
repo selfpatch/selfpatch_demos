@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+#
+# Optional dev-convenience: build artefact tarballs + catalog.json on
+# the host so a maintainer can iterate on broken_lidar / fixed_lidar /
+# obstacle_classifier_v2 without going through `docker compose build`
+# every time.
+#
+# This script is NOT load-bearing for CI or distribution. The
+# reproducible path is `docker compose build ota_update_server`, which
+# multi-stage-builds the same artefacts inside ros:jazzy. If you don't
+# want to think about ROS env on your host, use compose.
+#
+# Prerequisites for running locally:
+#   - /opt/ros/jazzy on the prefix path
+#   - ros2_medkit_msgs sourced (e.g. via a colcon overlay built from
+#     a local clone of ros2_medkit; the gateway image embeds this).
+
 set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEMO_DIR="$(dirname "$SCRIPT_DIR")"
@@ -7,6 +23,18 @@ ARTIFACTS="$DEMO_DIR/artifacts"
 
 # shellcheck disable=SC1091
 source /opt/ros/jazzy/setup.bash
+
+if ! ros2 pkg prefix ros2_medkit_msgs > /dev/null 2>&1; then
+  echo "ros2_medkit_msgs not found on the prefix path." >&2
+  echo "" >&2
+  echo "fixed_lidar / broken_lidar depend on the SOVD ReportFault service" >&2
+  echo "definition that lives in ros2_medkit. Either:" >&2
+  echo "  - source an overlay that has it built, or" >&2
+  echo "  - run 'docker compose build ota_update_server' instead - that" >&2
+  echo "    path is reproducible and bundles the msgs build internally." >&2
+  exit 1
+fi
+
 set -u
 
 mkdir -p "$WS/src"

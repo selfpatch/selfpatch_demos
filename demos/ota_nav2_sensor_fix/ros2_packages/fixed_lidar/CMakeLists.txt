@@ -12,9 +12,10 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(ros2_medkit_msgs REQUIRED)
 
 add_executable(fixed_lidar_node src/fixed_lidar_node.cpp)
-ament_target_dependencies(fixed_lidar_node rclcpp sensor_msgs)
+ament_target_dependencies(fixed_lidar_node rclcpp sensor_msgs ros2_medkit_msgs)
 
 install(TARGETS fixed_lidar_node DESTINATION lib/${PROJECT_NAME})
 
