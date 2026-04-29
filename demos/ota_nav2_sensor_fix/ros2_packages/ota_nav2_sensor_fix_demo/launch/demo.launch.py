@@ -81,7 +81,11 @@ def generate_launch_description():
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='True')
     headless = LaunchConfiguration('headless', default='True')
-    x_pose = LaunchConfiguration('x_pose', default='-2.0')
+    # Robot spawn must lie inside the map's bounds. turtlebot3_world.yaml
+    # has origin (-1.76, -2.42) - the previous (-2.0, -0.5) default put
+    # the robot outside, so global_costmap reported "Sensor origin out of
+    # map bounds" and every navigate_to_pose returned NO_VIABLE_PATH 203.
+    x_pose = LaunchConfiguration('x_pose', default='-1.5')
     y_pose = LaunchConfiguration('y_pose', default='-0.5')
 
     set_gz_model_path = AppendEnvironmentVariable(

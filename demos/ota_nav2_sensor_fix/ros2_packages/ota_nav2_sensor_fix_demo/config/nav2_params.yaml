@@ -57,10 +57,15 @@ amcl:
     z_rand: 0.5
     z_short: 0.05
     scan_topic: scan
+    # Must match the spawn pose set by demo.launch.py (x_pose=-2.0, y_pose=-0.5).
+    # Otherwise AMCL's particle filter searches around origin, never sees the
+    # robot, and never publishes map -> odom - which leaves Foxglove unable
+    # to set Display Frame to "map" and floods rosout with "Invalid frame
+    # ID 'map'" errors.
     set_initial_pose: true
     initial_pose:
-      x: 0.0
-      y: 0.0
+      x: -1.5
+      y: -0.5
       z: 0.0
       yaw: 0.0
 
