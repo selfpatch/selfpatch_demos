@@ -1,0 +1,119 @@
+# Copyright 2026 bburda
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Builds the ros2_medkit gateway, the ota_update_plugin, and the four demo
+# ROS 2 packages into a single ROS 2 Jazzy image. Plugin loads at gateway
+# startup via /etc/ros2_medkit/gateway_config.yaml and the entrypoint also
+# launches the broken_lidar demo nodes that get swapped/uninstalled at
+# runtime by the plugin.
+
+FROM ros:jazzy AS builder
+
+ARG GATEWAY_REPO=https://github.com/selfpatch/ros2_medkit.git
+# Pin to the component-logs aggregation fix branch until the upstream PR
+# lands on main; without it the per-component Logs tab in the Foxglove
+# extension shows zero entries because the synthetic component prefix
+# match returns empty for fqn-less components.
+ARG GATEWAY_REF=fix/component-logs-aggregation
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git \
+      python3-colcon-common-extensions \
+      python3-rosdep \
+      build-essential \
+      cmake \
+      curl \
+      ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rosdep init || true
+RUN rosdep update --rosdistro=jazzy
+
+WORKDIR /ws/src
+RUN git clone --depth=1 --branch ${GATEWAY_REF} ${GATEWAY_REPO} ros2_medkit
+
+# Copy demo packages (broken_lidar, fixed_lidar, broken_lidar_legacy,
+# obstacle_classifier_v2) and the OTA plugin from the build context.
+COPY ros2_packages /tmp/ros2_packages
+RUN cp -r /tmp/ros2_packages/. /ws/src/ && rm -rf /tmp/ros2_packages
+COPY ota_update_plugin /ws/src/ota_update_plugin
+
+WORKDIR /ws
+# rosdep needs the apt cache populated to install gateway dependencies
+# (nlohmann-json3-dev, libcpp-httplib-dev, etc.).
+RUN apt-get update
+RUN . /opt/ros/jazzy/setup.sh && \
+    rosdep install --from-paths src --ignore-src -r -y --rosdistro=jazzy && \
+    colcon build \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release && \
+    rm -rf /var/lib/apt/lists/*
+
+
+FROM ros:jazzy
+
+# Runtime dependencies. Beyond the gateway/plugin bare minimum we also pull in
+# TurtleBot3, Nav2, and gz-sim so the container can self-host the visual demo
+# (TB3 + headless Gazebo + Nav2) - no external sim required, the OTA story
+# becomes "Foxglove sees a stuck robot, run an update, robot unsticks".
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-jazzy-rclcpp \
+      ros-jazzy-rclcpp-lifecycle \
+      ros-jazzy-sensor-msgs \
+      ros-jazzy-visualization-msgs \
+      ros-jazzy-launch-ros \
+      ros-jazzy-test-msgs \
+      ros-jazzy-foxglove-bridge \
+      ros-jazzy-turtlebot3-gazebo \
+      ros-jazzy-turtlebot3-msgs \
+      ros-jazzy-turtlebot3-description \
+      ros-jazzy-turtlebot3-navigation2 \
+      ros-jazzy-nav2-bringup \
+      ros-jazzy-nav2-bt-navigator \
+      ros-jazzy-nav2-controller \
+      ros-jazzy-nav2-planner \
+      ros-jazzy-nav2-behaviors \
+      ros-jazzy-nav2-costmap-2d \
+      ros-jazzy-nav2-lifecycle-manager \
+      ros-jazzy-nav2-map-server \
+      ros-jazzy-nav2-amcl \
+      ros-jazzy-ros-gz-sim \
+      ros-jazzy-ros-gz-bridge \
+      ros-jazzy-rmw-cyclonedds-cpp \
+      libcpp-httplib-dev \
+      libsystemd-dev \
+      nlohmann-json3-dev \
+      curl \
+      procps \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /ws/install /ws/install
+COPY gateway_config.yaml /etc/ros2_medkit/gateway_config.yaml
+COPY manifest.yaml /etc/ros2_medkit/manifest.yaml
+
+# Pre-create the fragments directory so the gateway's manifest manager
+# scans an existing (empty) dir at boot rather than logging "missing
+# fragments_dir" warnings. Plugin writes / removes yaml files here at
+# OTA install / uninstall time.
+RUN mkdir -p /etc/ros2_medkit/manifest_fragments
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Default TB3 model + gz-sim resource path so spawn_turtlebot3 + gz can find
+# the burger URDF/world models without the launch file having to set them.
+# RMW: jazzy's apt-shipped nav2_msgs fastrtps typesupport pulls
+# eprosima::fastcdr::Cdr::serialize(uint32_t), which the bundled
+# ros-jazzy-fastcdr 2.2.5 does NOT export - amcl/controller_server segfault
+# at startup. Switch to cyclonedds, which doesn't use the broken typesupport.
+ENV ROS_DOMAIN_ID=42 \
+    TURTLEBOT3_MODEL=burger \
+    GAZEBO_MODEL_PATH=/opt/ros/jazzy/share/turtlebot3_gazebo/models \
+    HEADLESS=true \
+    RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+EXPOSE 8080 8765
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

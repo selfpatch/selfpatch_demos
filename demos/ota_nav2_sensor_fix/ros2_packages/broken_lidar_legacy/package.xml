@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>broken_lidar_legacy</name>
+  <version>1.0.0</version>
+  <description>Do-nothing legacy package, target of uninstall demo scene.</description>
+  <maintainer email="bartoszburda93@gmail.com">bburda</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

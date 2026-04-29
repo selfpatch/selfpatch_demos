@@ -1,0 +1,273 @@
+# Copyright 2026 bburda. Apache-2.0.
+#
+# SOVD manifest for the OTA over SOVD nav2 sensor-fix demo.
+#
+# Hybrid discovery: the manifest defines components + apps + functions,
+# runtime discovery fills in topics/services/params, and OTA-installed
+# nodes (obstacle_classifier_v2 after trigger-install.sh) appear
+# automatically without needing a manifest entry.
+#
+# Hierarchy used for this demo:
+#   - One Component: the robot itself. SOVD lets a manifest declare
+#     multiple components (e.g. one per ECU on a vehicle), but here
+#     everything runs on a single host so a flat single-component model
+#     is honest and avoids fake "lidar-sensor / nav2-motion / ..."
+#     subdivisions that don't correspond to anything you can actually
+#     swap independently in this demo.
+#   - Apps are the ROS 2 nodes - one entry per node we want the operator
+#     to see. They all live on the single robot component.
+#   - Functions are capability groupings - "Autonomous Navigation",
+#     "Perception" etc. - that pull apps together by what they deliver,
+#     orthogonally to where they run.
+#
+# Areas are intentionally left out. SOVD allows them, but they only add
+# value when there's a meaningful zone partition (powertrain / body /
+# chassis on a vehicle ECU mesh, or multi-robot tenancy). For a single
+# robot they just regroup the same component a second time.
+
+manifest_version: "1.0"
+
+metadata:
+  name: "ota-nav2-sensor-fix"
+  description: "OTA over SOVD demo - TurtleBot3 + Nav2 + headless Gazebo + ros2_medkit gateway"
+  version: "0.1.0"
+
+config:
+  # broken_lidar_legacy gets uninstalled by the OTA flow; obstacle_classifier
+  # gets installed at runtime. Both are unmanifested at boot - tolerate.
+  unmanifested_nodes: warn
+  # Pull in topics, services, params from the running graph for entities
+  # the manifest declares.
+  inherit_runtime_resources: true
+
+# =============================================================================
+# COMPONENTS - one per OTA boundary. For this demo there's a single host
+# so a single component owns every app.
+# =============================================================================
+components:
+  - id: turtlebot3
+    name: "TurtleBot3 Robot"
+    type: "platform"
+    description: "TurtleBot3 burger running headless Gazebo, Nav2, the ros2_medkit gateway, and the OTA-managed sensor stack."
+
+# =============================================================================
+# APPS - one per ROS 2 node we care about (skip nav2-internal _rclcpp_node
+# helpers and transform_listener_impl_* - they're plumbing, not user-facing)
+# =============================================================================
+apps:
+  # ── LiDAR / perception ────────────────────────────────────────────
+  - id: scan-sensor
+    name: "Scan Sensor"
+    category: "sensor"
+    is_located_on: turtlebot3
+    description: "LaserScan publisher (broken_lidar pre-OTA, fixed_lidar post-OTA)"
+    ros_binding: { node_name: scan_sensor_node, namespace: / }
+
+  - id: ros-gz-bridge
+    name: "ROS-Gazebo Bridge"
+    category: "simulation"
+    is_located_on: turtlebot3
+    description: "Bridges /scan_sim and /clock from gz-sim"
+    ros_binding: { node_name: ros_gz_bridge, namespace: / }
+
+  # ── Robot platform ────────────────────────────────────────────────
+  - id: robot-state-publisher
+    name: "Robot State Publisher"
+    category: "platform"
+    is_located_on: turtlebot3
+    description: "Publishes the robot URDF TF tree"
+    ros_binding: { node_name: robot_state_publisher, namespace: / }
+
+  # ── Nav2 motion ───────────────────────────────────────────────────
+  - id: bt-navigator
+    name: "BT Navigator"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Behavior Tree navigator - hosts navigate_to_pose action"
+    ros_binding: { node_name: bt_navigator, namespace: / }
+
+  - id: planner-server
+    name: "Planner Server"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Global path planner"
+    ros_binding: { node_name: planner_server, namespace: / }
+
+  - id: controller-server
+    name: "Controller Server"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Local path follower"
+    ros_binding: { node_name: controller_server, namespace: / }
+
+  - id: smoother-server
+    name: "Smoother Server"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Path smoothing"
+    ros_binding: { node_name: smoother_server, namespace: / }
+
+  - id: route-server
+    name: "Route Server"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Route planning"
+    ros_binding: { node_name: route_server, namespace: / }
+
+  - id: behavior-server
+    name: "Behavior Server"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Recovery behaviors"
+    ros_binding: { node_name: behavior_server, namespace: / }
+
+  - id: waypoint-follower
+    name: "Waypoint Follower"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Sequenced waypoint navigation"
+    ros_binding: { node_name: waypoint_follower, namespace: / }
+
+  - id: velocity-smoother
+    name: "Velocity Smoother"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "/cmd_vel smoothing"
+    ros_binding: { node_name: velocity_smoother, namespace: / }
+
+  - id: collision-monitor
+    name: "Collision Monitor"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Emergency stop on imminent collision"
+    ros_binding: { node_name: collision_monitor, namespace: / }
+
+  - id: docking-server
+    name: "Docking Server"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Approach + dock action"
+    ros_binding: { node_name: docking_server, namespace: / }
+
+  - id: global-costmap
+    name: "Global Costmap"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Static + obstacle costmap for planning"
+    ros_binding: { node_name: global_costmap, namespace: /global_costmap }
+
+  - id: local-costmap
+    name: "Local Costmap"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Local rolling costmap for control"
+    ros_binding: { node_name: local_costmap, namespace: /local_costmap }
+
+  - id: lifecycle-manager-navigation
+    name: "Lifecycle Manager (Navigation)"
+    category: "navigation"
+    is_located_on: turtlebot3
+    description: "Nav2 motion lifecycle orchestration"
+    ros_binding: { node_name: lifecycle_manager_navigation, namespace: / }
+
+  # ── Nav2 localization ─────────────────────────────────────────────
+  - id: amcl
+    name: "AMCL"
+    category: "localization"
+    is_located_on: turtlebot3
+    description: "Adaptive Monte Carlo Localization"
+    ros_binding: { node_name: amcl, namespace: / }
+
+  - id: map-server
+    name: "Map Server"
+    category: "localization"
+    is_located_on: turtlebot3
+    description: "Static map publisher"
+    ros_binding: { node_name: map_server, namespace: / }
+
+  - id: lifecycle-manager-localization
+    name: "Lifecycle Manager (Localization)"
+    category: "localization"
+    is_located_on: turtlebot3
+    description: "Localization lifecycle orchestration"
+    ros_binding: { node_name: lifecycle_manager_localization, namespace: / }
+
+  # ── Diagnostics ───────────────────────────────────────────────────
+  - id: medkit-gateway
+    name: "ros2_medkit Gateway"
+    category: "gateway"
+    is_located_on: turtlebot3
+    description: "SOVD REST gateway, hosts the OTA plugin"
+    ros_binding: { node_name: ros2_medkit_gateway, namespace: / }
+
+  - id: medkit-fault-manager
+    name: "Fault Manager"
+    category: "diagnostics"
+    is_located_on: turtlebot3
+    description: "Fault aggregation + storage"
+    ros_binding: { node_name: fault_manager, namespace: / }
+
+  # ── Visualization ─────────────────────────────────────────────────
+  - id: foxglove-bridge
+    name: "Foxglove Bridge"
+    category: "visualization"
+    is_located_on: turtlebot3
+    description: "WebSocket bridge on :8765"
+    ros_binding: { node_name: foxglove_bridge, namespace: / }
+
+# =============================================================================
+# FUNCTIONS - what the user actually selects in the tree to ask
+# "is this capability working?"
+# =============================================================================
+functions:
+  - id: autonomous-navigation
+    name: "Autonomous Navigation"
+    category: "mobility"
+    description: "Plan + drive to a goal pose - the headline OTA demo capability"
+    hosted_by:
+      - bt-navigator
+      - planner-server
+      - controller-server
+      - smoother-server
+      - route-server
+      - behavior-server
+      - waypoint-follower
+      - velocity-smoother
+      - collision-monitor
+      - docking-server
+      - global-costmap
+      - local-costmap
+      - lifecycle-manager-navigation
+
+  - id: localization
+    name: "Localization"
+    category: "mobility"
+    description: "Where is the robot in the map - AMCL + map server"
+    hosted_by:
+      - amcl
+      - map-server
+      - lifecycle-manager-localization
+
+  - id: perception
+    name: "Perception"
+    category: "sensing"
+    description: "LaserScan stream feeding nav2 - the OTA target"
+    hosted_by:
+      - scan-sensor
+      - ros-gz-bridge
+
+  - id: fleet-diagnostics
+    name: "Fleet Diagnostics"
+    category: "diagnostics"
+    description: "SOVD REST surface + fault aggregation - this panel"
+    hosted_by:
+      - medkit-gateway
+      - medkit-fault-manager
+
+  - id: live-telemetry
+    name: "Live Telemetry"
+    category: "observability"
+    description: "Foxglove bridge + URDF publisher feeding the 3D panel"
+    hosted_by:
+      - foxglove-bridge
+      - robot-state-publisher
