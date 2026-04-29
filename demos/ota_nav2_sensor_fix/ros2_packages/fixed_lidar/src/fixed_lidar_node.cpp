@@ -75,7 +75,10 @@ class FixedLidarNode : public rclcpp::Node {
     req->event_type = ros2_medkit_msgs::srv::ReportFault::Request::EVENT_PASSED;
     req->severity = 0;
     req->description = "fixed_lidar took over scan_sensor_node - phantom returns no longer published.";
-    req->source_id = "scan_sensor_node";
+    // Same FQN as broken_lidar so the EVENT_PASSED clears the fault on
+    // the same reporting source - see broken_lidar_node.cpp for why a
+    // bare name doesn't match the per-app/per-component aggregation.
+    req->source_id = "/scan_sensor_node";
 
     auto cb = [this](rclcpp::Client<ros2_medkit_msgs::srv::ReportFault>::SharedFuture fut) {
       try {
