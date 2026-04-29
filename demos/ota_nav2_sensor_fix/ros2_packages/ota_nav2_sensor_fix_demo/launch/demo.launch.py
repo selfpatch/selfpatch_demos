@@ -132,11 +132,32 @@ def generate_launch_description():
         condition=IfCondition(headless),
     )
 
-    robot_state_publisher = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(turtlebot3_gazebo_dir, 'launch', 'robot_state_publisher.launch.py'),
-        ),
-        launch_arguments={'use_sim_time': use_sim_time}.items(),
+    # We deliberately do NOT include turtlebot3_gazebo's
+    # robot_state_publisher.launch.py - it hardcodes
+    # `frame_prefix=PythonExpression(["'", frame_prefix, "/'"])`, which
+    # appends a leading "/" to every link name even when the launch arg
+    # is empty. The result was a tf tree where odom / amcl frames are
+    # `base_link` (no slash) and URDF link frames are `/base_link`
+    # (with slash) - two disjoint subgraphs, so Foxglove rendered the
+    # robot as a pile of disconnected meshes. Spawn robot_state_publisher
+    # directly with an empty frame_prefix.
+    turtlebot3_model = os.environ.get('TURTLEBOT3_MODEL', 'burger')
+    urdf_path = os.path.join(
+        turtlebot3_gazebo_dir, 'urdf', f'turtlebot3_{turtlebot3_model}.urdf'
+    )
+    with open(urdf_path, 'r') as f:
+        robot_desc = f.read()
+
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        name='robot_state_publisher',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'robot_description': robot_desc,
+            'frame_prefix': '',
+        }],
         condition=IfCondition(headless),
     )
 
