@@ -2,18 +2,24 @@
 #
 # SOVD manifest for the OTA over SOVD nav2 sensor-fix demo.
 #
-# The demo runs in hybrid discovery mode: this manifest defines areas /
-# components / apps / functions, runtime discovery fills in topic
-# bindings, and OTA-installed nodes (e.g. obstacle_classifier_v2 after
-# trigger-install.sh) appear automatically without needing a manifest
-# entry.
+# Hybrid discovery: the manifest defines components + apps + functions,
+# runtime discovery fills in topics/services/params, and OTA-installed
+# nodes (obstacle_classifier_v2 after trigger-install.sh) appear
+# automatically without needing a manifest entry.
 #
-# The point of the manifest is to make the Functions tree meaningful:
-# without it the gateway either auto-synthesizes one Function per
-# namespace (mostly single-host noise on this stack, where everything
-# lives at root) or leaves it empty. Here we group nodes by capability
-# so an operator viewing the tree sees Navigation / Localization /
-# Perception / Diagnostics / Visualization, not opaque hashes.
+# Hierarchy used for this demo:
+#   - Components are the OTA / hardware boundaries: a LiDAR sensor, the
+#     Nav2 motion stack, the diagnostics services, etc. This is what
+#     "you can swap" looks like.
+#   - Apps are the ROS 2 nodes that live on a component.
+#   - Functions are capability groupings - "Autonomous Navigation",
+#     "Perception" - that pull apps from across components when the
+#     capability is delivered by more than one node.
+#
+# Areas are intentionally left out. SOVD allows them, but they only add
+# value when there's a meaningful spatial / zone partition (powertrain /
+# body / chassis on a vehicle ECU mesh). On a single robot they just
+# regroup the same components a second time and clutter the tree.
 
 manifest_version: "1.0"
 
@@ -31,74 +37,43 @@ config:
   inherit_runtime_resources: true
 
 # =============================================================================
-# AREAS
-# =============================================================================
-areas:
-  - id: robot
-    name: "Robot"
-    description: "TurtleBot3 platform, sensors, and TF infrastructure"
-    namespace: /
-
-  - id: navigation
-    name: "Navigation"
-    description: "Nav2 motion / planning / control stack"
-    namespace: /
-
-  - id: diagnostics
-    name: "Diagnostics"
-    description: "ros2_medkit gateway, fault manager, OTA"
-    namespace: /
-
-  - id: visualization
-    name: "Visualization"
-    description: "Foxglove bridge and simulator-ROS bridge"
-    namespace: /
-
-# =============================================================================
-# COMPONENTS - logical groupings the apps live on
+# COMPONENTS - OTA / hardware boundaries; the apps live on these
 # =============================================================================
 components:
   - id: lidar-sensor
     name: "LiDAR Sensor"
     type: "sensor"
     description: "2D LiDAR (broken_lidar / fixed_lidar after OTA swap)"
-    area: robot
 
   - id: robot-base
     name: "TurtleBot3 Base"
     type: "platform"
     description: "Robot platform - URDF publisher and gz bridge"
-    area: robot
 
   - id: nav2-motion
     name: "Nav2 Motion"
     type: "controller"
     description: "BT navigator, planner, controller, behaviors, costmaps"
-    area: navigation
 
   - id: nav2-localization
     name: "Nav2 Localization"
     type: "controller"
     description: "AMCL + map server + localization lifecycle manager"
-    area: navigation
 
   - id: medkit-gateway-unit
     name: "ros2_medkit Gateway"
     type: "controller"
     description: "SOVD HTTP gateway with the OTA update plugin loaded"
-    area: diagnostics
 
   - id: fault-manager-unit
     name: "Fault Manager"
     type: "controller"
     description: "Fault aggregation backend behind /faults"
-    area: diagnostics
 
   - id: foxglove-unit
     name: "Foxglove Bridge"
     type: "controller"
     description: "WebSocket bridge for Foxglove Studio panels"
-    area: visualization
 
 # =============================================================================
 # APPS - one per ROS 2 node we care about (skip nav2-internal _rclcpp_node
