@@ -70,23 +70,17 @@ class BrokenLidarNode : public rclcpp::Node {
     msg.range_max = 10.0f;
     constexpr int kRays = 360;
     msg.ranges.assign(kRays, msg.range_max);
-    // Phantom obstacle: a 21-ray (~20 degree) wedge of 0.5 m returns
-    // centered straight ahead. A single ray at 1.0 m the local costmap
-    // happily plans around because nav2 marks one cell, raytracing
-    // clears it on the next sweep, and the controller drives forward
-    // anyway. A close wide wedge gets stamped into the local costmap
-    // as a continuous wall the planner has to swerve to avoid - which
-    // it can't reliably do because the wedge stays anchored to base_scan
-    // (it rotates with the robot). End result: the controller stalls,
-    // BT navigator times out, NavigateToPose returns ABORTED.
-    constexpr int kPhantomCenter = 180;
-    constexpr int kPhantomHalfWidth = 10;
-    constexpr float kPhantomRange = 0.5f;
-    for (int i = kPhantomCenter - kPhantomHalfWidth;
-         i <= kPhantomCenter + kPhantomHalfWidth;
-         ++i) {
-      msg.ranges[i] = kPhantomRange;
-    }
+    // Phantom obstacle: a single 1.0 m return on ray index 180 (angle
+    // 0, straight ahead in base_scan). The single ray is just enough to
+    // jitter the local costmap inflation layer near the path - the
+    // global planner still finds a route, the controller engages and
+    // drives /cmd_vel, but the planner has to keep replanning as the
+    // phantom rotates with the robot. Wider wedges trigger
+    // NO_VIABLE_PATH at the planner level and the action ABORTS before
+    // the controller ever spins, which kills the demo's reactive-fault
+    // beat (broken_lidar only raises the fault while /cmd_vel is
+    // commanded).
+    msg.ranges[180] = 1.0f;
     pub_->publish(msg);
   }
 
