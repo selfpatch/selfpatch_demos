@@ -138,7 +138,23 @@ tl::expected<int, std::string> ProcessRunner::spawn(const std::string & executab
     }
     if (grandchild == 0) {
       setsid();
-      execl(executable_path.c_str(), executable_path.c_str(), nullptr);
+      // Forward use_sim_time so the spawned node aligns with the
+      // gateway's clock domain. Without this, nodes started by OTA
+      // (post-update fixed_lidar, post-install obstacle_classifier)
+      // run on wall time while the rest of the stack runs on
+      // /clock from gz-sim - their /scan / /diagnostics timestamps
+      // fall outside nav2's TF buffer and the costmap drops every
+      // message: "the timestamp on the message is earlier than all
+      // the data in the transform cache". Robot stops responding.
+      //
+      // Note: this is the minimum viable param plumbing. A full
+      // production plugin should plumb arbitrary parameters from
+      // the catalog entry through to execve.
+      execl(executable_path.c_str(),
+            executable_path.c_str(),
+            "--ros-args",
+            "-p", "use_sim_time:=true",
+            static_cast<char *>(nullptr));
       std::fprintf(stderr, "execl %s failed: %s\n", executable_path.c_str(),
                    std::strerror(errno));
       _exit(127);
