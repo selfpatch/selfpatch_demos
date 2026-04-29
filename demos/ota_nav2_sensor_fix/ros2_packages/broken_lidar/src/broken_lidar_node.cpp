@@ -110,7 +110,13 @@ class BrokenLidarNode : public rclcpp::Node {
     req->description = "LaserScan ray index 180 reports a constant 1.0 m return "
                        "(straight ahead). Nav2 traces it as a phantom obstacle "
                        "and the controller cannot make progress.";
-    req->source_id = "scan_sensor_node";
+    // Fully-qualified node name. Gateway's per-component / per-app fault
+    // aggregation in fault_handlers.cpp:filter_faults_by_sources does
+    // prefix-match against app.effective_fqn() ("/scan_sensor_node") and
+    // a bare "scan_sensor_node" never matches, so the fault appears in
+    // server-level /faults but is invisible from /components/turtlebot3
+    // /faults and /apps/scan-sensor/faults (the panels Foxglove uses).
+    req->source_id = "/scan_sensor_node";
 
     auto cb = [this, passed](rclcpp::Client<ros2_medkit_msgs::srv::ReportFault>::SharedFuture fut) {
       try {
