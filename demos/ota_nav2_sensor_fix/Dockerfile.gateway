@@ -94,6 +94,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /ws/install /ws/install
 COPY gateway_config.yaml /etc/ros2_medkit/gateway_config.yaml
 COPY manifest.yaml /etc/ros2_medkit/manifest.yaml
+
+# Pre-create the fragments directory so the gateway's manifest manager
+# scans an existing (empty) dir at boot rather than logging "missing
+# fragments_dir" warnings. Plugin writes / removes yaml files here at
+# OTA install / uninstall time.
+RUN mkdir -p /etc/ros2_medkit/manifest_fragments
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

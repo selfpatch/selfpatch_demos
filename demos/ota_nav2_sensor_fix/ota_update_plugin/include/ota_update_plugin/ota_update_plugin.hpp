@@ -73,9 +73,22 @@ class OtaUpdatePlugin : public ros2_medkit_gateway::GatewayPlugin, public ros2_m
   void poll_and_register_catalog();
 
  private:
+  // Manifest-fragment helpers. Plugins that deploy new nodes at runtime
+  // are expected to drop a fragment yaml in `fragments_dir_` and then
+  // notify the gateway so its ManifestManager re-merges. Without this
+  // the new app shows up as an "Orphan node (not in manifest)" warn
+  // log and never attaches to the manifest entity tree.
+  tl::expected<void, std::string> write_install_fragment(const std::string & update_id,
+                                                          const nlohmann::json & metadata);
+  tl::expected<void, std::string> remove_install_fragment(const std::string & update_id);
+  void notify_manifest_changed();
+
   std::string catalog_url_;
   std::string staging_dir_;
   std::string install_dir_;
+  std::string fragments_dir_;
+
+  ros2_medkit_gateway::PluginContext * context_{nullptr};
 
   std::mutex mu_;
   std::map<std::string, nlohmann::json> registry_;
