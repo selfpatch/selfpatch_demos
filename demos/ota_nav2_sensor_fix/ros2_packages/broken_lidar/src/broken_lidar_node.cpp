@@ -25,7 +25,6 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
-#include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <ros2_medkit_msgs/srv/report_fault.hpp>
 
@@ -38,24 +37,20 @@ class BrokenLidarNode : public rclcpp::Node {
     pub_ = create_publisher<sensor_msgs::msg::LaserScan>("scan", 10);
     timer_ = create_wall_timer(100ms, [this]() { publish_scan(); });
 
-    // Nav2 Jazzy publishes /cmd_vel as TwistStamped; older stacks (and
-    // teleop) still use plain Twist. Subscribe to both so the reactive
-    // fault works regardless of which side is driving.
+    // Nav2 Jazzy publishes /cmd_vel as TwistStamped. Subscribing to
+    // both Twist and TwistStamped works at runtime, but Foxglove
+    // (which inspects subscribers when listing schemas) complains:
+    // "Multiple channels advertise the same topic /cmd_vel but the
+    // schema, schema name or encodings do not match". Stick to the
+    // Nav2 Jazzy default - TwistStamped only.
     constexpr double kThresh = 0.01;
-    auto handle_motion = [this](double linear_x, double angular_z) {
-      if (std::fabs(linear_x) > kThresh || std::fabs(angular_z) > kThresh) {
-        last_motion_command_ = now();
-      }
-    };
-    cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
+    cmd_vel_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
       "cmd_vel", 10,
-      [handle_motion](const geometry_msgs::msg::Twist::SharedPtr msg) {
-        handle_motion(msg->linear.x, msg->angular.z);
-      });
-    cmd_vel_stamped_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
-      "cmd_vel", 10,
-      [handle_motion](const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
-        handle_motion(msg->twist.linear.x, msg->twist.angular.z);
+      [this](const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
+        if (std::fabs(msg->twist.linear.x) > kThresh ||
+            std::fabs(msg->twist.angular.z) > kThresh) {
+          last_motion_command_ = now();
+        }
       });
 
     fault_client_ = create_client<ros2_medkit_msgs::srv::ReportFault>(
@@ -142,8 +137,7 @@ class BrokenLidarNode : public rclcpp::Node {
 
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr pub_;
   rclcpp::TimerBase::SharedPtr timer_;
-  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_vel_stamped_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_vel_sub_;
   rclcpp::Client<ros2_medkit_msgs::srv::ReportFault>::SharedPtr fault_client_;
   rclcpp::TimerBase::SharedPtr fault_timer_;
   rclcpp::Time last_motion_command_{0, 0, RCL_ROS_TIME};
