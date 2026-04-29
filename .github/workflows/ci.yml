@@ -233,37 +233,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build artifacts (catalog + tarballs) inside ros:jazzy
-        working-directory: demos/ota_nav2_sensor_fix
-        run: |
-          docker run --rm \
-            -v "$PWD":/work \
-            -w /work \
-            ros:jazzy \
-            bash -c '
-              set -eu
-              apt-get update
-              apt-get install -y --no-install-recommends \
-                python3-colcon-common-extensions \
-                python3-catkin-pkg \
-                python3-venv \
-                python3-pip \
-                build-essential \
-                cmake \
-                ros-jazzy-rclcpp \
-                ros-jazzy-sensor-msgs \
-                ros-jazzy-visualization-msgs
-              cd scripts
-              python3 -m venv .venv
-              .venv/bin/pip install --upgrade pip
-              .venv/bin/pip install pytest
-              cd ..
-              ./scripts/build_artifacts.sh
-            '
-          sudo chown -R "$USER:$USER" .
-
       - name: Build and start OTA demo
         working-directory: demos/ota_nav2_sensor_fix
+        # docker compose up --build runs the multi-stage build for
+        # ota_update_server which produces the catalog + tarballs
+        # internally - no separate "build artifacts on host" step
+        # needed (and the host wouldn't have ros2_medkit_msgs anyway).
         run: docker compose up -d --build
 
       - name: Run demo narrative smoke
