@@ -155,13 +155,33 @@ def generate_launch_description():
         }.items(),
     )
 
+    # healing_enabled lets EVENT_PASSED reports actually clear an active
+    # fault instead of stalling at PREFAILED. We need this so fixed_lidar
+    # (post-OTA) can clear the SCAN_PHANTOM_RETURN that broken_lidar
+    # raised - otherwise the Faults Dashboard stays red forever after
+    # the OTA swap. Threshold of 2 keeps things responsive while still
+    # debouncing single accidental EVENT_PASSED reports.
     fault_manager = Node(
         package='ros2_medkit_fault_manager',
         executable='fault_manager_node',
         name='fault_manager',
         namespace='',
         output='screen',
-        parameters=[{'use_sim_time': use_sim_time}],
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            # `memory` storage so faults don't persist across container
+            # restarts - the demo is supposed to start with a clean
+            # Faults Dashboard every time, and SQLite kept the last
+            # SCAN_PHANTOM_RETURN around forever.
+            'storage_type': 'memory',
+            # healing_enabled lets EVENT_PASSED reports actually heal an
+            # active fault instead of stalling at PREFAILED (so
+            # fixed_lidar can clear the fault that broken_lidar raised
+            # via the OTA swap). healing_threshold=2 gives a small
+            # debounce against single accidental clears.
+            'healing_enabled': True,
+            'healing_threshold': 2,
+        }],
     )
 
     foxglove = Node(
