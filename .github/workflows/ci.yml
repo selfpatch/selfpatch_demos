@@ -163,3 +163,26 @@ jobs:
         if: always()
         working-directory: demos/multi_ecu_aggregation
         run: docker compose --profile ci down
+
+  build-and-test-manymove-industrial:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and start manymove_industrial demo
+        working-directory: demos/manymove_industrial
+        run: docker compose --profile ci up -d --build manymove-sim-ci
+
+      - name: Run smoke tests
+        run: ./tests/smoke_test_manymove_industrial.sh
+
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: demos/manymove_industrial
+        run: docker compose --profile ci logs manymove-sim-ci --tail=200
+
+      - name: Teardown
+        if: always()
+        working-directory: demos/manymove_industrial
+        run: docker compose --profile ci down
