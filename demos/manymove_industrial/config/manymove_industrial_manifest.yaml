@@ -1,0 +1,96 @@
+manifest_version: "1.0"
+metadata:
+  name: "manymove-industrial"
+  description: "manymove BT manipulator pipeline with medkit fault reporting"
+  version: "0.1.0"
+
+config:
+  unmanifested_nodes: "warn"
+  inherit_runtime_resources: true
+
+areas:
+  - id: manipulation
+    name: "Manipulation"
+    description: "Robot arm motion and grasp control"
+    namespace: /
+  - id: planning
+    name: "Planning"
+    description: "Behavior tree orchestration and motion planning"
+    namespace: /
+  - id: diagnostics
+    name: "Diagnostics"
+    description: "ros2_medkit fault management"
+    namespace: /
+
+components:
+  - id: xarm7-arm
+    name: "xArm 7 manipulator"
+    type: "manipulator"
+    description: "7-DoF cobot under fake_components hardware"
+    area: manipulation
+  - id: manymove-bt
+    name: "manymove BT client"
+    type: "controller"
+    description: "BehaviorTree.CPP orchestration of pick/place sequences"
+    area: planning
+  - id: move-group
+    name: "MoveIt move_group"
+    type: "planner"
+    description: "OMPL motion planner"
+    area: planning
+  - id: gateway
+    name: "ros2_medkit gateway"
+    type: "diagnostics"
+    description: "HTTP REST API for fault inspection"
+    area: diagnostics
+  - id: fault-manager
+    name: "ros2_medkit fault_manager"
+    type: "diagnostics"
+    description: "SQLite-backed fault store"
+    area: diagnostics
+
+apps:
+  - id: bt-client-xarm7
+    name: "BT client (xArm7)"
+    category: "controller"
+    is_located_on: manymove-bt
+    ros_binding:
+      namespace: /
+      node_name: bt_client_xarm7
+  - id: move-group-app
+    name: "move_group"
+    category: "planner"
+    is_located_on: move-group
+    ros_binding:
+      namespace: /
+      node_name: move_group
+  - id: fault-manager-app
+    name: "fault_manager"
+    category: "diagnostics"
+    is_located_on: fault-manager
+    ros_binding:
+      namespace: /
+      node_name: fault_manager
+  - id: gateway-app
+    name: "gateway"
+    category: "diagnostics"
+    is_located_on: gateway
+    ros_binding:
+      namespace: /
+      node_name: ros2_medkit_gateway
+
+functions:
+  - id: pick-and-place
+    name: "Pick and place"
+    category: "manipulation"
+    description: "Pick an object from a feeder zone and place it on the conveyor"
+    hosted_by:
+      - bt-client-xarm7
+      - move-group-app
+  - id: fault-management
+    name: "Fault management"
+    category: "diagnostics"
+    description: "Capture, persist, and surface BT runtime failures"
+    hosted_by:
+      - fault-manager-app
+      - gateway-app

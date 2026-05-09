@@ -1,0 +1,57 @@
+services:
+  # CPU-only manymove + medkit gateway in a single container. The CI profile
+  # below runs the same image headless without the web UI.
+  manymove-sim:
+    profiles: ["cpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manymove_industrial_sim
+    environment:
+      - ROS_DOMAIN_ID=42
+    ports:
+      - "8080:8080"   # medkit gateway HTTP
+      - "8765:8765"   # foxglove-bridge
+    networks: [medkit-net]
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
+               source /opt/ros/jazzy/setup.bash &&
+               source /root/demo_ws/install/setup.bash &&
+               ros2 launch manymove_industrial demo.launch.py"
+
+  medkit-web-ui:
+    profiles: ["cpu"]
+    image: ghcr.io/selfpatch/ros2_medkit_web_ui:latest
+    container_name: manymove_industrial_web_ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - manymove-sim
+    networks: [medkit-net]
+
+  # Headless variant for CI smoke tests.
+  manymove-sim-ci:
+    profiles: ["ci"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manymove_industrial_sim_ci
+    environment:
+      - ROS_DOMAIN_ID=42
+    ports:
+      - "8080:8080"
+    networks: [medkit-net]
+    command: >
+      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
+               source /opt/ros/jazzy/setup.bash &&
+               source /root/demo_ws/install/setup.bash &&
+               ros2 launch manymove_industrial demo.launch.py headless:=true"
+
+# OpenPLC + OPC UA bridge services are planned for the tier-2 PLC correlation
+# narrative; see README "TODO: PLC tier" for the wiring sketch.
+
+networks:
+  medkit-net:
+    driver: bridge

@@ -1,0 +1,37 @@
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      server:
+        host: "0.0.0.0"
+        port: 8080
+      discovery:
+        manifest_path: ""  # set by launch
+        mode: "hybrid"
+        manifest_strict_validation: true
+      plugins: [""]
+      scripts:
+        scripts_dir: "/var/lib/ros2_medkit/scripts"
+        max_concurrent_executions: 3
+
+fault_manager:
+  ros__parameters:
+    storage_type: "sqlite"
+    database_path: "/var/lib/ros2_medkit/faults.db"
+    confirmation_threshold: 0
+    snapshots:
+      enabled: true
+      rosbag:
+        enabled: true
+        duration_sec: 10.0
+        duration_after_sec: 2.0
+        storage_path: "/var/lib/ros2_medkit/rosbags"
+
+# Per-node fault_reporter local filtering.
+bt_client_xarm7:
+  ros__parameters:
+    fault_reporter:
+      local_filtering:
+        enabled: true
+        default_threshold: 3
+        default_window_sec: 10.0
+        bypass_severity: 2  # ERROR + CRITICAL bypass filtering

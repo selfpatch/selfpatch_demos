@@ -1,0 +1,5 @@
+{
+  "name": "Restore normal (clear faults)",
+  "description": "Sends EVENT_PASSED for the planner-collision and retry-attempt codes to clear their LocalFilter state.",
+  "format": "bash"
+}

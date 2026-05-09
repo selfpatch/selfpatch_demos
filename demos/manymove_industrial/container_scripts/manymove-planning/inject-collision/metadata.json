@@ -1,0 +1,5 @@
+{
+  "name": "Inject planner collision fault",
+  "description": "Reports MANYMOVE_PLANNER_COLLISION_DETECTED via the fault_manager service to simulate the collision-on-start failure path.",
+  "format": "bash"
+}
