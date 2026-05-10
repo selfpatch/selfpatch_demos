@@ -4,6 +4,12 @@ diagnostics:
       server:
         host: "0.0.0.0"
         port: 8080
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
+        allowed_headers: ["Content-Type", "Accept"]
+        allow_credentials: false
+        max_age_seconds: 86400
       discovery:
         manifest_path: ""  # set by launch
         mode: "hybrid"
