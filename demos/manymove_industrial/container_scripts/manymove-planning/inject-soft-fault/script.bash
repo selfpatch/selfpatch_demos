@@ -3,7 +3,7 @@
 # will retry pick poses near it, occasionally fail planning, and emit
 # MANYMOVE_PLANNER_RETRY_ATTEMPT (WARN) before either succeeding or hitting
 # RETRIES_EXHAUSTED.
-set -eu
+set -e
 
 source /opt/ros/jazzy/setup.bash
 source /opt/manymove_ws/install/setup.bash

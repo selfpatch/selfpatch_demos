@@ -48,6 +48,7 @@ def generate_launch_description():
         package="ros2_medkit_gateway",
         executable="gateway_node",
         name="ros2_medkit_gateway",
+        namespace="diagnostics",
         output="screen",
         parameters=[medkit_params, {"discovery.manifest_path": manifest_path}],
     )
