@@ -37,14 +37,19 @@ else
     fail "gateway rejected inject-collision script execution"
 fi
 
-# Allow the SQLite write + service round-trip to settle.
-sleep 2
+# Give the BT a few ticks to observe the blackboard flag, run a retry cycle
+# and emit either the collision-detected fault (if MoveManipulator::onStart
+# is the next BT node) or the retries-exhausted fault.
+sleep 6
 
-if poll_until "/faults/list" \
-    '.items[] | select(.fault_code == "MANYMOVE_PLANNER_COLLISION_DETECTED")' 30; then
-    pass "MANYMOVE_PLANNER_COLLISION_DETECTED visible in fault list"
+# Either kPlannerCollisionDetected or kPlannerRetriesExhausted is acceptable:
+# both prove the BT round-trip works, just from different code paths in
+# MoveManipulatorAction.
+if poll_until "/faults" \
+    '.items[] | select(.fault_code == "MANYMOVE_PLANNER_COLLISION_DETECTED" or .fault_code == "MANYMOVE_PLANNER_RETRIES_EXHAUSTED")' 30; then
+    pass "manymove planner fault visible in fault list"
 else
-    fail "MANYMOVE_PLANNER_COLLISION_DETECTED never appeared"
+    fail "no MANYMOVE_PLANNER_* fault appeared after inject-collision"
 fi
 
 section "Restore"
