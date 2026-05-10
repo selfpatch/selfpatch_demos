@@ -81,11 +81,18 @@ def generate_launch_description():
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='True')
     headless = LaunchConfiguration('headless', default='True')
-    # Robot spawn must lie inside the map's bounds. turtlebot3_world.yaml
-    # has origin (-1.76, -2.42) - the previous (-2.0, -0.5) default put
-    # the robot outside, so global_costmap reported "Sensor origin out of
-    # map bounds" and every navigate_to_pose returned NO_VIABLE_PATH 203.
-    x_pose = LaunchConfiguration('x_pose', default='-1.5')
+    # Robot spawn must lie inside the map's bounds with at least 1.5 m of
+    # margin on each side, otherwise the 3 m rolling local_costmap extends
+    # past the global static map and nav2 reports "Sensor origin out of
+    # map bounds" -> NO_VIABLE_PATH 203. turtlebot3_world.yaml has origin
+    # (-1.76, -2.42), so the safe lower bounds are x >= -0.16, y >= -0.82.
+    # Spawn (0.5, -0.5) is 0.71 m from every TB3 obstacle pillar
+    # ((1, 0), (-1, 0), (0, 1), (0, -1) and the central origin obstacle) -
+    # just outside the 0.55 m inflation halo - so AMCL initialises in
+    # clean space and the controller doesn't fire recovery actions at
+    # boot. Map margins: W=2.26 m, S=1.92 m, E=16.94 m, N=17.28 m, all
+    # >= the local_costmap half-width of 1.5 m.
+    x_pose = LaunchConfiguration('x_pose', default='0.5')
     y_pose = LaunchConfiguration('y_pose', default='-0.5')
 
     set_gz_model_path = AppendEnvironmentVariable(
@@ -218,6 +225,13 @@ def generate_launch_description():
             {'port': 8765},
             {'address': '0.0.0.0'},
             {'use_sim_time': use_sim_time},
+            # /tf publisher uses history depth 210 (15 nav2 publishers x ~14
+            # transforms). foxglove_bridge defaults max_qos_depth to 25,
+            # which silently drops most TF samples and breaks Foxglove's
+            # TF chain reconstruction - costmaps drift off the map, robot
+            # mesh floats off /scan, /amcl_pose lags. Bump to 1000 to
+            # accept the full nav2 fan-in.
+            {'max_qos_depth': 1000},
         ],
     )
 
@@ -261,7 +275,7 @@ def generate_launch_description():
             description='Run Gazebo without a GUI - default True for Docker/CI',
         ),
         DeclareLaunchArgument(
-            'x_pose', default_value='-2.0',
+            'x_pose', default_value='0.5',
             description='Robot initial X position',
         ),
         DeclareLaunchArgument(

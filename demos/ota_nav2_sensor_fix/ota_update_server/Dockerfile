@@ -16,7 +16,7 @@
 FROM ros:jazzy AS artefact_builder
 
 ARG GATEWAY_REPO=https://github.com/selfpatch/ros2_medkit.git
-ARG GATEWAY_REF=fix/component-logs-aggregation
+ARG GATEWAY_REF=main
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git \

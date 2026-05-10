@@ -48,7 +48,7 @@ ros2_in_gw() {
 
 publish_goal() {
     local x="${1:-1.5}"
-    local y="${2:-0.0}"
+    local y="${2:-1.0}"
     ros2_in_gw "ros2 topic pub --once /goal_pose geometry_msgs/PoseStamped \
         '{header: {frame_id: map}, pose: {position: {x: ${x}, y: ${y}, z: 0.0}, orientation: {w: 1.0}}}'" \
         > /dev/null
@@ -172,8 +172,8 @@ fi
 # ---------------------------------------------------------------------
 section "Reactive fault: pre-OTA goal triggers SCAN_PHANTOM_RETURN"
 
-publish_goal 1.5 0.0
-echo "  Published /goal_pose (1.5, 0.0). Waiting for SCAN_PHANTOM_RETURN to appear..."
+publish_goal 1.5 1.0
+echo "  Published /goal_pose (1.5, 1.0). Waiting for SCAN_PHANTOM_RETURN to appear..."
 
 # The fault appearing IS the proof the reactive path is wired correctly:
 # broken_lidar only reports SCAN_PHANTOM_RETURN when its /cmd_vel
@@ -225,7 +225,7 @@ fi
 section "Post-OTA: SCAN_PHANTOM_RETURN clears, robot completes the goal"
 
 # Re-issue the goal so the new run is on fixed_lidar.
-publish_goal 1.5 0.0
+publish_goal 1.5 1.0
 sleep 5
 
 # fixed_lidar fires EVENT_PASSED at 500 ms; the fault_manager debounce

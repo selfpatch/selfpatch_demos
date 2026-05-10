@@ -83,7 +83,7 @@ for CI. To trigger the "robot stuck on phantom obstacle" beat manually:
 ```bash
 # From the host (or any container on the same ROS_DOMAIN_ID=42):
 ros2 topic pub --once /goal_pose geometry_msgs/PoseStamped \
-  '{header: {frame_id: map}, pose: {position: {x: 1.5, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}'
+  '{header: {frame_id: map}, pose: {position: {x: 1.5, y: 1.0, z: 0.0}, orientation: {w: 1.0}}}'
 ```
 
 Foxglove's **3D** panel also has a built-in "Publish" tool - select pose
