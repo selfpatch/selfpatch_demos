@@ -1,0 +1,5 @@
+{
+  "name": "Inject soft fault (collision wall)",
+  "description": "Adds a thin collision wall in the planning scene near the pick zone. Roughly 30% of pick attempts fail to plan around it, which produces real MANYMOVE_PLANNER_RETRY_ATTEMPT bursts that the LocalFilter throttles before forwarding to the FaultManager.",
+  "format": "bash"
+}

@@ -1,5 +1,5 @@
 {
-  "name": "Inject planner collision fault",
-  "description": "Reports MANYMOVE_PLANNER_COLLISION_DETECTED via the fault_manager service to simulate the collision-on-start failure path.",
+  "name": "Inject planner collision (real BT)",
+  "description": "Sets the BT blackboard 'collision_detected' flag via update_blackboard. The next MoveManipulatorAction tick observes it, emits MANYMOVE_PLANNER_COLLISION_DETECTED, and the BT returns FAILURE.",
   "format": "bash"
 }

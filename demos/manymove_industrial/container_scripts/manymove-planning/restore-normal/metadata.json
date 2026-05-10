@@ -1,5 +1,5 @@
 {
-  "name": "Restore normal (clear faults)",
-  "description": "Sends EVENT_PASSED for the planner-collision and retry-attempt codes to clear their LocalFilter state.",
+  "name": "Restore normal (clear collision + resume BT)",
+  "description": "Clears collision_detected and stop_execution on the BT blackboard, sets reset+start so the BT picks up cleanly on the next tick.",
   "format": "bash"
 }

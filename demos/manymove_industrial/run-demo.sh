@@ -31,6 +31,12 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+# Allow X11 access from the container so RViz / Groot / manymove HMI render
+# on the host display when running the cpu profile.
+if [ "$PROFILE" = "cpu" ] && command -v xhost >/dev/null 2>&1; then
+  xhost +local:root >/dev/null 2>&1 || true
+fi
+
 if [ "$NO_CACHE" = "1" ]; then
   docker compose --profile "$PROFILE" build --no-cache
 fi
@@ -44,7 +50,13 @@ Started manymove_industrial (profile: $PROFILE).
   Gateway:  http://localhost:8080/api/v1/health
   Web UI:   http://localhost:3000  (cpu profile only)
 
-Try:
+Live BT view (Groot, in the running container):
+  docker compose exec manymove-sim bash -lc "source install/setup.bash && src/Groot/build/Groot"
+
+Inject scripts (also runnable from the medkit Web UI):
+  docker compose exec manymove-sim bash -lc "/var/lib/ros2_medkit/scripts/manymove-planning/inject-collision/script.bash"
+
+Other helpers:
   docker compose --profile $PROFILE logs -f manymove-sim
   ./check-demo.sh
   ./stop-demo.sh

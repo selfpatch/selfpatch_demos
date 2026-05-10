@@ -1,12 +1,16 @@
 #!/bin/bash
+# Trigger a real collision fault by flipping the BT blackboard's
+# collision_detected flag. MoveManipulatorAction::onStart will see the flag
+# next tick, emit MANYMOVE_PLANNER_COLLISION_DETECTED and return FAILURE.
 set -eu
 
 source /opt/ros/jazzy/setup.bash
+source /opt/manymove_ws/install/setup.bash
 
-ros2 service call /fault_manager/report_fault \
-  ros2_medkit_msgs/srv/ReportFault \
-  "{fault_code: 'MANYMOVE_PLANNER_COLLISION_DETECTED', \
-    event_type: 0, \
-    severity: 2, \
-    description: 'inject-collision: synthetic collision on bt_client_xarm7', \
-    source_id: '/bt_client_xarm7'}"
+# Default xArm7 prefix in the upstream launch is empty; the BT keys live in
+# the global blackboard under the "<robot_prefix>collision_detected" name.
+PREFIX="${ROBOT_PREFIX:-}"
+
+ros2 service call /hmi_service_node/update_blackboard \
+  manymove_msgs/srv/SetBlackboardValues \
+  "{key: ['${PREFIX}collision_detected'], value_type: ['bool'], value_data: ['true']}"

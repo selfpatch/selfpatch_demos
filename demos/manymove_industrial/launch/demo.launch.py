@@ -1,18 +1,18 @@
 """manymove_industrial demo launch.
 
-Brings up the medkit fault_manager and gateway against the SOVD manifest. The
-manymove BT client and move_group are intentionally NOT started here yet
-(blocked on xArm packages being available on jazzy or a Panda variant of the
-demo). Once that lands, drop the corresponding Node() entries in the
-LaunchDescription below.
+Reuses the upstream manymove xarm7_movegroup_fake_cpp_trees launch verbatim
+so the BT pipeline behaves exactly as in the manymove project's own demos,
+and adds the medkit fault_manager + gateway against the SOVD manifest.
 
-Faults can already be exercised against this stack via the inject scripts
-under container_scripts/manymove-planning/, which talk to
-/fault_manager/report_fault directly.
+The bt_client_xarm7 binary inside the manymove fork is the one that
+actually emits MANYMOVE_* fault codes through ros2_medkit_fault_reporter
+when the BT runs into collision / retry / IO failures.
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition, UnlessCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -20,14 +20,21 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     headless = LaunchConfiguration("headless")
+    log_level = LaunchConfiguration("log_level")
 
-    pkg_share = FindPackageShare("manymove_industrial")
-    manifest_path = PathJoinSubstitution([
-        pkg_share, "config", "manymove_industrial_manifest.yaml",
-    ])
-    medkit_params = PathJoinSubstitution([
-        pkg_share, "config", "medkit_params.yaml",
-    ])
+    demo_pkg = FindPackageShare("manymove_industrial")
+    bringup_pkg = FindPackageShare("manymove_bringup")
+
+    manifest_path = PathJoinSubstitution([demo_pkg, "config", "manymove_industrial_manifest.yaml"])
+    medkit_params = PathJoinSubstitution([demo_pkg, "config", "medkit_params.yaml"])
+
+    # Upstream manymove xArm7 movegroup + BT pipeline (fake hardware).
+    manymove_xarm7 = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            bringup_pkg, "/launch/xarm7_movegroup_fake_cpp_trees.launch.py",
+        ]),
+        launch_arguments={"log_level": log_level}.items(),
+    )
 
     fault_manager = Node(
         package="ros2_medkit_fault_manager",
@@ -42,18 +49,21 @@ def generate_launch_description():
         executable="gateway_node",
         name="ros2_medkit_gateway",
         output="screen",
-        parameters=[
-            medkit_params,
-            {"discovery.manifest_path": manifest_path},
-        ],
+        parameters=[medkit_params, {"discovery.manifest_path": manifest_path}],
     )
 
     return LaunchDescription([
         DeclareLaunchArgument(
             "headless",
             default_value="false",
-            description="Suppress GUI / visualization (no-op until move_group is wired up).",
+            description="Suppress GUI tools (rviz/groot/HMI) for CI runs.",
         ),
+        DeclareLaunchArgument(
+            "log_level",
+            default_value="info",
+            description="Log level forwarded to the manymove BT client.",
+        ),
+        manymove_xarm7,
         fault_manager,
         gateway,
     ])

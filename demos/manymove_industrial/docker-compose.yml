@@ -1,6 +1,6 @@
 services:
-  # CPU-only manymove + medkit gateway in a single container. The CI profile
-  # below runs the same image headless without the web UI.
+  # cpu profile: full demo with X11 forwarding so RViz / Groot / manymove HMI
+  # render on the host display. matches the manymove project's own demo style.
   manymove-sim:
     profiles: ["cpu"]
     build:
@@ -8,7 +8,14 @@ services:
       dockerfile: Dockerfile
     container_name: manymove_industrial_sim
     environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=1
       - ROS_DOMAIN_ID=42
+      - HEADLESS=${HEADLESS:-false}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - manymove_faults:/var/lib/ros2_medkit
     ports:
       - "8080:8080"   # medkit gateway HTTP
       - "8765:8765"   # foxglove-bridge
@@ -16,10 +23,9 @@ services:
     stdin_open: true
     tty: true
     command: >
-      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
-               source /opt/ros/jazzy/setup.bash &&
-               source /root/demo_ws/install/setup.bash &&
-               ros2 launch manymove_industrial demo.launch.py"
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /opt/manymove_ws/install/setup.bash &&
+               ros2 launch manymove_industrial demo.launch.py headless:=$${HEADLESS}"
 
   medkit-web-ui:
     profiles: ["cpu"]
@@ -31,7 +37,7 @@ services:
       - manymove-sim
     networks: [medkit-net]
 
-  # Headless variant for CI smoke tests.
+  # CI profile: headless, no web UI, no X11. Suitable for the smoke test.
   manymove-sim-ci:
     profiles: ["ci"]
     build:
@@ -40,18 +46,24 @@ services:
     container_name: manymove_industrial_sim_ci
     environment:
       - ROS_DOMAIN_ID=42
+      - HEADLESS=true
     ports:
       - "8080:8080"
+    volumes:
+      - manymove_faults_ci:/var/lib/ros2_medkit
     networks: [medkit-net]
     command: >
-      bash -c "mkdir -p /var/lib/ros2_medkit/rosbags &&
-               source /opt/ros/jazzy/setup.bash &&
-               source /root/demo_ws/install/setup.bash &&
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /opt/manymove_ws/install/setup.bash &&
                ros2 launch manymove_industrial demo.launch.py headless:=true"
 
-# OpenPLC + OPC UA bridge services are planned for the tier-2 PLC correlation
-# narrative; see README "TODO: PLC tier" for the wiring sketch.
+# OpenPLC + OPC UA bridge for the tier-2 PLC correlation narrative are
+# planned in a follow-up; see README "TODO: PLC tier".
 
 networks:
   medkit-net:
     driver: bridge
+
+volumes:
+  manymove_faults:
+  manymove_faults_ci:
