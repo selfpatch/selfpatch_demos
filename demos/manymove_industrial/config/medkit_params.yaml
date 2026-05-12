@@ -26,11 +26,19 @@ fault_manager:
     confirmation_threshold: 0
     snapshots:
       enabled: true
+      default_topics:
+        - "/joint_states"
+        - "/tf"
+        - "/tf_static"
       rosbag:
         enabled: true
         duration_sec: 10.0
         duration_after_sec: 2.0
         storage_path: "/var/lib/ros2_medkit/rosbags"
+        format: "mcap"
+        max_bag_size_mb: 50
+        max_total_storage_mb: 500
+        topics: "/joint_states,/tf,/tf_static,/blackboard_status,/planning_scene"
 
 # Per-node fault_reporter local filtering.
 bt_client_xarm7:
