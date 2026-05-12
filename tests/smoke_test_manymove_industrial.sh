@@ -28,36 +28,41 @@ if api_get "/apps"; then
     fi
 fi
 
-section "Fault round-trip via inject-collision"
+section "Script bindings"
+# Each script execution endpoint should resolve (proves manifest component
+# id matches the container_scripts directory layout). We do not assert on
+# BT-emitted faults here: BT-side fault emission requires an active move
+# trajectory, and the CI fake-hardware launch does not auto-start moves.
+# Real BT round-trip is covered by record_full.sh demo runs.
 EXEC_BODY='{"execution_type": "now"}'
+for script in inject-collision restore-normal; do
+    if curl -fsS -X POST -H "Content-Type: application/json" -d "$EXEC_BODY" \
+        "$API_BASE/components/manymove-planning/scripts/$script/executions" >/dev/null; then
+        pass "$script script accepted by gateway"
+    else
+        fail "gateway rejected $script script execution"
+    fi
+done
+
+section "Medkit REST -> FaultManager round-trip"
+# arm-self-test issues a FAILED + PASSED pair directly via the FaultManager
+# service. This exercises the medkit gateway + manager pipeline without
+# depending on BT trajectory state.
 if curl -fsS -X POST -H "Content-Type: application/json" -d "$EXEC_BODY" \
-    "$API_BASE/components/manymove-planning/scripts/inject-collision/executions" >/dev/null; then
-    pass "inject-collision script accepted by gateway"
+    "$API_BASE/components/manymove-planning/scripts/arm-self-test/executions" >/dev/null; then
+    pass "arm-self-test script accepted by gateway"
 else
-    fail "gateway rejected inject-collision script execution"
+    fail "gateway rejected arm-self-test script execution"
 fi
 
-# Give the BT a few ticks to observe the blackboard flag, run a retry cycle
-# and emit either the collision-detected fault (if MoveManipulator::onStart
-# is the next BT node) or the retries-exhausted fault.
-sleep 6
-
-# Either kPlannerCollisionDetected or kPlannerRetriesExhausted is acceptable:
-# both prove the BT round-trip works, just from different code paths in
-# MoveManipulatorAction.
-if poll_until "/faults" \
-    '.items[] | select(.fault_code == "MANYMOVE_PLANNER_COLLISION_DETECTED" or .fault_code == "MANYMOVE_PLANNER_RETRIES_EXHAUSTED")' 30; then
-    pass "manymove planner fault visible in fault list"
+# arm-self-test sleeps 1s between FAILED and PASSED, so the fault should
+# briefly appear in /faults as CONFIRMED before HEALED. Poll the historical
+# list (statuses=all) to catch it regardless of current state.
+if poll_until "/faults?statuses=CONFIRMED,HEALED" \
+    '.items[] | select(.fault_code == "MANYMOVE_SELFTEST")' 30; then
+    pass "MANYMOVE_SELFTEST fault round-tripped through medkit"
 else
-    fail "no MANYMOVE_PLANNER_* fault appeared after inject-collision"
-fi
-
-section "Restore"
-if curl -fsS -X POST -H "Content-Type: application/json" -d "$EXEC_BODY" \
-    "$API_BASE/components/manymove-planning/scripts/restore-normal/executions" >/dev/null; then
-    pass "restore-normal script accepted"
-else
-    fail "restore-normal script rejected"
+    fail "MANYMOVE_SELFTEST fault did not appear in fault list"
 fi
 
 # Final summary
