@@ -1,6 +1,7 @@
 #!/bin/bash
 set -eu
 
+# shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
 
 CODE="MANYMOVE_SELFTEST"

@@ -38,6 +38,11 @@ components:
     type: "controller"
     description: "BehaviorTree.CPP orchestration of pick/place sequences"
     area: planning
+  - id: manymove-planning
+    name: "manymove planning subsystem"
+    type: "controller"
+    description: "Logical grouping for planning-side container scripts (collision inject, restore, self-test)"
+    area: planning
   - id: move-group
     name: "MoveIt move_group"
     type: "planner"

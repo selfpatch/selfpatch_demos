@@ -5,7 +5,9 @@
 # RETRIES_EXHAUSTED.
 set -e
 
+# shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
+# shellcheck source=/dev/null
 source /opt/manymove_ws/install/setup.bash
 
 ros2 action send_goal --feedback /add_collision_object \

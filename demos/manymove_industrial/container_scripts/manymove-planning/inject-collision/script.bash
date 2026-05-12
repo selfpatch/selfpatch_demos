@@ -7,7 +7,9 @@
 # variables when sourced from a fresh shell.
 set -e
 
+# shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
+# shellcheck source=/dev/null
 source /opt/manymove_ws/install/setup.bash
 
 # Default xArm7 prefix in the upstream launch is empty; the BT keys live in

@@ -4,7 +4,9 @@
 # operators can rerun without restarting the demo.
 set -e
 
+# shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
+# shellcheck source=/dev/null
 source /opt/manymove_ws/install/setup.bash
 
 PREFIX="${ROBOT_PREFIX:-}"
