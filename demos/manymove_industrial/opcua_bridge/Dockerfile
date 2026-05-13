@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros2-medkit-msgs=0.4.0-1* \
         ros-jazzy-ros2-medkit-fault-reporter=0.4.0-1* \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --break-system-packages \
+    && pip install --no-cache-dir --break-system-packages --ignore-installed \
         "asyncua==1.1.5"
 
 WORKDIR /opt/opcua_bridge
