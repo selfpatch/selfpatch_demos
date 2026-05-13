@@ -167,6 +167,23 @@ class AlarmEventHandler:
 
 async def opcua_loop(node: BridgeNode, stop_event: asyncio.Event) -> None:
     handler = AlarmEventHandler(node)
+    # One-shot DNS diagnostic so future "name resolution failure" loops are
+    # debuggable without docker exec into the running container.
+    try:
+        import socket
+        from urllib.parse import urlparse
+
+        parsed = urlparse(OPCUA_ENDPOINT)
+        host = parsed.hostname or OPCUA_ENDPOINT
+        infos = socket.getaddrinfo(host, parsed.port or 4840)
+        LOGGER.info(
+            "DNS check: %s resolves to %s",
+            host,
+            ", ".join(sorted({i[4][0] for i in infos})),
+        )
+    except Exception as dns_exc:  # noqa: BLE001
+        LOGGER.warning("DNS check FAILED: %s", dns_exc)
+
     while not stop_event.is_set():
         try:
             async with Client(OPCUA_ENDPOINT) as client:
