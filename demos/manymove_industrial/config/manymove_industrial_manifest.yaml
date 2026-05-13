@@ -24,11 +24,9 @@ areas:
   - id: line
     name: "Conveyor line"
     description: "PLC-driven conveyor line: photoeyes, motor, e-stop"
-    namespace: /
-  - id: bridge
-    name: "Bridges"
-    description: "Cross-protocol bridges (OPC UA, etc.)"
-    namespace: /
+    # /plc namespace anchors topic-discovered PLC-side nodes (opcua_bridge
+    # publishes /plc/heartbeat etc.) into this area in the SOVD entity tree.
+    namespace: /plc
 
 components:
   - id: xarm7-arm
@@ -100,7 +98,7 @@ components:
     name: "OPC UA -> medkit bridge"
     type: "bridge"
     description: "Subscribes to PLC AlarmConditionType events and forwards them as medkit faults"
-    area: bridge
+    area: line
   - id: conveyor-line
     name: "Conveyor line subsystem"
     type: "controller"
