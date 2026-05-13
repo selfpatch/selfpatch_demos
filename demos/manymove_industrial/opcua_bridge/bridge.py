@@ -25,6 +25,7 @@ from typing import Optional
 import rclpy
 from rclpy.node import Node
 from ros2_medkit_msgs.srv import ReportFault
+from std_msgs.msg import String
 
 from asyncua import Client, ua
 
@@ -85,10 +86,23 @@ class BridgeNode(Node):
     """
 
     def __init__(self) -> None:
-        super().__init__("opcua_bridge")
+        # Place the node under /plc namespace so the medkit gateway's
+        # topic-discovery routes it under the conveyor-line area instead
+        # of the global / namespace.
+        super().__init__("sensor_io", namespace="/plc")
         self.client = self.create_client(ReportFault, REPORT_FAULT_SERVICE)
         self.source_id = SOURCE_ID
+        # Heartbeat publisher: makes the bridge node discoverable in the
+        # SOVD entity tree (topic-discovery requires at least one topic
+        # per node) and gives operators a simple liveness signal.
+        self.heartbeat_pub = self.create_publisher(String, "heartbeat", 10)
+        self._heartbeat_timer = self.create_timer(1.0, self._publish_heartbeat)
         self._await_service()
+
+    def _publish_heartbeat(self) -> None:
+        msg = String()
+        msg.data = "opcua_bridge alive"
+        self.heartbeat_pub.publish(msg)
 
     def _await_service(self) -> None:
         while rclpy.ok() and not self.client.wait_for_service(timeout_sec=2.0):
