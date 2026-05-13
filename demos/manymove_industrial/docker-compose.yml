@@ -48,7 +48,8 @@ services:
     build:
       context: ./plc_sim
       dockerfile: Dockerfile
-    container_name: manymove_industrial_plc_sim
+    # No container_name: leaves the default service-name DNS alias intact
+    # on the user-defined bridge so other services can resolve `plc-sim`.
     hostname: plc-sim
     environment:
       # asyncua advertises this URL in endpoint discovery; clients reconnect
@@ -58,12 +59,7 @@ services:
     ports:
       - "4840:4840"   # OPC UA endpoint
       - "8500:8500"   # admin (raise/clear alarm via curl)
-    # Setting container_name suppresses the default service-name network
-    # alias on the user-defined bridge. Add it back explicitly so the
-    # bridge container can resolve `plc-sim` (used in OPCUA_ENDPOINT).
-    networks:
-      medkit-net:
-        aliases: [plc-sim]
+    networks: [medkit-net]
 
   # OPC UA -> medkit fault bridge. Subscribes to PLC alarm conditions and
   # POSTs them to the FaultManager so PLC faults land in the same
@@ -73,7 +69,9 @@ services:
     build:
       context: ./opcua_bridge
       dockerfile: Dockerfile
-    container_name: manymove_industrial_opcua_bridge
+    # No container_name: keep the default service-name DNS alias on the
+    # bridge so the rest of the compose can resolve `opcua-bridge`.
+    hostname: opcua-bridge
     environment:
       - OPCUA_ENDPOINT=opc.tcp://plc-sim:4840/manymove_plc/server
       - BRIDGE_SOURCE_ID=/plc/sensor_io
