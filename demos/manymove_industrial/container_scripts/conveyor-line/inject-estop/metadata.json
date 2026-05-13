@@ -1,0 +1,5 @@
+{
+  "name": "Inject PLC e-stop (CRITICAL)",
+  "description": "Raises the EstopEngaged AlarmConditionType on the PLC OPC UA server. The opcua_bridge forwards it as MANYMOVE_PLC_ESTOP_ENGAGED (CRITICAL) into the medkit FaultManager.",
+  "format": "bash"
+}

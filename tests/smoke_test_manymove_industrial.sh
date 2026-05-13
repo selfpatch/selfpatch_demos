@@ -65,6 +65,57 @@ else
     fail "MANYMOVE_SELFTEST fault did not appear in fault list"
 fi
 
+section "PLC bridge: cross-source fault aggregation"
+# Conveyor-line scripts trigger PLC AlarmConditionType events on the
+# plc-sim OPC UA server; opcua_bridge subscribes and forwards them as
+# MANYMOVE_PLC_* faults with source_id=/plc/sensor_io.
+
+# Manifest must declare the conveyor-line component (the container_scripts
+# directory + manifest component id must match for the gateway to expose
+# the script endpoints).
+if api_get "/components"; then
+    if echo "$RESPONSE" | items_contain_id "openplc"; then
+        pass "openplc component declared in components"
+    else
+        fail "openplc component missing from components list"
+    fi
+    if echo "$RESPONSE" | items_contain_id "opcua-bridge"; then
+        pass "opcua-bridge component declared in components"
+    else
+        fail "opcua-bridge component missing from components list"
+    fi
+fi
+
+# Photoeye flicker injection -> MANYMOVE_PLC_PHOTOEYE_FLICKER (WARN)
+if curl -fsS -X POST -H "Content-Type: application/json" -d "$EXEC_BODY" \
+    "$API_BASE/components/conveyor-line/scripts/inject-photoeye-flicker/executions" >/dev/null; then
+    pass "inject-photoeye-flicker script accepted by gateway"
+else
+    fail "gateway rejected inject-photoeye-flicker script execution"
+fi
+
+if poll_until "/faults?statuses=CONFIRMED" \
+    '.items[] | select(.fault_code == "MANYMOVE_PLC_PHOTOEYE_FLICKER")' 30; then
+    pass "PLC photoeye flicker fault arrived via opcua_bridge"
+else
+    fail "PLC photoeye flicker fault did not arrive via opcua_bridge"
+fi
+
+# Clear PLC alarms -> PASSED events -> healed faults
+if curl -fsS -X POST -H "Content-Type: application/json" -d "$EXEC_BODY" \
+    "$API_BASE/components/conveyor-line/scripts/restore-line/executions" >/dev/null; then
+    pass "restore-line script accepted by gateway"
+else
+    fail "gateway rejected restore-line script execution"
+fi
+
+if poll_until "/faults?statuses=HEALED" \
+    '.items[] | select(.fault_code == "MANYMOVE_PLC_PHOTOEYE_FLICKER")' 30; then
+    pass "PLC photoeye flicker fault healed via opcua_bridge"
+else
+    fail "PLC photoeye flicker fault did not heal after restore-line"
+fi
+
 # Final summary
 echo ""
 if [ "$FAIL_COUNT" -gt 0 ]; then

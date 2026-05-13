@@ -21,6 +21,14 @@ areas:
     name: "Diagnostics"
     description: "ros2_medkit fault management"
     namespace: /
+  - id: conveyor-line
+    name: "Conveyor line"
+    description: "PLC-driven conveyor line: photoeyes, motor, e-stop"
+    namespace: /
+  - id: bridge
+    name: "Bridges"
+    description: "Cross-protocol bridges (OPC UA, etc.)"
+    namespace: /
 
 components:
   - id: xarm7-arm
@@ -68,6 +76,31 @@ components:
     type: "diagnostics"
     description: "SQLite-backed fault store"
     area: diagnostics
+  - id: openplc
+    name: "Line PLC (OPC UA)"
+    type: "controller"
+    description: "IEC 61131-3 soft PLC exposing photoeye / conveyor / e-stop tags + AlarmConditionType events"
+    area: conveyor-line
+  - id: photoeye-pick
+    name: "Pick photoeye"
+    type: "sensor"
+    description: "Diffuse-mode photoelectric sensor at pick position"
+    area: conveyor-line
+  - id: photoeye-drop
+    name: "Drop photoeye"
+    type: "sensor"
+    description: "Diffuse-mode photoelectric sensor at drop position"
+    area: conveyor-line
+  - id: conveyor-motor
+    name: "Conveyor motor"
+    type: "actuator"
+    description: "Belt drive motor"
+    area: conveyor-line
+  - id: opcua-bridge
+    name: "OPC UA -> medkit bridge"
+    type: "bridge"
+    description: "Subscribes to PLC AlarmConditionType events and forwards them as medkit faults"
+    area: bridge
 
 apps:
   - id: bt-client-xarm7
@@ -126,6 +159,20 @@ apps:
     ros_binding:
       namespace: /
       node_name: ros2_medkit_gateway
+  - id: openplc-runtime
+    name: "OpenPLC runtime"
+    category: "controller"
+    is_located_on: openplc
+    ros_binding:
+      namespace: /plc
+      node_name: openplc_runtime
+  - id: opcua-bridge-app
+    name: "opcua_bridge"
+    category: "bridge"
+    is_located_on: opcua-bridge
+    ros_binding:
+      namespace: /plc
+      node_name: sensor_io
 
 functions:
   - id: pick-and-place
@@ -149,5 +196,19 @@ functions:
     category: "diagnostics"
     description: "Capture, persist, and surface BT runtime failures emitted by manymove_cpp_trees"
     hosted_by:
+      - fault-manager-app
+      - gateway-app
+  - id: line-control
+    name: "Line control"
+    category: "controller"
+    description: "PLC-driven conveyor sequencing with safety interlocks"
+    hosted_by:
+      - openplc-runtime
+  - id: fault-aggregation
+    name: "Cross-source fault aggregation"
+    category: "diagnostics"
+    description: "Bridge PLC AlarmConditionType events into the same medkit FaultManager that aggregates ROS-side faults"
+    hosted_by:
+      - opcua-bridge-app
       - fault-manager-app
       - gateway-app

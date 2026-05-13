@@ -19,7 +19,9 @@ services:
     ports:
       - "8080:8080"   # medkit gateway HTTP
       - "8765:8765"   # foxglove-bridge
-    networks: [medkit-net]
+    networks:
+      medkit-net:
+        aliases: [medkit-gateway]
     stdin_open: true
     tty: true
     command: >
@@ -37,6 +39,40 @@ services:
       - manymove-sim
     networks: [medkit-net]
 
+  # PLC simulator: OPC UA server emulating a line PLC (photoeye, conveyor,
+  # e-stop). Publishes AlarmConditionType events the bridge subscribes to.
+  # Swappable with a real OpenPLC v3 + ST program once the IEC 61131-3
+  # build pipeline is in place; the OPC UA surface stays identical.
+  plc-sim:
+    profiles: ["cpu", "ci"]
+    build:
+      context: ./plc_sim
+      dockerfile: Dockerfile
+    container_name: manymove_industrial_plc_sim
+    ports:
+      - "4840:4840"   # OPC UA endpoint
+      - "8500:8500"   # admin (raise/clear alarm via curl)
+    networks: [medkit-net]
+
+  # OPC UA -> medkit fault bridge. Subscribes to PLC alarm conditions and
+  # POSTs them to the FaultManager so PLC faults land in the same
+  # dashboard / SOVD entity tree as the manymove BT-side faults.
+  opcua-bridge:
+    profiles: ["cpu", "ci"]
+    build:
+      context: ./opcua_bridge
+      dockerfile: Dockerfile
+    container_name: manymove_industrial_opcua_bridge
+    environment:
+      - OPCUA_ENDPOINT=opc.tcp://plc-sim:4840/manymove_plc/server
+      - BRIDGE_SOURCE_ID=/plc/sensor_io
+      - REPORT_FAULT_SERVICE=/fault_manager/report_fault
+      - ROS_DOMAIN_ID=42
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    depends_on:
+      - plc-sim
+    networks: [medkit-net]
+
   # CI profile: headless, no web UI, no X11. Suitable for the smoke test.
   manymove-sim-ci:
     profiles: ["ci"]
@@ -51,14 +87,13 @@ services:
       - "8080:8080"
     volumes:
       - manymove_faults_ci:/var/lib/ros2_medkit
-    networks: [medkit-net]
+    networks:
+      medkit-net:
+        aliases: [medkit-gateway]
     command: >
       bash -c "source /opt/ros/jazzy/setup.bash &&
                source /opt/manymove_ws/install/setup.bash &&
                ros2 launch manymove_industrial demo.launch.py headless:=true"
-
-# OpenPLC + OPC UA bridge for the tier-2 PLC correlation narrative are
-# planned in a follow-up; see README "TODO: PLC tier".
 
 networks:
   medkit-net:

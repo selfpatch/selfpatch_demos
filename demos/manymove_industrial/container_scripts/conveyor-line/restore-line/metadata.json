@@ -1,0 +1,5 @@
+{
+  "name": "Clear PLC alarms",
+  "description": "Clears all three PLC AlarmConditionType alarms (photoeye_flicker, conveyor_overspeed, estop_engaged). The opcua_bridge forwards PASSED events that heal the corresponding medkit faults.",
+  "format": "bash"
+}
