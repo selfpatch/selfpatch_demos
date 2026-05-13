@@ -79,10 +79,14 @@ class PLCSimulator:
         ):
             await tag.set_writable()
 
-        # Alarm conditions (OPC UA Part 9 AlarmConditionType).
+        # Alarm conditions (OPC UA Part 9 AlarmConditionType). Source MUST
+        # be an Object node (supports EventNotifier attribute), not a
+        # Variable. Per OPC UA spec, the Server object is the canonical
+        # event emitter when no per-equipment Object exists.
+        server_node = self.server.get_node(ua.ObjectIds.Server)
         self.alarm_nodes["photoeye_flicker"] = AlarmHandle(
             server=self.server,
-            source=self.tag_photoeye_pick,
+            source=server_node,
             event_type=ua.ObjectIds.AlarmConditionType,
             severity=300,  # 1-1000, mid range
             condition_name="PhotoeyeFlicker",
@@ -90,7 +94,7 @@ class PLCSimulator:
         )
         self.alarm_nodes["conveyor_overspeed"] = AlarmHandle(
             server=self.server,
-            source=self.tag_conveyor_speed_rpm,
+            source=server_node,
             event_type=ua.ObjectIds.AlarmConditionType,
             severity=600,
             condition_name="ConveyorOverspeed",
@@ -98,7 +102,7 @@ class PLCSimulator:
         )
         self.alarm_nodes["estop_engaged"] = AlarmHandle(
             server=self.server,
-            source=self.tag_estop,
+            source=server_node,
             event_type=ua.ObjectIds.AlarmConditionType,
             severity=900,
             condition_name="EstopEngaged",
