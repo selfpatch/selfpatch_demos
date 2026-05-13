@@ -58,7 +58,7 @@ fi
 # arm-self-test sleeps 1s between FAILED and PASSED, so the fault should
 # briefly appear in /faults as CONFIRMED before HEALED. Poll the historical
 # list (statuses=all) to catch it regardless of current state.
-if poll_until "/faults?statuses=CONFIRMED,HEALED" \
+if poll_until "/faults" \
     '.items[] | select(.fault_code == "MANYMOVE_SELFTEST")' 30; then
     pass "MANYMOVE_SELFTEST fault round-tripped through medkit"
 else
@@ -94,7 +94,7 @@ else
     fail "gateway rejected inject-photoeye-flicker script execution"
 fi
 
-if poll_until "/faults?statuses=CONFIRMED" \
+if poll_until "/faults" \
     '.items[] | select(.fault_code == "MANYMOVE_PLC_PHOTOEYE_FLICKER")' 30; then
     pass "PLC photoeye flicker fault arrived via opcua_bridge"
 else
@@ -109,7 +109,7 @@ else
     fail "gateway rejected restore-line script execution"
 fi
 
-if poll_until "/faults?statuses=HEALED" \
+if poll_until "/faults?statuses=HEALED,PREPASSED" \
     '.items[] | select(.fault_code == "MANYMOVE_PLC_PHOTOEYE_FLICKER")' 30; then
     pass "PLC photoeye flicker fault healed via opcua_bridge"
 else

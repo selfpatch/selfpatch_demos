@@ -101,6 +101,11 @@ components:
     type: "bridge"
     description: "Subscribes to PLC AlarmConditionType events and forwards them as medkit faults"
     area: bridge
+  - id: conveyor-line
+    name: "Conveyor line subsystem"
+    type: "controller"
+    description: "Logical grouping for line-side container scripts (PLC alarm inject / restore)"
+    area: conveyor-line
 
 apps:
   - id: bt-client-xarm7
