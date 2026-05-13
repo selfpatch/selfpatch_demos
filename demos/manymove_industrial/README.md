@@ -24,8 +24,17 @@ fault_manager / gateway / web UI on top.
 `update_blackboard` HMI service so faults are produced organically by the BT
 nodes (not synthesised on the FaultManager service).
 
-**v1.5 (planned):** OpenPLC v3 + ROS<->OPC UA bridge for the tier-2 PLC
-correlation narrative. See "TODO: PLC tier" below.
+**v2 (this directory, since `feat/manymove-industrial`):** adds the PLC tier.
+A Python OPC UA server (`plc_sim/`) emulates the line PLC (photoeye,
+conveyor, e-stop tags) and publishes `AlarmConditionType` events. A ROS 2
+bridge (`opcua_bridge/`) subscribes to those events and forwards them to
+the `FaultManager` as `MANYMOVE_PLC_*` faults with `source_id=/plc/sensor_io`.
+The PLC sim is swappable with a real OpenPLC v3 + ST program later; the
+OPC UA AlarmConditionType surface stays the same.
+
+This gives the demo a real cross-source narrative: a PLC photoeye flicker
+WARN can land in the same dashboard alongside a manymove BT
+`MANYMOVE_PLANNER_COLLISION_DETECTED` CRITICAL, on one timeline.
 
 ## Prerequisites
 
