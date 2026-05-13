@@ -58,7 +58,12 @@ services:
     ports:
       - "4840:4840"   # OPC UA endpoint
       - "8500:8500"   # admin (raise/clear alarm via curl)
-    networks: [medkit-net]
+    # Setting container_name suppresses the default service-name network
+    # alias on the user-defined bridge. Add it back explicitly so the
+    # bridge container can resolve `plc-sim` (used in OPCUA_ENDPOINT).
+    networks:
+      medkit-net:
+        aliases: [plc-sim]
 
   # OPC UA -> medkit fault bridge. Subscribes to PLC alarm conditions and
   # POSTs them to the FaultManager so PLC faults land in the same
