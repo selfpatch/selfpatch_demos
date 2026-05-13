@@ -49,6 +49,12 @@ services:
       context: ./plc_sim
       dockerfile: Dockerfile
     container_name: manymove_industrial_plc_sim
+    hostname: plc-sim
+    environment:
+      # asyncua advertises this URL in endpoint discovery; clients reconnect
+      # to it after the initial bind, so it must be a hostname they can
+      # resolve (the service name on medkit-net).
+      - PLC_OPCUA_ENDPOINT=opc.tcp://plc-sim:4840/manymove_plc/server
     ports:
       - "4840:4840"   # OPC UA endpoint
       - "8500:8500"   # admin (raise/clear alarm via curl)
