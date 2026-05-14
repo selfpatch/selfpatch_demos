@@ -81,6 +81,41 @@ if api_get "/components"; then
     fi
 fi
 
+# Wait for opcua_bridge to actually subscribe to AlarmConditionType
+# events before injecting. Container manifest discovery (above) only
+# proves the gateway routed the component, not that the asyncua
+# subscription handshake on plc-sim completed. Without this wait the
+# inject can fire 100-500ms before bridge is ready, the OPC UA raise
+# event goes unheard and the test flakes.
+#
+# Skipped gracefully if the host docker CLI is not reachable (e.g.
+# running the smoke script from inside a container without the socket
+# mounted), since the belt-and-suspenders sleep below covers the race
+# in practice.
+# Probe once first; if docker logs of the bridge isn't reachable from
+# this environment (script running from inside a container without the
+# socket mounted, etc.) skip the check entirely - the sleep below
+# covers the race for the common-case smoke runs.
+PROBE=$(docker logs manymove_industrial-opcua-bridge-1 2>/dev/null || true)
+if [ -n "$PROBE" ]; then
+    BRIDGE_LOGS="$PROBE"
+    for _ in $(seq 1 20); do
+        if echo "$BRIDGE_LOGS" | grep -q "subscribed to AlarmConditionType events"; then
+            pass "opcua_bridge subscribed to AlarmConditionType events"
+            break
+        fi
+        sleep 1
+        BRIDGE_LOGS=$(docker logs manymove_industrial-opcua-bridge-1 2>/dev/null || true)
+    done
+    if ! echo "$BRIDGE_LOGS" | grep -q "subscribed to AlarmConditionType events"; then
+        fail "opcua_bridge never subscribed to AlarmConditionType events"
+    fi
+fi
+# Belt-and-suspenders: small extra delay so subscription is fully active
+# on the plc-sim side too (asyncua handshake completes ~50-200ms after
+# the bridge logs the subscribe call).
+sleep 1
+
 # Photoeye flicker injection -> MANYMOVE_PLC_PHOTOEYE_FLICKER (WARN)
 if curl -fsS -X POST -H "Content-Type: application/json" -d "$EXEC_BODY" \
     "$API_BASE/components/conveyor-line/scripts/inject-photoeye-flicker/executions" >/dev/null; then
