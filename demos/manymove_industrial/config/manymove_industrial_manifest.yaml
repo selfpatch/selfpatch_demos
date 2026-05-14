@@ -4,15 +4,18 @@ metadata:
   description: "manymove BT manipulator pipeline (xArm7 fake hardware) with medkit fault reporting"
   version: "0.1.0"
 
+# Hybrid discovery: pure ROS-side components (xarm7-arm, ufactory-driver,
+# move-group, object-manager, action-server, gateway, etc.) are picked up
+# at runtime from topic/node introspection. The manifest declares only
+# what the runtime can't infer:
+#   - PLC-side entities (no ROS topics)
+#   - script-bound logical components (conveyor-line, manymove-planning)
+#   - apps the smoke test asserts on (bt-client-xarm7, fault-manager-app)
 config:
   unmanifested_nodes: "warn"
   inherit_runtime_resources: true
 
 areas:
-  - id: manipulation
-    name: "Manipulation"
-    description: "xArm7 cobot under fake_components hardware"
-    namespace: /
   - id: planning
     name: "Planning"
     description: "BehaviorTree.CPP orchestration and MoveIt motion planning"
@@ -29,16 +32,6 @@ areas:
     namespace: /plc
 
 components:
-  - id: xarm7-arm
-    name: "xArm 7 manipulator"
-    type: "manipulator"
-    description: "7-DoF cobot, fake_components hardware"
-    area: manipulation
-  - id: ufactory-driver
-    name: "UFactory ROS 2 driver"
-    type: "driver"
-    description: "xarm_ros2 driver layer (fake mode)"
-    area: manipulation
   - id: manymove-bt
     name: "manymove BT client"
     type: "controller"
@@ -49,26 +42,6 @@ components:
     type: "controller"
     description: "Logical grouping for planning-side container scripts (collision inject, restore, self-test)"
     area: planning
-  - id: move-group
-    name: "MoveIt move_group"
-    type: "planner"
-    description: "OMPL motion planner"
-    area: planning
-  - id: object-manager
-    name: "manymove object_manager"
-    type: "service"
-    description: "Planning scene collision objects"
-    area: planning
-  - id: action-server
-    name: "manymove planner action_server"
-    type: "service"
-    description: "MoveManipulator / PlanManipulator action servers"
-    area: planning
-  - id: gateway
-    name: "ros2_medkit gateway"
-    type: "diagnostics"
-    description: "HTTP REST API for fault inspection"
-    area: diagnostics
   - id: fault-manager
     name: "ros2_medkit fault_manager"
     type: "diagnostics"
@@ -113,41 +86,6 @@ apps:
     ros_binding:
       namespace: /
       node_name: bt_client_xarm7
-  - id: hmi-service-node
-    name: "HMI service node"
-    category: "controller"
-    is_located_on: manymove-bt
-    ros_binding:
-      namespace: /
-      node_name: hmi_service_node
-  - id: move-group-app
-    name: "move_group"
-    category: "planner"
-    is_located_on: move-group
-    ros_binding:
-      namespace: /
-      node_name: move_group
-  - id: action-server-app
-    name: "action_server_node"
-    category: "service"
-    is_located_on: action-server
-    ros_binding:
-      namespace: /
-      node_name: action_server_node
-  - id: object-manager-app
-    name: "object_manager_node"
-    category: "service"
-    is_located_on: object-manager
-    ros_binding:
-      namespace: /
-      node_name: object_manager_node
-  - id: ufactory-driver-app
-    name: "ufactory_driver"
-    category: "driver"
-    is_located_on: ufactory-driver
-    ros_binding:
-      namespace: /
-      node_name: ufactory_driver
   - id: fault-manager-app
     name: "fault_manager"
     category: "diagnostics"
@@ -155,63 +93,3 @@ apps:
     ros_binding:
       namespace: /
       node_name: fault_manager
-  - id: gateway-app
-    name: "ros2_medkit_gateway"
-    category: "diagnostics"
-    is_located_on: gateway
-    ros_binding:
-      namespace: /
-      node_name: ros2_medkit_gateway
-  - id: openplc-runtime
-    name: "OpenPLC runtime"
-    category: "controller"
-    is_located_on: openplc
-    ros_binding:
-      namespace: /plc
-      node_name: openplc_runtime
-  - id: opcua-bridge-app
-    name: "opcua_bridge"
-    category: "bridge"
-    is_located_on: opcua-bridge
-    ros_binding:
-      namespace: /plc
-      node_name: sensor_io
-
-functions:
-  - id: pick-and-place
-    name: "Pick and place"
-    category: "manipulation"
-    description: "BT-driven manipulation sequence on fake xArm7"
-    hosted_by:
-      - bt-client-xarm7
-      - move-group-app
-      - action-server-app
-      - object-manager-app
-  - id: hmi-control
-    name: "Operator control"
-    category: "interaction"
-    description: "Qt HMI panel for blackboard mutation and BT reset"
-    hosted_by:
-      - hmi-service-node
-      - bt-client-xarm7
-  - id: fault-management
-    name: "Fault management"
-    category: "diagnostics"
-    description: "Capture, persist, and surface BT runtime failures emitted by manymove_cpp_trees"
-    hosted_by:
-      - fault-manager-app
-      - gateway-app
-  - id: line-control
-    name: "Line control"
-    category: "controller"
-    description: "PLC-driven conveyor sequencing with safety interlocks"
-    hosted_by:
-      - openplc-runtime
-  - id: fault-aggregation
-    name: "Cross-source fault aggregation"
-    category: "diagnostics"
-    description: "Bridge PLC AlarmConditionType events into the same medkit FaultManager that aggregates ROS-side faults"
-    hosted_by:
-      - opcua-bridge-app
-      - fault-manager-app
-      - gateway-app

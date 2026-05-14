@@ -69,11 +69,6 @@ at the well-known gateway scripts dir and runnable from the web UI or via
   The next `MoveManipulatorAction::onStart` tick observes it, emits
   `MANYMOVE_PLANNER_COLLISION_DETECTED` (ERROR) and returns FAILURE.
   This is a real BT fault, not a synthesised report.
-- `inject-soft-fault` - drops a thin collision wall in the planning scene
-  near the pick zone; planning fails ~30% of attempts and the BT emits
-  `MANYMOVE_PLANNER_RETRY_ATTEMPT` (WARN). The reporter's LocalFilter
-  (threshold=3, window=10s) throttles those locally and only forwards once
-  the threshold is crossed - this is the soft-fault narrative.
 - `restore-normal` - clears `collision_detected`, `stop_execution` and
   triggers `reset` + `start` on the blackboard so the BT picks up cleanly.
 
