@@ -5,10 +5,13 @@
 
 set -eu
 
+# ROS setup.bash dereferences AMENT_TRACE_SETUP_FILES; relax nounset around it.
+set +u
 # shellcheck source=/dev/null
 source /opt/ros/jazzy/setup.bash
 # shellcheck source=/dev/null
 source /root/demo_ws/install/setup.bash
+set -u
 
 echo "Injecting PLANNING FAILURE fault..."
 echo "   Adding collision wall between pick and place positions"
