@@ -20,7 +20,7 @@
 
 #include <gtest/gtest.h>
 
-#include <ros2_medkit_gateway/updates/update_types.hpp>
+#include <ros2_medkit_gateway/core/providers/update_types.hpp>
 
 #include "catalog_client.hpp"
 #include "ota_update_plugin/ota_update_plugin.hpp"
