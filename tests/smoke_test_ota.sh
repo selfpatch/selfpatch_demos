@@ -76,19 +76,19 @@ fi
 
 section "UpdateProvider plugin loaded"
 
-# Capture logs into a variable rather than piping `docker logs | grep -q`.
-# With `set -o pipefail` and a large log (nav2 lifecycle prints ~500 lines),
-# grep -q exits early on first match, SIGPIPEs docker logs, and the pipeline
-# returns 141 - which `if` reads as "no match" even when the line was found.
+# Capture logs into a variable and grep via here-string. Piping `printf | grep -q`
+# still SIGPIPEs printf when grep -q exits early on first match, and with
+# `set -o pipefail` the whole pipeline returns 141 - which `if` reads as
+# "no match" even when the line was found. Here-strings avoid the pipe entirely.
 GATEWAY_LOGS=$(docker logs "$GATEWAY_CONTAINER" 2>&1 || true)
 
-if printf '%s\n' "$GATEWAY_LOGS" | grep -q "Update backend provided by plugin"; then
+if grep -q "Update backend provided by plugin" <<<"$GATEWAY_LOGS"; then
     pass "gateway log says: 'Update backend provided by plugin'"
 else
     fail "gateway log says: 'Update backend provided by plugin'" "log line missing"
 fi
 
-if printf '%s\n' "$GATEWAY_LOGS" | grep -q "Updates enabled but no UpdateProvider plugin loaded"; then
+if grep -q "Updates enabled but no UpdateProvider plugin loaded" <<<"$GATEWAY_LOGS"; then
     fail "no 'no UpdateProvider' warning" "warning was logged"
 else
     pass "no 'no UpdateProvider' warning"
