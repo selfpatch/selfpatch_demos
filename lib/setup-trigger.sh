@@ -8,7 +8,7 @@ if [ -z "${ENTITY_TYPE:-}" ] || [ -z "${ENTITY_ID:-}" ]; then
     exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/triggers-api.sh"
 
