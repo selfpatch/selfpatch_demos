@@ -15,7 +15,9 @@ echo "Waiting for particles to scatter..."
 sleep 2
 
 echo "Sending navigation goal with high localization uncertainty..."
-curl -sf -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions" \
+# Drop -f: action server typically rejects the goal under scattered particles,
+# which is the demo's intended failure mode - treat HTTP 400 as expected.
+RESPONSE=$(curl -s -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/executions" \
     -H "Content-Type: application/json" \
     -d '{
     "goal": {
@@ -27,7 +29,8 @@ curl -sf -X POST "${API_BASE}/apps/bt-navigator/operations/navigate_to_pose/exec
         }
       }
     }
-  }'
+  }')
+echo "${RESPONSE}" | jq '.' 2>/dev/null || echo "${RESPONSE}"
 
 echo ""
 echo "Localization failure injected."
