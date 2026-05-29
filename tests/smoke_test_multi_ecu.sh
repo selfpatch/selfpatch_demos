@@ -26,14 +26,25 @@ wait_for_gateway 120
 # Wait for runtime node linking (perception ECU local nodes)
 wait_for_runtime_linking "/apps/lidar-driver/data" 90
 
-# Wait for aggregation to discover peer ECUs
-echo "  Waiting for aggregated entities from planning ECU (max 60s)..."
-if poll_until "/apps" '.items[] | select(.id == "path-planner")' 60; then
-    echo -e "  ${GREEN}Aggregation discovery complete${NC}"
-else
-    echo -e "  ${RED}Aggregation discovery did not complete within 60s${NC}"
-    exit 1
-fi
+# Wait for aggregation to discover peer ECUs.
+# The aggregator pulls each peer independently, so a single peer's marker app is
+# not a sufficient readiness gate: we must see a representative app from EACH
+# peer ECU before the discovery assertions run. Otherwise a slower peer
+# (typically the actuation ECU) races the checks and surfaces as missing apps
+# ("found 7" instead of >=10).
+#   planning ECU  -> path-planner
+#   actuation ECU -> motor-controller
+echo "  Waiting for aggregated entities from planning + actuation ECUs (max 60s each)..."
+for peer in "planning ECU:path-planner" "actuation ECU:motor-controller"; do
+    peer_name="${peer%%:*}"
+    peer_app="${peer##*:}"
+    if poll_until "/apps" ".items[] | select(.id == \"${peer_app}\")" 60; then
+        echo -e "  ${GREEN}${peer_name} aggregated (${peer_app})${NC}"
+    else
+        echo -e "  ${RED}${peer_name} not aggregated within 60s (${peer_app} missing)${NC}"
+        exit 1
+    fi
+done
 
 # --- Tests ---
 
