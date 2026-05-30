@@ -24,7 +24,7 @@ This demo demonstrates:
 
 - Docker and docker-compose
 - `curl` and `jq` installed on the host (required for host-side scripts)
-- X11 display server (for Gazebo GUI) or `--headless` mode
+- (Optional) X11 display server for the RViz/Gazebo GUI on Linux with a desktop. Not needed on macOS or headless hosts - the demo falls back to headless automatically.
 - (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) - recommended for smooth Gazebo rendering
 - ~7 GB disk space for Docker image
 
@@ -45,6 +45,8 @@ That's it! The script will:
 
 **REST API:** http://localhost:8080/api/v1/
 **Web UI:** http://localhost:3000/
+
+**On macOS:** Docker Desktop has no X server, so `run-demo.sh` detects this and starts **headless automatically** - no XQuartz needed. The RViz/Gazebo window is not shown, but MoveIt planning, ros2_medkit, the REST API (`http://localhost:8080`) and the Web UI (`http://localhost:3000`) all run. Drive the demo from the Web UI and the helper scripts (`./move-arm.sh`, `./inject-planning-failure.sh`). The same auto-fallback applies to any host without a `DISPLAY` (for example a headless Linux server).
 
 ### 2. Available Options
 
@@ -437,7 +439,7 @@ Container scripts are stored under `/var/lib/ros2_medkit/scripts/moveit-planning
 
 | Problem | Cause | Solution |
 |---------|-------|----------|
-| RViz window doesn't appear | X11 not set up | Run `xhost +local:docker` or use `--headless` |
+| RViz window doesn't appear | No X display (e.g. macOS Docker Desktop) | On macOS / headless hosts the demo runs headless automatically; on Linux with a desktop run `xhost +local:docker` |
 | "Package not found" error | Build failed | Rebuild with `./run-demo.sh --no-cache` |
 | No faults appearing | Monitor not connected | Check `ros2 node list` includes `manipulation_monitor` |
 | Docker build fails | Apt package missing | Check if MoveIt 2 Jazzy packages are available |
