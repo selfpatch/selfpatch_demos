@@ -38,7 +38,7 @@ trap cleanup EXIT
 # Parse arguments
 COMPOSE_ARGS=""
 BUILD_ARGS=""
-HEADLESS_MODE="false"
+HEADLESS_MODE="${HEADLESS:-false}"
 UPDATE_IMAGES="false"
 DETACH_MODE="true"
 
@@ -100,6 +100,23 @@ done
 if [[ -z "$COMPOSE_ARGS" ]]; then
     echo "Using CPU-only mode (use --nvidia flag for GPU acceleration)"
     COMPOSE_ARGS="--profile cpu"
+fi
+
+# Auto-enable headless when there is no display to render the RViz/Gazebo GUI.
+# macOS Docker Desktop has no X server, and headless Linux hosts have no DISPLAY;
+# in both cases the GUI cannot open and would abort the launch.
+# An explicit --headless (or HEADLESS=true) always wins.
+if [[ "$HEADLESS_MODE" != "true" && -z "${DISPLAY:-}" ]]; then
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo "ℹ️  macOS detected with no X display: running HEADLESS."
+        echo "    Docker Desktop on macOS cannot open the RViz/Gazebo window."
+    else
+        echo "ℹ️  No DISPLAY detected: running HEADLESS (no GUI window)."
+    fi
+    echo "    MoveIt planning and ros2_medkit still run normally:"
+    echo "      REST API -> http://localhost:8080/api/v1/"
+    echo "      Web UI   -> http://localhost:3000/"
+    HEADLESS_MODE="true"
 fi
 
 # Export for docker-compose

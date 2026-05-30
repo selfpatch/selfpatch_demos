@@ -30,23 +30,20 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Setup X11 forwarding for GUI (Gazebo)
-echo "Setting up X11 forwarding..."
-xhost +local:docker 2>/dev/null || {
-    echo "   Warning: xhost failed. GUI may not work."
-}
-
-# Cleanup function
+# Cleanup function (undo the X11 grant only if we actually set it up)
+X11_FORWARDING="false"
 cleanup() {
     echo ""
     echo "Cleaning up..."
-    xhost -local:docker 2>/dev/null || true
+    if [[ "$X11_FORWARDING" == "true" ]]; then
+        xhost -local:docker 2>/dev/null || true
+    fi
     echo "Done!"
 }
 trap cleanup EXIT
 
 # Parse arguments
-HEADLESS_MODE="false"
+HEADLESS_MODE="${HEADLESS:-false}"
 DETACH_MODE="true"
 PROFILE="cpu"
 
@@ -59,6 +56,33 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# Auto-enable headless when there is no display to render the Gazebo GUI.
+# macOS Docker Desktop has no X server, and headless Linux hosts have no DISPLAY;
+# in both cases the Gazebo window cannot open and would abort the whole launch.
+# An explicit --headless (or HEADLESS=true) always wins.
+if [[ "$HEADLESS_MODE" != "true" && -z "${DISPLAY:-}" ]]; then
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo "ℹ️  macOS detected with no X display: running HEADLESS."
+        echo "    Docker Desktop on macOS cannot open the Gazebo 3D window."
+    else
+        echo "ℹ️  No DISPLAY detected: running HEADLESS (no Gazebo 3D window)."
+    fi
+    echo "    The simulation and ros2_medkit still run normally:"
+    echo "      REST API -> http://localhost:8080/api/v1/"
+    echo "      Web UI   -> http://localhost:3000/"
+    HEADLESS_MODE="true"
+fi
+
+# Set up X11 forwarding only when a GUI will actually be shown
+if [[ "$HEADLESS_MODE" != "true" ]]; then
+    echo "Setting up X11 forwarding..."
+    if xhost +local:docker 2>/dev/null; then
+        X11_FORWARDING="true"
+    else
+        echo "   Warning: xhost failed. GUI may not work."
+    fi
+fi
 
 export HEADLESS=$HEADLESS_MODE
 
