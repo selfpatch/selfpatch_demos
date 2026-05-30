@@ -23,7 +23,7 @@ This demo demonstrates:
 ## Prerequisites
 
 - Docker and docker-compose
-- X11 display server (Linux with GUI, or XQuartz on macOS)
+- (Optional) X11 display server for the Gazebo GUI on Linux with a desktop. Not needed on macOS or headless hosts - the demo falls back to headless automatically.
 - (Optional) NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 - `curl` and `jq` (required for host-side scripts)
 
@@ -44,6 +44,8 @@ That's it! The script will:
 4. Launch ros2_medkit_web_ui at <http://localhost:3000>
 
 **Note:** By default, the demo runs in **daemon mode** with **Gazebo GUI** enabled. This allows you to interact with ROS 2 while the demo is running.
+
+**On macOS:** Docker Desktop has no X server, so `run-demo.sh` detects this and starts **headless automatically** - no XQuartz needed. The Gazebo 3D window is not shown, but the simulation, Nav2, ros2_medkit, the REST API (`http://localhost:8080`) and the Web UI (`http://localhost:3000`) all run. Drive the demo from the Web UI and the helper scripts (`./send-nav-goal.sh`, fault injection). The same auto-fallback applies to any host without a `DISPLAY` (for example a headless Linux server).
 
 ### Available Options
 

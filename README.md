@@ -87,7 +87,7 @@ Full mobile robot demo with autonomous navigation:
 ```bash
 cd demos/turtlebot3_integration
 ./run-demo.sh
-# Gazebo will open, Web UI at http://localhost:3000
+# Gazebo will open (on macOS / headless hosts it runs headless automatically), Web UI at http://localhost:3000
 # Try: ./send-nav-goal.sh 2.0 0.5
 
 # To stop
