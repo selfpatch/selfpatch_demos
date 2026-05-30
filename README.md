@@ -110,7 +110,7 @@ Panda robot arm demo with pick-and-place manipulation:
 ```bash
 cd demos/moveit_pick_place
 ./run-demo.sh
-# RViz will open with Panda arm (or use --headless), Web UI at http://localhost:3000
+# RViz will open with Panda arm (on macOS / headless hosts it runs headless automatically), Web UI at http://localhost:3000
 # Move the arm: ./move-arm.sh demo
 # Inject faults: ./inject-planning-failure.sh
 # Check faults: ./check-faults.sh
