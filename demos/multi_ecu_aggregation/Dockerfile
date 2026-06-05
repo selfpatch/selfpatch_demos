@@ -57,7 +57,7 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y \
       --skip-keys='ament_cmake_clang_format ament_cmake_clang_tidy test_msgs example_interfaces sqlite3' && \
-    colcon build --symlink-install --cmake-args -DBUILD_TESTING=OFF"
+    MAKEFLAGS='-j 2' colcon build --executor sequential --symlink-install --cmake-args -DBUILD_TESTING=OFF"
 
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
