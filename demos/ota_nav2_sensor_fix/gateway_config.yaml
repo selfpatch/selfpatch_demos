@@ -1,0 +1,59 @@
+# Copyright 2026 bburda
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# Gateway configuration for the OTA nav2 sensor-fix demo.
+# Enables /updates endpoints and loads ota_update_plugin which polls the
+# update server's /catalog at boot and exposes Update / Install / Uninstall
+# operations over the SOVD HTTP API.
+
+ros2_medkit_gateway:
+  ros__parameters:
+    server:
+      host: "0.0.0.0"
+      port: 8080
+
+    refresh_interval_ms: 2000
+
+    # CORS so an external Foxglove panel or browser can hit the API.
+    cors:
+      allowed_origins: ["*"]
+      allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
+      allowed_headers: ["Content-Type", "Accept"]
+      allow_credentials: false
+      max_age_seconds: 86400
+
+    discovery:
+      # Hybrid: manifest defines areas/components/apps/functions, runtime
+      # fills in topics/services/params, and OTA-deployed apps land via
+      # manifest fragments dropped in fragments_dir below.
+      mode: "hybrid"
+      manifest_path: "/etc/ros2_medkit/manifest.yaml"
+      manifest_strict_validation: false
+      manifest:
+        # ota_update_plugin writes one fragment per Install operation
+        # here and calls notify_entities_changed; the gateway re-merges
+        # the base manifest + every yaml in this dir on each reload.
+        # Path is shared with the plugin via plugins.ota_update_plugin
+        # .fragments_dir below - keep them in lockstep.
+        fragments_dir: "/etc/ros2_medkit/manifest_fragments"
+      runtime:
+        # Manifest defines components, no need for synthetic ones.
+        create_synthetic_components: false
+        # Manifest defines functions; the auto-gen-from-namespaces path
+        # produces single-host noise because the nav2 stack lives at /.
+        create_functions_from_namespaces: false
+
+    # Enable /updates endpoints; provider supplied by ota_update_plugin below.
+    updates:
+      enabled: true
+
+    plugins: ["ota_update_plugin"]
+    plugins.ota_update_plugin.path: "/ws/install/ota_update_plugin/lib/ota_update_plugin/ota_update_plugin.so"
+    plugins.ota_update_plugin.catalog_url: "http://ota_update_server:9000"
+    plugins.ota_update_plugin.staging_dir: "/tmp/ota_staging"
+    plugins.ota_update_plugin.install_dir: "/ws/install"
+    # Same path the gateway has under discovery.manifest.fragments_dir.
+    # Plugin drops one yaml per Install and removes it on Uninstall.
+    plugins.ota_update_plugin.fragments_dir: "/etc/ros2_medkit/manifest_fragments"

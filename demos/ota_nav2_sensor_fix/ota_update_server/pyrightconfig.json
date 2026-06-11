@@ -1,0 +1,6 @@
+{
+  "include": ["ota_update_server", "tests"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "reportUnusedFunction": "none"
+}
