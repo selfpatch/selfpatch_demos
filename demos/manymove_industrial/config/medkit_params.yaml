@@ -1,0 +1,51 @@
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      server:
+        host: "0.0.0.0"
+        port: 8080
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"]
+        allowed_headers: ["Content-Type", "Accept"]
+        allow_credentials: false
+        max_age_seconds: 86400
+      discovery:
+        manifest_path: ""  # set by launch
+        mode: "hybrid"
+        manifest_strict_validation: true
+      plugins: [""]
+      scripts:
+        scripts_dir: "/var/lib/ros2_medkit/scripts"
+        max_concurrent_executions: 3
+
+fault_manager:
+  ros__parameters:
+    storage_type: "sqlite"
+    database_path: "/var/lib/ros2_medkit/faults.db"
+    confirmation_threshold: 0
+    snapshots:
+      enabled: true
+      default_topics:
+        - "/joint_states"
+        - "/tf"
+        - "/tf_static"
+      rosbag:
+        enabled: true
+        duration_sec: 10.0
+        duration_after_sec: 2.0
+        storage_path: "/var/lib/ros2_medkit/rosbags"
+        format: "mcap"
+        max_bag_size_mb: 50
+        max_total_storage_mb: 500
+        topics: "/joint_states,/tf,/tf_static,/blackboard_status,/planning_scene"
+
+# Per-node fault_reporter local filtering.
+bt_client_xarm7:
+  ros__parameters:
+    fault_reporter:
+      local_filtering:
+        enabled: true
+        default_threshold: 3
+        default_window_sec: 10.0
+        bypass_severity: 2  # ERROR + CRITICAL bypass filtering

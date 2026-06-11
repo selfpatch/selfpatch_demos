@@ -1,0 +1,5 @@
+{
+  "name": "Inject PLC photoeye flicker (WARN)",
+  "description": "Raises the PhotoeyeFlicker AlarmConditionType on the PLC OPC UA server. The opcua_bridge subscribes and forwards it as MANYMOVE_PLC_PHOTOEYE_FLICKER (WARN) into the medkit FaultManager.",
+  "format": "bash"
+}
