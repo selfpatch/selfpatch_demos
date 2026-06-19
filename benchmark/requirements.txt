@@ -1,0 +1,4 @@
+matplotlib>=3.5
+PyYAML>=6
+# dev:
+pytest>=7

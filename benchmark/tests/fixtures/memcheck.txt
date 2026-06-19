@@ -1,0 +1,4 @@
+==42== LEAK SUMMARY:
+==42==    definitely lost: 1,024 bytes in 4 blocks
+==42==    indirectly lost: 2,048 bytes in 8 blocks
+==42==    still reachable: 4,096,000 bytes in 1,000 blocks

@@ -1,0 +1,4 @@
+Name:	gateway_node
+VmRSS:	   81920 kB
+Threads:	13
+voluntary_ctxt_switches:	1200

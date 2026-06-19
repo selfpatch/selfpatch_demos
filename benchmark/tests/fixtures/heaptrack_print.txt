@@ -1,0 +1,8 @@
+peak heap memory consumption: 84.30M
+peak RSS (including heaptrack overhead): 130.00M
+total memory leaked: 2.50M
+the largest leaks:
+    1.20M leaked over 4096 calls from
+        ros2_medkit_gateway::EntityCache::rebuild()
+    0.80M leaked over 2048 calls from
+        ros2_medkit_gateway::DiscoveryManager::refresh()
