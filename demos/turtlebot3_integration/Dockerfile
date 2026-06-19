@@ -61,6 +61,7 @@ RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} https://github.com/selfpatch
     mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_topic_beacon . && \
     mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_param_beacon . && \
     mv ros2_medkit/src/ros2_medkit_discovery_plugins/ros2_medkit_linux_introspection . && \
+    git -C ros2_medkit rev-parse HEAD > ${COLCON_WS}/gateway_sha && \
     rm -rf ros2_medkit
 
 # Copy demo package from local context (this repo)
