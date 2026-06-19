@@ -1,0 +1,11 @@
+discovery_runtime_only:
+  discovery: {mode: "runtime_only"}
+refresh_fast:
+  refresh_interval_ms: 200
+refresh_slow:
+  refresh_interval_ms: 5000
+sse_disabled:
+  sse: {max_subscriptions: 0}
+plugins_minimal:   # NOTE: perturbs the graph (drops introspection topics)
+  plugins:
+    - {name: linux_introspection, path: libros2_medkit_linux_introspection.so}

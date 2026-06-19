@@ -1,0 +1,12 @@
+{ fastdds_leak
+  Memcheck:Leak
+  ...
+  obj:*/libfastrtps* }
+{ fastcdr_leak
+  Memcheck:Leak
+  ...
+  obj:*/libfastcdr* }
+{ rcl_rcutils
+  Memcheck:Leak
+  ...
+  obj:*/librcl* }

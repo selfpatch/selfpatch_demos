@@ -1,0 +1,38 @@
+services:
+  bench:
+    image: ros2-medkit-benchmark:local
+    build:
+      context: ..
+      dockerfile: profiles/Dockerfile.benchmark
+      args:
+        ROS2_MEDKIT_REF: "${ROS2_MEDKIT_REF:-main}"
+    environment:
+      ROS_DOMAIN_ID: "41"
+      BENCH_ENTITIES: "${BENCH_ENTITIES:-10}"
+      BENCH_TOPICS_PER_NODE: "${BENCH_TOPICS_PER_NODE:-2}"
+      BENCH_MSG_TYPES: "${BENCH_MSG_TYPES:-3}"
+      TOOL: "${TOOL:-none}"
+      BENCH_PARAMS_FILE: "${BENCH_PARAMS_FILE:-}"
+    command: ["bash", "/ws/benchmark/profiles/run_gateway_and_graph.sh"]
+    mem_limit: "4g"
+    shm_size: "512m"
+    ulimits:
+      nofile: {soft: 65536, hard: 65536}
+
+  # fault lane: gateway_node + fault_manager_node, no synthetic graph.
+  # BENCH_ROSBAG=1 enables rosbag capture on snapshot (off by default).
+  bench-fault:
+    image: ros2-medkit-benchmark:local
+    build:
+      context: ..
+      dockerfile: profiles/Dockerfile.benchmark
+      args:
+        ROS2_MEDKIT_REF: "${ROS2_MEDKIT_REF:-main}"
+    environment:
+      ROS_DOMAIN_ID: "42"
+      BENCH_ROSBAG: "${BENCH_ROSBAG:-0}"
+    command: ["bash", "/ws/benchmark/profiles/run_fault.sh"]
+    mem_limit: "4g"
+    shm_size: "512m"
+    ulimits:
+      nofile: {soft: 65536, hard: 65536}
