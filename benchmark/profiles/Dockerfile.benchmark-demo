@@ -1,0 +1,41 @@
+# Copyright 2026 bburda
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Heap-on-Nav2 image: derive from the already-built turtlebot3 demo image,
+# rebuild only the gateway + serialization with debug symbols and frame pointers
+# (so heaptrack call-sites resolve), install heaptrack, and run the gateway under
+# heaptrack. Nav2 / turtlebot3 stay as the apt prebuilt - we only profile the
+# gateway, attached to the real Nav2 graph in the same container (DDS domain 30).
+ARG BASE=bench_fp-turtlebot3-demo-ci:latest
+FROM ${BASE}
+
+RUN apt-get update && apt-get install -y --no-install-recommends heaptrack \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rebuild gateway + serialization with RelWithDebInfo (-O2 -g) and frame pointers.
+# symlink-install means the installed launch file is the same source we patch below.
+WORKDIR /root/demo_ws
+RUN bash -c "source /opt/ros/jazzy/setup.bash && \
+    MAKEFLAGS='-j 2' colcon build --executor sequential --symlink-install \
+      --packages-select ros2_medkit_serialization ros2_medkit_gateway \
+      --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      '-DCMAKE_CXX_FLAGS=-fno-omit-frame-pointer -g' -DBUILD_TESTING=OFF"
+
+# Run the gateway under heaptrack. The prefix is prepended to the launched
+# executable, so it becomes `heaptrack -o /tmp/heap/gateway gateway_node ...`.
+# heaptrack finalizes the trace when the process is signalled (SIGTERM/SIGINT).
+RUN sed -i \
+    's|executable="gateway_node",|executable="gateway_node", prefix="heaptrack -o /tmp/heap/gateway",|' \
+    /root/demo_ws/src/turtlebot3_medkit_demo/launch/demo.launch.py \
+    && grep -q 'prefix="heaptrack' /root/demo_ws/src/turtlebot3_medkit_demo/launch/demo.launch.py
