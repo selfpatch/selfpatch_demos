@@ -1,0 +1,11 @@
+diagnostics:
+  ros2_medkit_gateway:
+    ros__parameters:
+      discovery: {mode: "hybrid"}
+      refresh_interval_ms: 1000
+      sse: {max_clients: 10, max_subscriptions: 50}
+      plugins:
+        - {name: linux_introspection, path: libfoo.so}
+        - {name: topic_beacon, path: libbar.so}
+  fault_manager:
+    ros__parameters: {confirmation_threshold: 3}

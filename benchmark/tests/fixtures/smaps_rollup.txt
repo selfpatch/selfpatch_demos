@@ -1,0 +1,8 @@
+55e0-7ffd ---p 00000000 00:00 0  [rollup]
+Rss:               81920 kB
+Pss:               42000 kB
+Pss_Anon:          16000 kB
+Shared_Clean:      30000 kB
+Shared_Dirty:       4000 kB
+Private_Clean:      8000 kB
+Private_Dirty:     12000 kB
