@@ -1,0 +1,76 @@
+# Copyright 2026 bburda
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# IMPORTANT: This workflow requires a self-hosted runner tagged [self-hosted, benchmark].
+# GitHub-hosted runners have variable hardware that invalidates the host-keyed baseline.
+# Register a fixed machine and add the 'benchmark' label before enabling scheduled runs.
+name: Gateway Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      medkit_ref:
+        description: "ros2_medkit branch/tag/SHA to benchmark (default: main)"
+        required: false
+        default: "main"
+  schedule:
+    # Every Monday at 03:00 UTC
+    - cron: "0 3 * * 1"
+
+jobs:
+  benchmark:
+    # A fixed self-hosted runner is REQUIRED. GitHub-hosted runners have variable
+    # hardware; running on different hardware invalidates the host-keyed baseline
+    # and compare will exit 2 (host mismatch) or produce meaningless deltas.
+    runs-on: [self-hosted, benchmark]
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install harness dependencies
+        run: pip install -r benchmark/requirements.txt
+
+      - name: Set gateway ref
+        run: echo "ROS2_MEDKIT_REF=${{ inputs.medkit_ref || 'main' }}" >> "$GITHUB_ENV"
+
+      - name: Run scaling lane
+        run: |
+          python -m benchmark.benchmark --strict scaling \
+            --entities 10,50,100,200 --refresh-ms 1000 --repeats 3
+
+      - name: Run footprint lane
+        run: |
+          python -m benchmark.benchmark --strict footprint \
+            --duration 300 --repeats 3
+
+      - name: Compare against baseline
+        run: |
+          python -m benchmark.benchmark compare \
+            --run latest \
+            --baseline benchmark/baseline/ci.json
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: benchmark/results/
+          retention-days: 90

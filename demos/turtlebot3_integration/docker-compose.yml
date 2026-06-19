@@ -6,6 +6,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        ROS2_MEDKIT_REF: "${ROS2_MEDKIT_REF:-main}"
     container_name: turtlebot3_medkit_demo
     environment:
       - DISPLAY=${DISPLAY}
@@ -35,6 +37,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        ROS2_MEDKIT_REF: "${ROS2_MEDKIT_REF:-main}"
     container_name: turtlebot3_medkit_demo_nvidia
     environment:
       - DISPLAY=${DISPLAY}
@@ -69,6 +73,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        ROS2_MEDKIT_REF: "${ROS2_MEDKIT_REF:-main}"
     container_name: turtlebot3_medkit_demo_ci
     environment:
       - TURTLEBOT3_MODEL=burger
