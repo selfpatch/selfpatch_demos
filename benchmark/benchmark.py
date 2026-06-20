@@ -47,6 +47,20 @@ def _run_dir(root, lane):
     return d
 
 
+def _resolve_root(args, root):
+    """Resolve the run-dir root for a lane.
+
+    An explicit ``root`` (internal callers like cmd_all) wins; otherwise the
+    global ``--run-dir`` is honored so several lane invocations write into ONE
+    shared run dir (CI runs scaling and footprint as separate processes and then
+    compares them together); otherwise None -> a fresh timestamped dir per lane.
+    """
+    if root is not None:
+        return root
+    rd = getattr(args, "run_dir", None)
+    return (RESULTS / rd) if rd else None
+
+
 def _strip(cell):
     # Drop non-numeric / non-aggregatable keys before aggregate_cell (which medians
     # every remaining key). load_stats is a dict; status/container/_meta are not data.
@@ -144,7 +158,7 @@ def cmd_footprint(args, root=None):
     check_host_load(strict=getattr(args, "strict", False))
     load_level = getattr(args, "load", "off")
     demo = turtlebot3.TURTLEBOT3
-    out = _run_dir(root, "footprint")
+    out = _run_dir(_resolve_root(args, root), "footprint")
     file = str(REPO / demo.compose_file)
     env = dict(os.environ, COMPOSE_PROFILES=demo.compose_profile)
     reps, status = [], "ok"
@@ -200,7 +214,7 @@ def _syn_cell(entities, args, out, tag):
 
 def cmd_scaling(args, root=None):
     check_host_load(strict=getattr(args, "strict", False))
-    out = _run_dir(root, "scaling")
+    out = _run_dir(_resolve_root(args, root), "scaling")
     counts = [int(x) for x in args.entities.split(",")]
     refreshes = [int(x) for x in args.refresh_ms.split(",")]
     cells, status = [], "ok"
@@ -284,7 +298,7 @@ def _materialize(demo, override):
 
 def cmd_sweep(args, root=None):
     check_host_load(strict=getattr(args, "strict", False))
-    out = _run_dir(root, "sweep")
+    out = _run_dir(_resolve_root(args, root), "sweep")
     sets = load_override_sets(
         str(Path(__file__).resolve().parent / "configs" / "overrides.yaml"))
     variants = {"default": {}, **sets}
@@ -325,7 +339,7 @@ def cmd_sweep(args, root=None):
 
 def cmd_heap(args, root=None):
     check_host_load(strict=getattr(args, "strict", False))
-    out = _run_dir(root, "heap")
+    out = _run_dir(_resolve_root(args, root), "heap")
     env = dict(os.environ, TOOL="heaptrack", BENCH_ENTITIES=str(args.entities))
     project = "bench_heap"
     dh.compose_up(SYN_COMPOSE, project, env=env, service="bench")
@@ -357,8 +371,19 @@ def cmd_heap(args, root=None):
                                         args.duration, args.interval, str(out / "heap.csv"))
         dh.run(["docker", "exec", container, "kill", "-INT", "1"])
         time.sleep(8)
-        raw = dh.run(["docker", "exec", container, "sh", "-c",
-                      "heaptrack_print /tmp/heaptrack.gateway.* | tail -n 200"])
+        # pipefail makes the pipeline fail if heaptrack_print fails (without it
+        # the exit code is tail's, which is 0 even on empty input). bash (not the
+        # default dash sh) is required for `set -o pipefail`.
+        raw = dh.run(["docker", "exec", container, "bash", "-c",
+                      "set -o pipefail; heaptrack_print /tmp/heaptrack.gateway.* "
+                      "| tail -n 200"])
+        # Fail loud if the trace was not finalized: an empty/summary-less output
+        # would otherwise parse as zero leaked / zero sites and report clean.
+        if ("total memory leaked" not in raw
+                and "peak heap memory consumption" not in raw):
+            raise RuntimeError(
+                "heaptrack_print produced no summary (trace not finalized?); "
+                "rerun with a longer settle or inspect the container logs")
         summary = parse_heaptrack_summary(raw)
         ci = slope_ci95([s.t for s in samples], [s.uss_kib * 1024 for s in samples])
         # B4: honest verdict - only SUSPECTED when warmup converged AND sites attributed
@@ -383,13 +408,18 @@ def cmd_heap(args, root=None):
 
 def cmd_memcheck(args, root=None):
     check_host_load(strict=getattr(args, "strict", False))
-    out = _run_dir(root, "memcheck")
+    out = _run_dir(_resolve_root(args, root), "memcheck")
     env = dict(os.environ, TOOL="valgrind", BENCH_ENTITIES=str(args.entities))
     project = "bench_memcheck"
     dh.compose_up(SYN_COMPOSE, project, env=env, service="bench")
     memcheck_meta = {}
     try:
         container = dh.service_container(SYN_COMPOSE, project, "bench")
+        # Gate on readiness: under valgrind the gateway is slow to start, but a
+        # crashed/early-exiting gateway must be reported as an error, not parsed
+        # as a clean run. Allow a generous timeout for the valgrind slowdown.
+        if not runner.ready_in(container, GATEWAY_PORT, "/api/v1", timeout_s=900):
+            raise RuntimeError("gateway never became ready under valgrind")
         try:
             memcheck_meta["image_digest"] = dh.image_digest_of_container(container)
         except Exception:
@@ -400,9 +430,26 @@ def cmd_memcheck(args, root=None):
             memcheck_meta["gateway_sha"] = "unknown"
         memcheck_meta["allocator"] = "glibc"  # valgrind replaces allocator
         time.sleep(args.settle)
+        # valgrind is PID 1 (it wraps the gateway executable directly), so SIGINT
+        # triggers a clean shutdown and the leak walk.
         dh.run(["docker", "exec", container, "kill", "-INT", "1"])
-        time.sleep(15)
-        s = parse_memcheck_summary(dh.run(["docker", "logs", container]))
+        # valgrind walks the whole heap on exit (slow for a DDS process), so poll
+        # for the LEAK SUMMARY rather than guessing a fixed sleep. The summary
+        # goes to stderr, which `docker logs` forwards on the stderr stream, so
+        # capture it with merge_stderr. Fail loud if it never finalizes instead
+        # of parsing empty output as a clean (0, 0) run.
+        logs = ""
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            logs = dh.run(["docker", "logs", container], merge_stderr=True)
+            if "LEAK SUMMARY" in logs:
+                break
+            time.sleep(5)
+        if "LEAK SUMMARY" not in logs:
+            raise RuntimeError("valgrind did not emit a LEAK SUMMARY (the gateway "
+                               "did not finalize under valgrind); the lane cannot "
+                               "report leak data")
+        s = parse_memcheck_summary(logs)
         _write_metadata(out, args, memcheck_meta, refresh_ms="unknown")
         (out / "report.md").write_text(report.render_memcheck_markdown(s))
         (out / "summary.json").write_text(json.dumps(
@@ -413,7 +460,7 @@ def cmd_memcheck(args, root=None):
 
 
 def cmd_attribute(args, root=None):
-    out = _run_dir(root, "attribute")
+    out = _run_dir(_resolve_root(args, root), "attribute")
     env = dict(os.environ, TOOL="heaptrack", BENCH_ENTITIES=str(args.attribute_at))
     project = "bench_attr"
     dh.compose_up(SYN_COMPOSE, project, env=env, service="bench")
@@ -458,7 +505,7 @@ def cmd_load(args, root=None):
     substrate for latency data.
     """
     check_host_load(strict=getattr(args, "strict", False))
-    out = _run_dir(root, "load")
+    out = _run_dir(_resolve_root(args, root), "load")
     levels = ["off", "light", "heavy"]
     cells, status = [], "ok"
     first_meta = {}
@@ -498,13 +545,17 @@ def cmd_load(args, root=None):
             p95_vals = [ls["p95_ms"] for ls in ls_list if "p95_ms" in ls]
             agg["p50_ms"] = _stats.median(p50_vals) if p50_vals else 0.0
             agg["p95_ms"] = _stats.median(p95_vals) if p95_vals else 0.0
-            agg["threads"] = first_meta.get("threads", {})
+            # Thread census from THIS level's own reps (not the first lane's
+            # meta): thread counts change with load, so reusing the off-level
+            # census would misreport the breakdown under heavy load.
+            level_meta = next((r.get("_meta", {}) for r in reps if r.get("_meta")), {})
+            agg["threads"] = level_meta.get("threads", {})
             cells.append(agg)
 
         (out / "partial.json").write_text(json.dumps({"status": status, "cells": cells},
                                                       indent=2, default=str))
 
-    load_run_meta = _write_metadata(out, args, first_meta, refresh_ms="unknown")
+    _write_metadata(out, args, first_meta, refresh_ms="unknown")
     (out / "summary.json").write_text(json.dumps({"status": status, "cells": cells},
                                                   indent=2, default=str))
     (out / "report.md").write_text(report.render_load_markdown(cells))
@@ -520,8 +571,6 @@ def _fault_burst(container, n, mode, out, tag, args):
     """
     from statistics import median as _med
     from benchmark.lib.burst import sample_burst, summarize_burst
-    from benchmark.lib.metrics import Sample
-    from benchmark.lib import sampler
 
     pid = dh.resolve_gateway_pid(container, _FAULT_PROC)
     clk = dh.getconf_clk_tck(container)
@@ -563,6 +612,7 @@ def _fault_burst(container, n, mode, out, tag, args):
         t_trigger=t_trigger,
         baseline_uss_kib=baseline_uss_kib,
         window_s=args.window_s,
+        clk_tck=clk,
     )
 
     # Count rosbag WARNs from container logs.
@@ -595,7 +645,7 @@ def cmd_fault(args, root=None):
     residual, recovered, rosbag_got/N.
     """
     check_host_load(strict=getattr(args, "strict", False))
-    out = _run_dir(root, "fault")
+    out = _run_dir(_resolve_root(args, root), "fault")
     n_list = [int(x) for x in args.faults.split(",")]
     modes = ["data", "rosbag"]
 
@@ -658,8 +708,49 @@ def cmd_fault(args, root=None):
     print(f"fault: {status} -> {out}")
 
 
+def cmd_churn(args, root=None):
+    """Leak-under-graph-churn gate (no heaptrack, self-contained PASS/FAIL).
+
+    Runs the synthetic gateway twice: against a STATIC graph (control) and against
+    a CHURNING graph (bounded node count, topology recycled). Compares the
+    steady-window USS slope. A gateway that frees what it rebuilds keeps the churn
+    slope at the static level; a churn slope well above static means memory grows
+    per graph change. Exits 1 when a churn-driven leak is detected, so the fix can
+    be validated with one command (slope must fall to the static level).
+    """
+    check_host_load(strict=getattr(args, "strict", False))
+    out = _run_dir(_resolve_root(args, root), "churn")
+    base_env = dict(os.environ, BENCH_ENTITIES=str(args.entities),
+                    BENCH_TOPICS_PER_NODE=str(args.topics_per_node),
+                    BENCH_MSG_TYPES=str(args.msg_types))
+
+    static = runner.run_cell(
+        SYN_COMPOSE, "bench_churn_static", "bench", "gateway_node", "/api/v1",
+        GATEWAY_PORT, dict(base_env, BENCH_CHURN_SEC="0"),
+        args.duration, args.interval, str(out / "static.csv"))
+    static["label"] = "static"
+
+    churn = runner.run_cell(
+        SYN_COMPOSE, "bench_churn_on", "bench", "gateway_node", "/api/v1",
+        GATEWAY_PORT, dict(base_env, BENCH_CHURN_SEC=str(args.churn_sec),
+                           BENCH_CHURN_COUNT=str(args.churn_count)),
+        args.duration, args.interval, str(out / "churn.csv"))
+    churn["label"] = "churn"
+
+    is_leak, verdict = report.churn_verdict(static, churn)
+    meta = _write_metadata(out, args, churn.get("_meta", {}), refresh_ms="n/a")
+    (out / "summary.json").write_text(json.dumps(
+        {"status": "ok", "leak": is_leak, "verdict": verdict,
+         "static": _strip(static), "churn": _strip(churn)}, indent=2, default=str))
+    (out / "report.md").write_text(
+        report.render_churn_markdown(static, churn, verdict, meta=meta))
+    print(f"churn: {'LEAK' if is_leak else 'PASS'} :: {verdict} -> {out}")
+    if is_leak:
+        raise SystemExit(1)
+
+
 def cmd_all(args, root=None):
-    shared = RESULTS / time.strftime("%Y%m%d-%H%M%S")
+    shared = root or _resolve_root(args, None) or RESULTS / time.strftime("%Y%m%d-%H%M%S")
     import copy as _copy
     cmd_footprint(args, root=shared)
     cmd_scaling(args, root=shared)
@@ -679,13 +770,24 @@ def cmd_all(args, root=None):
     cmd_report(argparse.Namespace(run=shared.name), root=shared)
 
 
+def _latest_run_dir():
+    """Return the most recent results dir, or raise a clear error if there is none.
+
+    Guards against a missing or empty benchmark/results/ (which would otherwise
+    raise FileNotFoundError / IndexError).
+    """
+    if not RESULTS.is_dir():
+        raise RuntimeError(f"no results directory yet: {RESULTS} (run a lane first)")
+    candidates = sorted(p for p in RESULTS.iterdir() if p.is_dir())
+    if not candidates:
+        raise RuntimeError(f"no results found in {RESULTS} (run a lane first)")
+    return candidates[-1]
+
+
 def _find_run_dir(run_arg):
     """Resolve --run arg: 'latest' -> most recent results dir, else join with RESULTS."""
     if run_arg == "latest":
-        candidates = sorted(RESULTS.iterdir())
-        if not candidates:
-            raise RuntimeError("no results found in benchmark/results/")
-        return candidates[-1]
+        return _latest_run_dir()
     p = Path(run_arg)
     if p.is_absolute():
         return p
@@ -704,19 +806,24 @@ def cmd_compare(args):
 
     baseline = load_baseline(baseline_path)
 
-    # Read host fingerprint from any available run_metadata.json in the run dir.
-    run_meta = {}
+    # Collect EVERY lane's run_metadata.json. high_host_load is written per lane,
+    # so a noisy run on any single lane must gate the whole comparison - reading
+    # only the first lane would let a noisy lane through ungated.
+    lane_metas = []
     for lane_dir in sorted(run_dir.iterdir()):
         meta_path = lane_dir / "run_metadata.json"
         if meta_path.exists():
-            run_meta = json.loads(meta_path.read_text())
-            break
+            lane_metas.append((lane_dir.name, json.loads(meta_path.read_text())))
 
-    if run_meta.get("high_host_load"):
-        print("ERROR: run was taken under high host load (high_host_load=true) - "
-              "comparison would be unreliable.", flush=True)
+    high_lanes = [name for name, m in lane_metas if m.get("high_host_load")]
+    if high_lanes:
+        print("ERROR: run was taken under high host load (high_host_load=true on "
+              f"lane(s): {', '.join(high_lanes)}) - comparison would be "
+              "unreliable.", flush=True)
         raise SystemExit(2)
 
+    # Host fingerprint is per machine, identical across lanes - use any lane.
+    run_meta = lane_metas[0][1] if lane_metas else {}
     ok, reason = host_matches(baseline, run_meta)
     if not ok:
         print(f"ERROR: host mismatch - {reason}\n"
@@ -810,7 +917,7 @@ def cmd_update_baseline(args):
 
 
 def cmd_report(args, root=None):
-    run_dir = root or (RESULTS / args.run if args.run else sorted(RESULTS.iterdir())[-1])
+    run_dir = root or (RESULTS / args.run if args.run else _latest_run_dir())
     parts = [p / "report.md" for p in sorted(run_dir.iterdir()) if (p / "report.md").exists()]
     (run_dir / "REPORT.md").write_text("\n\n---\n\n".join(p.read_text() for p in parts))
     print(f"combined report -> {run_dir / 'REPORT.md'}")
@@ -820,6 +927,10 @@ def main():
     p = argparse.ArgumentParser(prog="benchmark")
     p.add_argument("--strict", action="store_true",
                    help="Abort the lane if host load exceeds cpu_count at lane start.")
+    p.add_argument("--run-dir", dest="run_dir", default=None,
+                   help="Write this lane into benchmark/results/<run-dir> instead "
+                        "of a fresh timestamp dir, so multiple lanes can share one "
+                        "run dir for a single 'compare'.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp):
@@ -884,6 +995,20 @@ def main():
     fl.add_argument("--demo", default="synthetic",
                     help="Substrate: 'synthetic' (default) or 'turtlebot3'.")
     fl.set_defaults(func=cmd_fault)
+
+    ch = sub.add_parser(
+        "churn",
+        help="Leak-under-graph-churn gate: static vs churning graph USS slope; "
+             "exit 1 if memory grows under churn.")
+    common(ch)
+    ch.add_argument("--entities", type=int, default=50)
+    ch.add_argument("--topics-per-node", dest="topics_per_node", type=int, default=2)
+    ch.add_argument("--msg-types", dest="msg_types", type=int, default=3)
+    ch.add_argument("--churn-sec", dest="churn_sec", type=float, default=2.0,
+                    help="Recycle the churn pool every N seconds.")
+    ch.add_argument("--churn-count", dest="churn_count", type=int, default=10,
+                    help="Nodes recycled per churn cycle.")
+    ch.set_defaults(func=cmd_churn, duration=600, interval=10)
 
     al = sub.add_parser("all")
     common(al)

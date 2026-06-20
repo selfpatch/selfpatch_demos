@@ -32,6 +32,7 @@ def summarize_burst(
     baseline_uss_kib: float,
     recover_frac: float = 0.05,
     window_s: Optional[float] = None,
+    clk_tck: int = 100,
 ) -> dict:
     """Summarize a burst sample series into scalar stats.
 
@@ -51,6 +52,11 @@ def summarize_burst(
         Total window length in seconds (used as the capture_duration_s upper
         bound when the process never recovers).  When None the actual sample
         span is used as the bound.
+    clk_tck:
+        Clock ticks per second (getconf CLK_TCK) used to convert /proc CPU ticks
+        to cores.  Pass the value resolved from the container so the summarized
+        peak CPU matches the per-sample CSV column; defaults to 100 (the common
+        Linux value) for callers/tests that do not resolve it.
 
     Returns
     -------
@@ -81,26 +87,40 @@ def summarize_burst(
         dt = curr_s.t - prev_s.t
         if dt > 0:
             cpu_vals.append(
-                compute_cpu_cores(prev_s.total_ticks, curr_s.total_ticks, 100, dt)
+                compute_cpu_cores(prev_s.total_ticks, curr_s.total_ticks, clk_tck, dt)
             )
     peak_cpu_cores = max(cpu_vals) if cpu_vals else 0.0
 
-    # Recovery: time from trigger until USS is within recover_frac of baseline.
-    # "Within band" means |USS - baseline| <= recover_frac * baseline.
+    # Recovery: time from trigger until USS returns to within recover_frac of
+    # baseline AFTER it has first risen above the band.  Requiring the signal to
+    # leave the band first prevents a false instant-recovery when the first
+    # post-trigger sample is taken before the burst has ramped (USS still ~=
+    # baseline at t_trigger).
     band = recover_frac * baseline_uss_kib
     t_last = post[-1].t
     t_window_end = t_last if window_s is None else t_trigger + window_s
 
+    left_band = False
     recovered_at: Optional[float] = None
     for s in post:
-        if abs(s.uss_kib - baseline_uss_kib) <= band:
+        delta = s.uss_kib - baseline_uss_kib
+        if not left_band:
+            if delta > band:
+                left_band = True
+            continue
+        if abs(delta) <= band:
             recovered_at = s.t
             break
 
-    recovered = recovered_at is not None
-    if recovered_at is not None:
+    if not left_band:
+        # USS never measurably left the baseline band: nothing to recover from.
+        recovered = True
+        capture_duration_s = 0.0
+    elif recovered_at is not None:
+        recovered = True
         capture_duration_s = recovered_at - t_trigger
     else:
+        recovered = False
         capture_duration_s = t_window_end - t_trigger
 
     # Residual: USS at end of window minus baseline.

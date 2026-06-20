@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import threading
 import time
 from http.client import HTTPConnection
@@ -86,6 +87,32 @@ def latency_percentiles(latencies_ms: list) -> tuple:
     return _percentile(50), _percentile(95)
 
 
+def assemble_stats(latencies: list, error_latencies: list, level: str,
+                   duration_s: float, workers: int) -> dict:
+    """Build the load-stats dict from successful and failed request timings.
+
+    Pure function - no I/O.  Tail percentiles are computed over BOTH successful
+    and failed (timed-out) request elapsed times: under saturation the slowest
+    requests are exactly the ones that time out, so excluding them would bias p95
+    low.  The error rate is reported alongside so a high-failure run is visible.
+    """
+    all_obs = list(latencies) + list(error_latencies)
+    total = len(all_obs)
+    errors = len(error_latencies)
+    p50, p95 = latency_percentiles(all_obs)
+    return {
+        "level": level,
+        "duration_s": duration_s,
+        "workers": workers,
+        "request_count": total,
+        "success_count": len(latencies),
+        "error_count": errors,
+        "error_rate": round(errors / total, 4) if total else 0.0,
+        "p50_ms": round(p50, 2),
+        "p95_ms": round(p95, 2),
+    }
+
+
 def _parse_base_url(base_url: str):
     """Return (host, port, path_prefix) from base_url."""
     parsed = urlparse(base_url)
@@ -97,7 +124,7 @@ def _parse_base_url(base_url: str):
 
 def _worker(host: str, port: int, prefix: str, paths: list,
             rate_per_s: float, stop_event: threading.Event,
-            latencies: list, errors_ref: list, lock: threading.Lock) -> None:
+            latencies: list, error_latencies: list, lock: threading.Lock) -> None:
     """Worker thread: issue GET requests at rate_per_s until stop_event is set."""
     interval = 1.0 / rate_per_s if rate_per_s > 0 else 1.0
     idx = 0
@@ -115,8 +142,12 @@ def _worker(host: str, port: int, prefix: str, paths: list,
             with lock:
                 latencies.append(elapsed_ms)
         except Exception:
+            # Record elapsed-to-failure: a timed-out request is the slow tail
+            # under saturation, so it must enter the latency distribution rather
+            # than only bumping a counter (which would bias p95 low).
+            elapsed_ms = (time.monotonic() - t0) * 1000.0
             with lock:
-                errors_ref[0] += 1
+                error_latencies.append(elapsed_ms)
         # Rate-limit: sleep for the remainder of the interval
         elapsed = time.monotonic() - t0
         sleep_for = interval - elapsed
@@ -160,16 +191,27 @@ def run_load(base_url: str, level: str, duration_s: float) -> dict:
             pass
 
     latencies: list = []
-    errors_ref = [0]
+    error_latencies: list = []
     lock = threading.Lock()
     stop_event = threading.Event()
+
+    # Let an external SIGTERM/SIGINT end the run early and still write stats: the
+    # harness warms the gateway under load, then stops the generator once the
+    # measurement window closes.  Signal handlers are only installable from the
+    # main thread, so guard for that.
+    installed = []
+    if threading.current_thread() is threading.main_thread():
+        def _handle_stop(_signum, _frame):
+            stop_event.set()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            installed.append((sig, signal.signal(sig, _handle_stop)))
 
     threads = []
     for _ in range(workers):
         t = threading.Thread(
             target=_worker,
             args=(host, port, prefix, rest_paths, rate_per_s,
-                  stop_event, latencies, errors_ref, lock),
+                  stop_event, latencies, error_latencies, lock),
             daemon=True,
         )
         t.start()
@@ -192,24 +234,20 @@ def run_load(base_url: str, level: str, duration_s: float) -> dict:
             st.start()
             sse_threads.append(st)
 
-    time.sleep(duration_s)
-    stop_event.set()
+    # Wait for the window (or an external stop signal), then tear down.
+    try:
+        stop_event.wait(duration_s)
+    finally:
+        stop_event.set()
+        for sig, prev in installed:
+            signal.signal(sig, prev)
 
     for t in threads:
         t.join(timeout=5)
     for st in sse_threads:
         st.join(timeout=5)
 
-    p50, p95 = latency_percentiles(latencies)
-    return {
-        "level": level,
-        "duration_s": duration_s,
-        "workers": workers,
-        "request_count": len(latencies),
-        "p50_ms": round(p50, 2),
-        "p95_ms": round(p95, 2),
-        "error_count": errors_ref[0],
-    }
+    return assemble_stats(latencies, error_latencies, level, duration_s, workers)
 
 
 def main() -> None:

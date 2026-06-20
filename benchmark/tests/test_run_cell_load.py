@@ -23,7 +23,7 @@ Verifies that:
 """
 from __future__ import annotations
 import json
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from benchmark.lib.metrics import Sample
 
@@ -89,6 +89,24 @@ def _run_cell_with_mocked_dh(dh_mock, **kwargs):
                 "/api/v1", 8080, {}, 30.0, 1.0, "/tmp/test.csv",
                 **kwargs,
             )
+
+
+def test_run_cell_empty_window_is_failed_not_ok():
+    """A window with no samples (process gone) must report status=failed and
+    steady=False, not be relabeled ok/steady (which would render downstream as a
+    valid zero-slope measurement)."""
+    import benchmark.lib.runner as runner_mod
+    dh_mock = MagicMock()
+    _patch_dh(dh_mock)
+    with patch.object(runner_mod, "dh", dh_mock), \
+         patch("benchmark.lib.sampler.sample_window", return_value=[]), \
+         patch.object(runner_mod, "ready_in", return_value=True), \
+         patch.object(runner_mod, "_warmup_gate", return_value=True):
+        cell = runner_mod.run_cell(
+            "compose.yml", "proj", "bench", "gateway_node",
+            "/api/v1", 8080, {}, 30.0, 1.0, "/tmp/test.csv")
+    assert cell["status"] == "failed"
+    assert cell["steady"] is False
 
 
 def test_run_cell_no_load_leaves_load_stats_empty():

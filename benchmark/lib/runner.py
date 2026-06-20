@@ -27,6 +27,11 @@ _LOAD_STATS_PATH = "/tmp/load_stats.json"
 # (in B/s) AND the 95% CI excludes zero, the window is flagged not-steady.
 _STEADY_SLOPE_THRESHOLD_B_S = 1024.0
 
+# Upper bound on how long the warmup gate blocks (also the default in
+# _warmup_gate).  The load generator for a load cell is sized to outlast warmup
+# plus the sample window so it stays up while we warm under load.
+_WARMUP_TIMEOUT_S = 180
+
 
 def summarize_window(samples, clk_tck):
     """Summarize a sample window into scalar stats.
@@ -99,7 +104,7 @@ def count_in(container, port, api_base):
     return total
 
 
-def _warmup_gate(read, pid, container, port, api_base, timeout_s=180):
+def _warmup_gate(read, pid, container, port, api_base, timeout_s=_WARMUP_TIMEOUT_S):
     """Block until the gateway USS and entity count are stable.
 
     Returns True when convergence is reached within the timeout, False
@@ -167,10 +172,27 @@ def _start_load_in_container(container, level, duration, port, api_base):
     return _LOAD_STATS_PATH
 
 
-def _read_load_stats(container, out_path, wait_s=15):
+def _stop_load_in_container(container):
+    """Signal the in-container load generator to stop and flush its stats.
+
+    The generator handles SIGTERM by ending its run early and writing the stats
+    file, so stopping it right after the sample window means the stats are ready
+    to read before teardown even though it was started (before warmup) with a
+    runtime that outlasts the window.  Best-effort: a missing process is fine.
+    """
+    try:
+        dh.run(["docker", "exec", container, "pkill", "-TERM", "-f",
+                "load_gen.py"])
+    except Exception:
+        pass
+
+
+def _read_load_stats(container, out_path, wait_s=30):
     """Read load_stats JSON from the container. The load generator writes the file
     at the END of its run, so poll for it (up to wait_s) instead of reading once
-    immediately after sampling (which races the write). Return dict or {}."""
+    immediately after sampling (which races the write). The budget allows for the
+    generator's own teardown after SIGTERM (heavy level joins up to 4 SSE workers
+    at 5s each before writing stats). Return dict or {}."""
     if out_path is None:
         return {}
     deadline = time.monotonic() + wait_s
@@ -197,22 +219,36 @@ def run_cell(compose_file, project, service, gateway_proc, api_base, port,
         pid = dh.resolve_gateway_pid(container, gateway_proc)
         clk = dh.getconf_clk_tck(container)
         read = lambda p, f: dh.read_proc(container, p, f)  # noqa: E731
-        converged = _warmup_gate(read, pid, container, port, api_base)
-        # Start the in-container load generator BEFORE the sample window so
-        # the gateway is under load throughout the measurement period.
+        # For a load cell, start the generator BEFORE the warmup gate so the
+        # gateway warms and settles UNDER load - warming on the idle gateway
+        # would let the loaded USS/CPU keep ramping into the steady window.  The
+        # generator is sized to outlast warmup + window and is stopped explicitly
+        # after the window so it flushes its stats in time.
         load_out_path = None
         if load_level and load_level != "off":
             ld = load_duration if load_duration is not None else duration
-            load_out_path = _start_load_in_container(container, load_level, ld, port, api_base)
+            gen_runtime = _WARMUP_TIMEOUT_S + ld + 30
+            load_out_path = _start_load_in_container(
+                container, load_level, gen_runtime, port, api_base)
+        converged = _warmup_gate(read, pid, container, port, api_base)
         samples = sampler.sample_window(read, pid, clk, _host_load1,
                                         duration, interval, csv_path)
         out = summarize_window(samples, clk)
-        # Read load stats while the container is still up (before finally teardown).
+        # Stop the generator (flushes stats), then read them while the container
+        # is still up (before the finally teardown).
+        if load_out_path:
+            _stop_load_in_container(container)
         out["load_stats"] = _read_load_stats(container, load_out_path)
         out["warmup_converged"] = converged
-        # Default to steady; the flatness check may override this.
-        out["steady"] = converged
-        if converged:
+        # A window that gathered no samples (e.g. the process exited and /proc
+        # reads failed) is a FAILED measurement - summarize_window already flagged
+        # it. Keep that: do not relabel it ok/steady, or an empty cell would
+        # render downstream as a valid zero-slope steady measurement.
+        no_samples = out.get("samples", 0) == 0
+        out["steady"] = converged and not no_samples
+        if no_samples:
+            out["steady_reason"] = out.get("error", "no samples collected")
+        elif converged:
             is_flat, reason = _is_steady(out)
             if not is_flat:
                 out["steady"] = False
@@ -220,7 +256,8 @@ def run_cell(compose_file, project, service, gateway_proc, api_base, port,
         else:
             out["steady_reason"] = "warmup did not converge"
         out["entity_count"] = count_in(container, port, api_base)
-        out["status"] = "ok"
+        if not no_samples:
+            out["status"] = "ok"  # else keep summarize_window's "failed"
         out["container"] = container
         # Capture per-cell reproducibility metadata while the container is alive.
         # Each field degrades to "unknown" on failure so a capture error never

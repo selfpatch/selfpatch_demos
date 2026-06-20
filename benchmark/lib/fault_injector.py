@@ -24,7 +24,8 @@ from typing import List
 # ReportFault.srv request fields (verified against ros2_medkit_msgs source):
 #   string source_id
 #   string fault_code
-#   uint8 severity   (INFO=0, WARNING=1, ERROR=2, CRITICAL=3)
+#   uint8 event_type   (EVENT_FAILED=0, EVENT_PASSED=1)
+#   uint8 severity     (INFO=0, WARNING=1, ERROR=2, CRITICAL=3)
 #   string description
 _SEVERITY_CRITICAL = 3
 _EVENT_FAILED = 0
@@ -86,7 +87,7 @@ def inject_faults(container: str, n: int, run_fn) -> None:
 
 
 def count_rosbag_warns(log_text: str, n_faults: int) -> int:
-    """Count how many of the N injected faults did NOT get a rosbag recording.
+    """Count how many of the N injected faults DID get a rosbag recording.
 
     The fault_manager logs a WARN line containing "Already recording post-fault
     data, skipping" when the shared rosbag writer is busy.  Each such WARN means
@@ -125,20 +126,30 @@ def build_fault_rows(
     Returns
     -------
     List of row dicts with keys:
-        n, mode, peak_uss_delta_mib, peak_cpu_cores, capture_duration_s,
+        n, mode, status, peak_uss_delta_mib, peak_cpu_cores, capture_duration_s,
         residual_mib, recovered, rosbag_got, rosbag_total.
+
+    A cell whose ``(n, mode)`` key is absent from ``burst_results`` is a FAILED
+    cell (it raised during measurement): its row carries ``status="error"`` and
+    no measurement fields, so a crashed cell is never rendered or aggregated as a
+    genuine zero-valued data point.  Successful cells carry ``status="ok"``.
     """
     rows = []
     for n in n_list:
         for mode in modes:
             key = (n, mode)
-            burst = burst_results.get(key, {})
+            if key not in burst_results:
+                rows.append({"n": n, "mode": mode, "status": "error",
+                             "rosbag_total": n if mode == "rosbag" else 0})
+                continue
+            burst = burst_results[key]
             peak_kib = burst.get("peak_uss_delta_kib", 0.0)
             residual_kib = burst.get("residual_uss_delta_kib", 0.0)
             got = rosbag_counts.get(key, 0)
             rows.append({
                 "n": n,
                 "mode": mode,
+                "status": "ok",
                 "peak_uss_delta_mib": peak_kib / 1024.0,
                 "peak_cpu_cores": burst.get("peak_cpu_cores", 0.0),
                 "capture_duration_s": burst.get("capture_duration_s", 0.0),

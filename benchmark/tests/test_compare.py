@@ -14,7 +14,6 @@
 """Unit tests for lib/compare.py - the regression tracking logic."""
 import json
 import pytest
-from pathlib import Path
 from benchmark.lib.compare import load_baseline, host_matches, extract_metrics, diff
 
 
@@ -183,11 +182,11 @@ def test_diff_regression_uss():
     assert verdicts["footprint.uss_kib_median"] == "REGRESSION"
 
 
-def test_diff_scaling_exponent_ci_lo_above_1_regression():
-    """Scaling exponent CI lower bound crossing 1.0 is a REGRESSION."""
+def test_diff_scaling_exponent_disjoint_above_baseline_regression():
+    """A new CI that clears the baseline CI upper bound (0.65) is a REGRESSION."""
     new_metrics = {
         "scaling.exponent": 1.2,
-        "scaling.ci_lo": 1.05,  # ci_lo > 1.0 -> REGRESSION
+        "scaling.ci_lo": 1.05,  # > baseline ci_hi (0.65) -> disjoint, worse
         "scaling.ci_hi": 1.4,
     }
     rows = diff(BASELINE, "scaling", new_metrics)
@@ -195,8 +194,22 @@ def test_diff_scaling_exponent_ci_lo_above_1_regression():
     assert exp_row["verdict"] == "REGRESSION"
 
 
+def test_diff_scaling_incomplete_baseline_absolute_floor():
+    """A baseline with an exponent but no ci_hi cannot be compared relatively;
+    a super-linear new run must still flag REGRESSION (absolute floor), not OK."""
+    baseline_incomplete = dict(BASELINE, scaling={"scaling.exponent": 0.5})
+    new_metrics = {
+        "scaling.exponent": 1.3,
+        "scaling.ci_lo": 1.10,   # > 1.0 -> absolute super-linearity floor
+        "scaling.ci_hi": 1.50,
+    }
+    rows = diff(baseline_incomplete, "scaling", new_metrics)
+    exp_row = next(r for r in rows if r["metric"] == "scaling.exponent")
+    assert exp_row["verdict"] == "REGRESSION"
+
+
 def test_diff_scaling_exponent_ci_lo_below_1_ok():
-    """If ci_lo <= 1.0, scaling exponent is not a regression even if it grew."""
+    """A new exponent whose CI still overlaps the baseline CI is not a regression."""
     new_metrics = {
         "scaling.exponent": 0.55,
         "scaling.ci_lo": 0.35,
@@ -205,6 +218,85 @@ def test_diff_scaling_exponent_ci_lo_below_1_ok():
     rows = diff(BASELINE, "scaling", new_metrics)
     exp_row = next(r for r in rows if r["metric"] == "scaling.exponent")
     assert exp_row["verdict"] == "OK"
+
+
+def test_diff_scaling_relative_regression_disjoint_ci():
+    """A real worsening (0.46 -> 0.95) is caught when the new CI clears the
+    baseline CI upper bound, even though ci_lo stays under 1.0."""
+    # baseline scaling.ci_hi == 0.65
+    new_metrics = {
+        "scaling.exponent": 0.95,
+        "scaling.ci_lo": 0.80,   # > baseline ci_hi (0.65) -> disjoint, worse
+        "scaling.ci_hi": 1.10,
+    }
+    rows = diff(BASELINE, "scaling", new_metrics)
+    exp_row = next(r for r in rows if r["metric"] == "scaling.exponent")
+    assert exp_row["verdict"] == "REGRESSION"
+
+
+def test_diff_scaling_stable_superlinear_no_false_regression():
+    """An already-super-linear baseline does NOT flag REGRESSION when the new run
+    is statistically unchanged (CIs overlap), unlike an absolute ci_lo>1 gate."""
+    baseline_superlinear = dict(BASELINE, scaling={
+        "scaling.exponent": 1.2, "scaling.ci_lo": 1.05, "scaling.ci_hi": 1.40,
+    })
+    new_metrics = {
+        "scaling.exponent": 1.2,
+        "scaling.ci_lo": 1.05,   # NOT > baseline ci_hi (1.40) -> overlapping
+        "scaling.ci_hi": 1.40,
+    }
+    rows = diff(baseline_superlinear, "scaling", new_metrics)
+    exp_row = next(r for r in rows if r["metric"] == "scaling.exponent")
+    assert exp_row["verdict"] == "OK"
+
+
+def test_diff_scaling_no_baseline_absolute_floor():
+    """With no baseline scaling entry, a genuinely super-linear new run still
+    flags REGRESSION (absolute floor) rather than being dropped to N/A."""
+    baseline_no_scaling = dict(BASELINE, scaling={})
+    new_metrics = {
+        "scaling.exponent": 1.3,
+        "scaling.ci_lo": 1.10,   # > 1.0 -> absolute super-linearity floor
+        "scaling.ci_hi": 1.50,
+    }
+    rows = diff(baseline_no_scaling, "scaling", new_metrics)
+    exp_row = next(r for r in rows if r["metric"] == "scaling.exponent")
+    assert exp_row["verdict"] == "REGRESSION"
+    assert exp_row["baseline_val"] is None
+
+
+def test_diff_scaling_no_baseline_sublinear_ok():
+    """No baseline + sub-linear new run -> OK (N/A baseline column, not regression)."""
+    baseline_no_scaling = dict(BASELINE, scaling={})
+    new_metrics = {
+        "scaling.exponent": 0.5,
+        "scaling.ci_lo": 0.30,
+        "scaling.ci_hi": 0.70,
+    }
+    rows = diff(baseline_no_scaling, "scaling", new_metrics)
+    exp_row = next(r for r in rows if r["metric"] == "scaling.exponent")
+    assert exp_row["verdict"] == "OK"
+    assert exp_row["baseline_val"] is None
+
+
+def test_diff_scaling_no_new_fit_na():
+    """A run that produced no scaling fit (exponent None) is N/A, not a crash."""
+    new_metrics = {"scaling.exponent": None, "scaling.ci_lo": None, "scaling.ci_hi": None}
+    rows = diff(BASELINE, "scaling", new_metrics)
+    exp_row = next(r for r in rows if r["metric"] == "scaling.exponent")
+    assert exp_row["verdict"] == "N/A"
+
+
+def test_diff_scaling_ci_rows_not_emitted():
+    """scaling.ci_lo / scaling.ci_hi are inputs to the exponent gate, never rows."""
+    new_metrics = {
+        "scaling.exponent": 0.5, "scaling.ci_lo": 0.3, "scaling.ci_hi": 0.7,
+    }
+    rows = diff(BASELINE, "scaling", new_metrics)
+    metrics = {r["metric"] for r in rows}
+    assert "scaling.ci_lo" not in metrics
+    assert "scaling.ci_hi" not in metrics
+    assert metrics == {"scaling.exponent"}
 
 
 def test_diff_missing_baseline_metric_na():

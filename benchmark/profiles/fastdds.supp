@@ -1,12 +1,23 @@
-{ fastdds_leak
-  Memcheck:Leak
-  ...
-  obj:*/libfastrtps* }
-{ fastcdr_leak
-  Memcheck:Leak
-  ...
-  obj:*/libfastcdr* }
-{ rcl_rcutils
-  Memcheck:Leak
-  ...
-  obj:*/librcl* }
+# Valgrind leak suppressions for FastDDS/CycloneDDS shutdown noise.
+# Format note: valgrind requires each token on its own line - '{', the
+# suppression name, the "Memcheck:Leak" tool:type, the call-frame lines, and the
+# closing '}' must each be separate. A brace sharing a line with the name (e.g.
+# "{ name") makes valgrind FATAL at parse time and the run never starts.
+{
+   fastdds_leak
+   Memcheck:Leak
+   ...
+   obj:*/libfastrtps*
+}
+{
+   fastcdr_leak
+   Memcheck:Leak
+   ...
+   obj:*/libfastcdr*
+}
+{
+   rcl_rcutils_leak
+   Memcheck:Leak
+   ...
+   obj:*/librcl*
+}

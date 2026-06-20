@@ -13,7 +13,7 @@
 # limitations under the License.
 """Unit tests for load_gen.latency_percentiles (pure function, no I/O)."""
 import math
-from benchmark.scaler.load_gen import latency_percentiles
+from benchmark.scaler.load_gen import assemble_stats, latency_percentiles
 
 
 def test_empty_returns_zeros():
@@ -120,6 +120,38 @@ def test_load_cmd_median_p50_p95():
     p95_result = statistics.median([ls["p95_ms"] for ls in ls_list if "p95_ms" in ls])
     assert p50_result == expected_p50, f"p50 median should be {expected_p50}, got {p50_result}"
     assert p95_result == expected_p95, f"p95 median should be {expected_p95}, got {p95_result}"
+
+
+def test_assemble_stats_includes_timeouts_in_tail():
+    """Tail percentiles must include failed (timed-out) requests, not just
+    successful ones - otherwise p95 is biased low under saturation."""
+    fast = [10.0] * 15            # 15 fast successes
+    slow_timeouts = [5000.0] * 5  # 5 timed-out requests at ~5s (saturation tail)
+    s = assemble_stats(fast, slow_timeouts, "heavy", 30.0, 32)
+    assert s["request_count"] == 20
+    assert s["success_count"] == 15
+    assert s["error_count"] == 5
+    assert math.isclose(s["error_rate"], 0.25)
+    # p95 over all 20 observations reflects the timed-out tail...
+    assert s["p95_ms"] == 5000.0
+    # ...whereas a success-only p95 would understate it (the bug being fixed).
+    _, success_only_p95 = latency_percentiles(fast)
+    assert success_only_p95 == 10.0
+
+
+def test_assemble_stats_no_errors():
+    s = assemble_stats([10.0, 20.0, 30.0], [], "light", 30.0, 8)
+    assert s["error_count"] == 0
+    assert s["error_rate"] == 0.0
+    assert s["success_count"] == 3
+    assert s["request_count"] == 3
+
+
+def test_assemble_stats_empty():
+    s = assemble_stats([], [], "light", 30.0, 8)
+    assert s["request_count"] == 0
+    assert s["error_rate"] == 0.0
+    assert s["p50_ms"] == 0.0 and s["p95_ms"] == 0.0
 
 
 def test_load_cmd_median_p50_p95_empty_stats():
