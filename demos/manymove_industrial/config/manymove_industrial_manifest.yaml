@@ -1,0 +1,95 @@
+manifest_version: "1.0"
+metadata:
+  name: "manymove-industrial"
+  description: "manymove BT manipulator pipeline (xArm7 fake hardware) with medkit fault reporting"
+  version: "0.1.0"
+
+# Hybrid discovery: pure ROS-side components (xarm7-arm, ufactory-driver,
+# move-group, object-manager, action-server, gateway, etc.) are picked up
+# at runtime from topic/node introspection. The manifest declares only
+# what the runtime can't infer:
+#   - PLC-side entities (no ROS topics)
+#   - script-bound logical components (conveyor-line, manymove-planning)
+#   - apps the smoke test asserts on (bt-client-xarm7, fault-manager-app)
+config:
+  unmanifested_nodes: "warn"
+  inherit_runtime_resources: true
+
+areas:
+  - id: planning
+    name: "Planning"
+    description: "BehaviorTree.CPP orchestration and MoveIt motion planning"
+    namespace: /
+  - id: diagnostics
+    name: "Diagnostics"
+    description: "ros2_medkit fault management"
+    namespace: /
+  - id: line
+    name: "Conveyor line"
+    description: "PLC-driven conveyor line: photoeyes, motor, e-stop"
+    # /plc namespace anchors topic-discovered PLC-side nodes (opcua_bridge
+    # publishes /plc/heartbeat etc.) into this area in the SOVD entity tree.
+    namespace: /plc
+
+components:
+  - id: manymove-bt
+    name: "manymove BT client"
+    type: "controller"
+    description: "BehaviorTree.CPP orchestration of pick/place sequences"
+    area: planning
+  - id: manymove-planning
+    name: "manymove planning subsystem"
+    type: "controller"
+    description: "Logical grouping for planning-side container scripts (collision inject, restore, self-test)"
+    area: planning
+  - id: fault-manager
+    name: "ros2_medkit fault_manager"
+    type: "diagnostics"
+    description: "SQLite-backed fault store"
+    area: diagnostics
+  - id: openplc
+    name: "Line PLC (OPC UA)"
+    type: "controller"
+    description: "IEC 61131-3 soft PLC exposing photoeye / conveyor / e-stop tags + AlarmConditionType events"
+    area: line
+  - id: photoeye-pick
+    name: "Pick photoeye"
+    type: "sensor"
+    description: "Diffuse-mode photoelectric sensor at pick position"
+    area: line
+  - id: photoeye-drop
+    name: "Drop photoeye"
+    type: "sensor"
+    description: "Diffuse-mode photoelectric sensor at drop position"
+    area: line
+  - id: conveyor-motor
+    name: "Conveyor motor"
+    type: "actuator"
+    description: "Belt drive motor"
+    area: line
+  - id: opcua-bridge
+    name: "OPC UA -> medkit bridge"
+    type: "bridge"
+    description: "Subscribes to PLC AlarmConditionType events and forwards them as medkit faults"
+    area: line
+  - id: conveyor-line
+    name: "Conveyor line subsystem"
+    type: "controller"
+    description: "Logical grouping for line-side container scripts (PLC alarm inject / restore)"
+    area: line
+
+apps:
+  - id: bt-client-xarm7
+    name: "BT client (xArm7)"
+    category: "controller"
+    is_located_on: manymove-bt
+    ros_binding:
+      namespace: /
+      node_name: bt_client_xarm7
+  - id: fault-manager-app
+    name: "fault_manager"
+    category: "diagnostics"
+    is_located_on: fault-manager
+    ros_binding:
+      namespace: /
+      node_name: fault_manager

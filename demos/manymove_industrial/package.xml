@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>manymove_industrial</name>
+  <version>0.1.0</version>
+  <description>
+    manymove + ros2_medkit integration demo: fault-aware BT manipulator
+    pipeline with planned OpenPLC + OPC UA tier 2 correlation.
+  </description>
+  <maintainer email="hello@selfpatch.ai">Selfpatch</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>ros2_medkit_fault_manager</exec_depend>
+  <exec_depend>ros2_medkit_gateway</exec_depend>
+  <exec_depend>ros2_medkit_diagnostic_bridge</exec_depend>
+  <exec_depend>ros2_medkit_graph_provider</exec_depend>
+  <exec_depend>manymove_cpp_trees</exec_depend>
+  <exec_depend>manymove_planner</exec_depend>
+  <exec_depend>manymove_object_manager</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

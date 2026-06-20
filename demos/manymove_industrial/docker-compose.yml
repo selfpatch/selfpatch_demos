@@ -1,0 +1,113 @@
+services:
+  # cpu profile: full demo with X11 forwarding so RViz / Groot / manymove HMI
+  # render on the host display. matches the manymove project's own demo style.
+  manymove-sim:
+    profiles: ["cpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manymove_industrial_sim
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - ROS_DOMAIN_ID=42
+      - HEADLESS=${HEADLESS:-false}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - manymove_faults:/var/lib/ros2_medkit
+    ports:
+      - "8080:8080"   # medkit gateway HTTP
+      - "8765:8765"   # foxglove-bridge
+    networks:
+      medkit-net:
+        aliases: [medkit-gateway]
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /opt/manymove_ws/install/setup.bash &&
+               ros2 launch manymove_industrial demo.launch.py headless:=$${HEADLESS}"
+
+  medkit-web-ui:
+    profiles: ["cpu"]
+    image: ghcr.io/selfpatch/ros2_medkit_web_ui:latest
+    container_name: manymove_industrial_web_ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - manymove-sim
+    networks: [medkit-net]
+
+  # PLC simulator: OPC UA server emulating a line PLC (photoeye, conveyor,
+  # e-stop). Publishes AlarmConditionType events the bridge subscribes to.
+  # Swappable with a real OpenPLC v3 + ST program once the IEC 61131-3
+  # build pipeline is in place; the OPC UA surface stays identical.
+  plc-sim:
+    profiles: ["cpu", "ci"]
+    build:
+      context: ./plc_sim
+      dockerfile: Dockerfile
+    # No container_name: leaves the default service-name DNS alias intact
+    # on the user-defined bridge so other services can resolve `plc-sim`.
+    hostname: plc-sim
+    environment:
+      # asyncua advertises this URL in endpoint discovery; clients reconnect
+      # to it after the initial bind, so it must be a hostname they can
+      # resolve (the service name on medkit-net).
+      - PLC_OPCUA_ENDPOINT=opc.tcp://plc-sim:4840/manymove_plc/server
+    ports:
+      - "4840:4840"   # OPC UA endpoint
+      - "8500:8500"   # admin (raise/clear alarm via curl)
+    networks: [medkit-net]
+
+  # OPC UA -> medkit fault bridge. Subscribes to PLC alarm conditions and
+  # POSTs them to the FaultManager so PLC faults land in the same
+  # dashboard / SOVD entity tree as the manymove BT-side faults.
+  opcua-bridge:
+    profiles: ["cpu", "ci"]
+    build:
+      context: ./opcua_bridge
+      dockerfile: Dockerfile
+    # No container_name: keep the default service-name DNS alias on the
+    # bridge so the rest of the compose can resolve `opcua-bridge`.
+    hostname: opcua-bridge
+    environment:
+      - OPCUA_ENDPOINT=opc.tcp://plc-sim:4840/manymove_plc/server
+      - BRIDGE_SOURCE_ID=/plc/sensor_io
+      - REPORT_FAULT_SERVICE=/fault_manager/report_fault
+      - ROS_DOMAIN_ID=42
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    depends_on:
+      - plc-sim
+    networks: [medkit-net]
+
+  # CI profile: headless, no web UI, no X11. Suitable for the smoke test.
+  manymove-sim-ci:
+    profiles: ["ci"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manymove_industrial_sim_ci
+    environment:
+      - ROS_DOMAIN_ID=42
+      - HEADLESS=true
+    ports:
+      - "8080:8080"
+    volumes:
+      - manymove_faults_ci:/var/lib/ros2_medkit
+    networks:
+      medkit-net:
+        aliases: [medkit-gateway]
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash &&
+               source /opt/manymove_ws/install/setup.bash &&
+               ros2 launch manymove_industrial demo.launch.py headless:=true"
+
+networks:
+  medkit-net:
+    driver: bridge
+
+volumes:
+  manymove_faults:
+  manymove_faults_ci:

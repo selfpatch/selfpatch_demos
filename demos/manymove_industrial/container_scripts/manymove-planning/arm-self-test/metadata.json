@@ -1,0 +1,5 @@
+{
+  "name": "Arm self-test (synthetic)",
+  "description": "Emits an INFO-severity health-check fault (and immediately PASSED) so operators can confirm the medkit pipeline is wired.",
+  "format": "bash"
+}
