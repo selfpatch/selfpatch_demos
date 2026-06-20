@@ -80,8 +80,12 @@ def leak_verdict(uss_slope_ci, heap_growth_bytes, warmup_converged=True, has_sit
     _, lo, hi = uss_slope_ci
     ci_excludes_zero = lo > 0
     if ci_excludes_zero and warmup_converged and has_sites:
-        return (f"USS slope CI [{lo:.1f},{hi:.1f}] B/s excludes zero; heap grew "
-                f"{heap_growth_bytes / 1024 / 1024:.1f} MiB -> leak: SUSPECTED")
+        # heap_growth_bytes is heaptrack's total-leaked-at-exit (bytes still
+        # allocated when the process exited), not a measured growth delta over
+        # the window - word it as such so the verdict is not misread as a rate.
+        return (f"USS slope CI [{lo:.1f},{hi:.1f}] B/s excludes zero; heaptrack "
+                f"leaked {heap_growth_bytes / 1024 / 1024:.1f} MiB at exit -> "
+                f"leak: SUSPECTED")
     if ci_excludes_zero and not warmup_converged:
         return (f"USS slope CI [{lo:.1f},{hi:.1f}] B/s excludes zero, but run was "
                 f"short/unsettled -> inconclusive: short/unsettled run, "
@@ -91,6 +95,57 @@ def leak_verdict(uss_slope_ci, heap_growth_bytes, warmup_converged=True, has_sit
                 f"attributable call sites -> inconclusive: warmup/cache fill, "
                 f"rerun --duration 1800 for a definitive test")
     return f"USS slope CI [{lo:.1f},{hi:.1f}] B/s straddles zero -> NO LEAK detected"
+
+
+def churn_verdict(static_cell, churn_cell, abs_floor_b_s=2000.0):
+    """Compare the churn cell's steady-window USS slope against the static control.
+
+    The static graph is the control (no graph change). A gateway that handles
+    graph changes without accumulating keeps the churn slope at the static level.
+    LEAK (regression) when the churn slope CI lower bound clears BOTH the static
+    slope CI upper bound AND an absolute noise floor - i.e. memory grows
+    significantly faster under graph churn than on a static graph, beyond noise.
+
+    Returns (is_leak: bool, message: str). Reads the uss_slope_* keys produced by
+    runner.summarize_window.
+    """
+    s_slope = static_cell.get("uss_slope_b_s", 0.0)
+    s_hi = static_cell.get("uss_slope_hi95", s_slope)
+    c_slope = churn_cell.get("uss_slope_b_s", 0.0)
+    c_lo = churn_cell.get("uss_slope_lo95", c_slope)
+    threshold = max(s_hi, abs_floor_b_s)
+    is_leak = c_lo > threshold
+    head = "LEAK" if is_leak else "PASS"
+    rel = "exceeds" if is_leak else "within"
+    msg = (f"{head}: churn USS slope {c_slope:.0f} B/s (CI lo {c_lo:.0f}) {rel} "
+           f"static {s_slope:.0f} B/s (CI hi {s_hi:.0f}) and floor "
+           f"{abs_floor_b_s:.0f} B/s")
+    return is_leak, msg
+
+
+def render_churn_markdown(static_cell, churn_cell, verdict, meta=None):
+    """Render the churn-gate report: static control vs churning graph USS slope."""
+    lines = ["# Churn leak gate", ""]
+    if meta:
+        warn = _high_load_warning(meta)
+        if warn:
+            lines += [warn, ""]
+    lines += [
+        f"**Verdict:** {verdict}", "",
+        "_Static is the control (no graph change). A gateway that frees what it "
+        "rebuilds keeps the churn USS slope at the static level. A churn slope "
+        "well above static means memory grows per graph change._", "",
+        "| graph | USS med | USS slope B/s [95% CI] | steady |",
+        "|---|---|---|---|",
+    ]
+    for c in (static_cell, churn_cell):
+        slope = c.get("uss_slope_b_s", 0.0)
+        lo = c.get("uss_slope_lo95", slope)
+        hi = c.get("uss_slope_hi95", slope)
+        lines.append(
+            f"| {c.get('label', '?')} | {_mib(c.get('uss_kib', 0))} | "
+            f"{slope:.0f} [{lo:.0f},{hi:.0f}] | {_steady_str(c)} |")
+    return "\n".join(lines) + "\n"
 
 
 def _mib(kib):
@@ -353,8 +408,12 @@ def render_fault_markdown(rows: list, meta: dict = None) -> str:
     """Render the fault-lane report table + optimization signal.
 
     Each row dict has keys:
-        n, mode, peak_uss_delta_mib, peak_cpu_cores, capture_duration_s,
+        n, mode, status, peak_uss_delta_mib, peak_cpu_cores, capture_duration_s,
         residual_mib, recovered, rosbag_got, rosbag_total.
+
+    Rows with ``status == "error"`` are failed cells: they render as an explicit
+    ERROR line (no fabricated zero values) and are excluded from the optimization
+    signals so a crashed cell is never mistaken for a genuine measurement.
 
     The table is followed by a one-line optimization signal derived from the
     data (e.g. capture duration growth rate and rosbag contention ratio).
@@ -376,6 +435,11 @@ def render_fault_markdown(rows: list, meta: dict = None) -> str:
         "|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
+        if r.get("status") == "error":
+            lines.append(
+                f"| {r['n']} | {r['mode']} | ERROR (cell failed) | - | - | - | - | - |"
+            )
+            continue
         rosbag_str = (
             f"{r['rosbag_got']}/{r['rosbag_total']}"
             if r["rosbag_total"] > 0
@@ -392,8 +456,9 @@ def render_fault_markdown(rows: list, meta: dict = None) -> str:
         )
     lines.append("")
 
-    # Optimization signal: derive from the data rows.
-    signals = _fault_optimization_signals(rows)
+    # Optimization signal: derive only from the cells that actually measured.
+    signals = _fault_optimization_signals([r for r in rows
+                                           if r.get("status") != "error"])
     if signals:
         lines.append("**Optimization signals:**")
         for sig in signals:
@@ -463,6 +528,9 @@ def render_fault_chart(rows: list, out_png: str) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    # Failed cells (status="error") have no measurement fields - exclude them so
+    # a crash is not plotted as a zero-valued point.
+    rows = [r for r in rows if r.get("status") != "error"]
     modes = sorted({r["mode"] for r in rows})
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
@@ -471,7 +539,7 @@ def render_fault_chart(rows: list, out_png: str) -> None:
         xs = [r["n"] for r in series]
         uss = [r["peak_uss_delta_mib"] for r in series]
         dur = [r["capture_duration_s"] for r in series]
-        label = f"+rosbag" if mode == "rosbag" else "data only"
+        label = "+rosbag" if mode == "rosbag" else "data only"
         ax1.plot(xs, uss, marker="o", label=label)
         ax2.plot(xs, dur, marker="o", label=label)
 

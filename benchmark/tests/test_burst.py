@@ -109,3 +109,48 @@ def test_baseline_uss_kib_in_result():
     samples = _make_samples([0.0, 1.0], [800, 900])
     result = summarize_burst(samples, t_trigger=0.5, baseline_uss_kib=800.0)
     assert result["baseline_uss_kib"] == 800.0
+
+
+def test_clk_tck_scales_peak_cpu():
+    """peak_cpu_cores uses the passed clk_tck, not a hardcoded 100."""
+    ts = [0.0, 1.0, 2.0, 3.0, 4.0]
+    uss = [1000, 1000, 1000, 1000, 1000]
+    samples = _make_samples(ts, uss, ticks_per_step=100)  # 100 ticks/s
+    t_trigger = 1.5
+    # clk_tck=100 -> 100 ticks/s == 1.0 core
+    r100 = summarize_burst(samples, t_trigger, baseline_uss_kib=1000.0,
+                           window_s=3.0, clk_tck=100)
+    # clk_tck=200 -> 100 ticks/s == 0.5 core
+    r200 = summarize_burst(samples, t_trigger, baseline_uss_kib=1000.0,
+                           window_s=3.0, clk_tck=200)
+    assert math.isclose(r100["peak_cpu_cores"], 1.0, abs_tol=1e-9)
+    assert math.isclose(r200["peak_cpu_cores"], 0.5, abs_tol=1e-9)
+
+
+def test_recovery_requires_leaving_band_first():
+    """USS must rise above the band before recovery is detected: a first
+    post-trigger sample still at baseline must not be read as instant recovery."""
+    # t_trigger=1.5; post samples: t=2 still at baseline, then a real spike that
+    # returns by t=5.
+    ts = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    uss = [1000, 1000, 1000, 1500, 1200, 1010, 1000]
+    samples = _make_samples(ts, uss)
+    result = summarize_burst(samples, t_trigger=1.5, baseline_uss_kib=1000.0,
+                             recover_frac=0.05, window_s=4.5)
+    assert result["recovered"] is True
+    assert result["peak_uss_delta_kib"] == 500
+    # Recovery is measured from the trigger to the post-spike return (t=5), NOT
+    # the in-band first sample at t=2 -> capture must be well above ~0.
+    assert result["capture_duration_s"] > 1.0
+
+
+def test_no_excursion_is_instant_recovery():
+    """A burst whose USS never measurably leaves the band recovers instantly
+    (capture 0), not 'never recovered' for the whole window."""
+    ts = [0.0, 1.0, 2.0, 3.0, 4.0]
+    uss = [1000, 1000, 1001, 1000, 1000]  # within 5% band of 1000
+    samples = _make_samples(ts, uss)
+    result = summarize_burst(samples, t_trigger=1.5, baseline_uss_kib=1000.0,
+                             recover_frac=0.05, window_s=3.0)
+    assert result["recovered"] is True
+    assert result["capture_duration_s"] == 0.0

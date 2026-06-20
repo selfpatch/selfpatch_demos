@@ -87,6 +87,7 @@ The goal is numbers you can trust and compare, not a single reading.
 | `memcheck` | valgrind memcheck on a short controlled run: definitely/indirectly lost bytes. |
 | `load` | Footprint, CPU, threads and request latency (p50/p95) under M concurrent HTTP clients (off/light/heavy). |
 | `fault` | Snapshot-capture impact as a burst (peak memory/CPU, capture duration, recovery) vs fault count N, with and without rosbag. |
+| `churn` | Leak-under-graph-churn gate: gateway USS slope on a static graph vs a churning graph (nodes recycled, bounded count). PASS/FAIL, exits 1 if memory grows under churn. |
 | `all` | Runs the above and writes one combined report. |
 
 `footprint`, `scaling`, `sweep` measure steady state; `load` adds an HTTP-client
@@ -231,21 +232,52 @@ so both the synthetic and turtlebot3 images clone that exact commit.
 ### Regression tracking workflow
 
 ```bash
-# 1. Run your lanes against a pinned commit
+# 1. Run your lanes against a pinned commit. Use --run-dir so several lanes land
+#    in ONE run dir - otherwise each lane gets its own timestamp dir and a single
+#    `compare` only sees the most recent one.
 export ROS2_MEDKIT_REF=<new-sha>
-python -m benchmark.benchmark scaling --entities 10,50,100,200
+python -m benchmark.benchmark --run-dir myrun scaling --entities 10,50,100,200
+python -m benchmark.benchmark --run-dir myrun footprint --duration 300
 
-# 2. Compare against the committed baseline
-python -m benchmark.benchmark compare --run latest --baseline benchmark/baseline/ci.json
-# Exits 0 (OK/WARN), 1 (REGRESSION), or 2 (host mismatch / high load)
+# 2. Compare the shared run dir against the committed baseline
+python -m benchmark.benchmark compare --run myrun --baseline benchmark/baseline/ci.json
+# Exits 0 (OK/WARN), 1 (REGRESSION), or 2 (host mismatch / high load on ANY lane)
 
 # 3. If the new numbers represent an intentional improvement, update the baseline
-python -m benchmark.benchmark update-baseline --run latest --name ci
+python -m benchmark.benchmark update-baseline --run myrun --name ci
 git add benchmark/baseline/ci.json && git commit -m "chore: update benchmark baseline"
 ```
 
-The baseline is host-keyed: `compare` hard-refuses if the machine differs.
-Run on the same self-hosted runner to get a valid comparison.
+A single lane can still use `--run latest` (the most recent run dir). `--run-dir`
+is only needed when several lanes must be compared together.
+
+The baseline is host-keyed: `compare` hard-refuses if the machine differs, or if
+any lane in the run was collected under high host load. Run on the same
+self-hosted runner to get a valid comparison.
+
+### Churn leak gate
+
+Checks whether the gateway accumulates memory when the ROS graph keeps changing
+(nodes/topics added and removed). It runs the synthetic gateway twice - against a
+static graph (control) and a churning graph with a bounded node count - and
+compares the steady-window USS slope. Self-contained PASS/FAIL, no baseline file:
+
+```bash
+python -m benchmark.benchmark churn --entities 50 --duration 600
+# PASS: churn USS slope stays at the static (flat) level
+# LEAK: churn USS slope is well above static (exit code 1)
+```
+
+Use it to validate a fix: a gateway that frees what it rebuilds on each graph
+change keeps the churn slope at the static level, so the lane flips from LEAK to
+PASS. It measures USS without heaptrack (heaptrack's own memory would inflate the
+reading). Tune the churn rate with `--churn-sec` and `--churn-count`.
+
+**Scaling gate:** the `scaling.exponent` verdict is baseline-relative - a
+REGRESSION fires when the new run's exponent 95% CI clears the baseline's CI
+upper bound (statistically worse than baseline), not on an absolute `ci_lo > 1.0`
+threshold. With no baseline scaling entry it falls back to flagging an absolute
+super-linear run (`ci_lo > 1.0`) so a real regression is never dropped to N/A.
 
 ## Limitations
 
@@ -256,8 +288,10 @@ Run on the same self-hosted runner to get a valid comparison.
 - Wired to the turtlebot3 demo and the synthetic graph; other demos are not yet
   implemented.
 - The `heap`/`memcheck` lanes run on the synthetic gateway (which has debug symbols).
-  A long heaptrack run on the real Nav2 demo (to settle leak-vs-cache for the slow
-  footprint creep) needs a debug-symbol demo image and is not yet wired.
+  For the real Nav2 stack use `scripts/heap_on_nav2.sh [USS_DURATION] [WARMUP]
+  [ATTR_DURATION]`: it measures the gateway USS over time WITHOUT heaptrack (the
+  clean leak-vs-plateau verdict, since heaptrack's shadow memory inflates USS),
+  then runs a short heaptrack pass for top-allocator attribution.
 - The `fault` lane reports faults sequentially, so each gets its own rosbag; measuring
   the single-writer rosbag contention needs parallel fault reporting.
 

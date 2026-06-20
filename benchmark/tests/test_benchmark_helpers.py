@@ -15,13 +15,16 @@ import argparse
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+import benchmark.benchmark as bm
 from benchmark.benchmark import (
+    RESULTS,
     _args_dict,
+    _latest_run_dir,
     _read_demo_refresh_ms,
+    _resolve_root,
     _write_metadata,
     check_host_load,
 )
@@ -120,3 +123,88 @@ def test_strip_drops_load_stats():
     from benchmark.benchmark import _strip
     out = _strip({"uss_kib": 1.0, "load_stats": {"p50_ms": 5}, "_meta": {}, "status": "ok"})
     assert "load_stats" not in out and "_meta" not in out and out["uss_kib"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# _resolve_root: --run-dir threading so lanes can share one run dir
+# ---------------------------------------------------------------------------
+
+def test_resolve_root_explicit_root_wins(tmp_path):
+    """An explicit root (cmd_all) overrides --run-dir."""
+    ns = argparse.Namespace(run_dir="ignored")
+    assert _resolve_root(ns, tmp_path) == tmp_path
+
+
+def test_resolve_root_uses_run_dir():
+    ns = argparse.Namespace(run_dir="myrun")
+    assert _resolve_root(ns, None) == RESULTS / "myrun"
+
+
+def test_resolve_root_none_when_unset():
+    ns = argparse.Namespace(run_dir=None)
+    assert _resolve_root(ns, None) is None
+
+
+# ---------------------------------------------------------------------------
+# _latest_run_dir: clear errors instead of FileNotFoundError/IndexError
+# ---------------------------------------------------------------------------
+
+def test_latest_run_dir_missing_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(bm, "RESULTS", tmp_path / "does_not_exist")
+    with pytest.raises(RuntimeError, match="no results"):
+        _latest_run_dir()
+
+
+def test_latest_run_dir_empty_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(bm, "RESULTS", tmp_path)
+    with pytest.raises(RuntimeError, match="no results found"):
+        _latest_run_dir()
+
+
+def test_latest_run_dir_returns_most_recent(monkeypatch, tmp_path):
+    monkeypatch.setattr(bm, "RESULTS", tmp_path)
+    (tmp_path / "20260101-000000").mkdir()
+    (tmp_path / "20260202-000000").mkdir()
+    assert _latest_run_dir().name == "20260202-000000"
+
+
+# ---------------------------------------------------------------------------
+# cmd_compare: high_host_load must gate on ANY lane, not just the first
+# ---------------------------------------------------------------------------
+
+def _write_lane_meta(run_dir, lane, meta):
+    d = run_dir / lane
+    d.mkdir(parents=True)
+    (d / "run_metadata.json").write_text(json.dumps(meta))
+
+
+def test_cmd_compare_high_load_on_any_lane_gates(tmp_path):
+    """A noisy run on ANY lane (not only the first one read) must abort compare
+    with exit 2 - the first lane is clean, the second is high-load."""
+    run_dir = tmp_path / "run1"
+    host = {"cpu_model": "X", "nproc": 4}
+    # Alphabetically 'footprint' sorts before 'scaling'; put the high-load flag on
+    # the LATER lane to prove the gate does not stop at the first lane's metadata.
+    _write_lane_meta(run_dir, "footprint", {**host, "high_host_load": False})
+    _write_lane_meta(run_dir, "scaling", {**host, "high_host_load": True})
+    baseline = tmp_path / "bl.json"
+    baseline.write_text(json.dumps({"host": host}))
+
+    args = argparse.Namespace(run=str(run_dir), baseline=str(baseline))
+    with pytest.raises(SystemExit) as ei:
+        bm.cmd_compare(args)
+    assert ei.value.code == 2
+
+
+def test_cmd_compare_clean_lanes_pass_host_check(tmp_path, capsys):
+    """All lanes clean + host matches + no comparable metrics -> no SystemExit
+    (compare prints 'No comparable lanes' and returns)."""
+    run_dir = tmp_path / "run2"
+    host = {"cpu_model": "X", "nproc": 4}
+    _write_lane_meta(run_dir, "footprint", {**host, "high_host_load": False})
+    baseline = tmp_path / "bl.json"
+    baseline.write_text(json.dumps({"host": host}))
+
+    args = argparse.Namespace(run=str(run_dir), baseline=str(baseline))
+    bm.cmd_compare(args)  # must not raise (no summary.json -> no metrics)
+    assert "No comparable lanes" in capsys.readouterr().out

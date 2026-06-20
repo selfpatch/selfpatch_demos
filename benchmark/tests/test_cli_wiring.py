@@ -13,13 +13,20 @@
 # limitations under the License.
 import subprocess
 import sys
+from pathlib import Path
+
+# Repo root = two levels up from this file (benchmark/tests/ -> benchmark/ -> repo).
+# Derived from __file__ so the test runs on any checkout / in CI, not just one
+# developer's machine.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_help_lists_subcommands():
     out = subprocess.run(
         [sys.executable, "-m", "benchmark.benchmark", "-h"],
         capture_output=True, text=True,
-        cwd="/home/bburda/workspace/wt/sd-benchmark",
+        cwd=str(_REPO_ROOT),
     )
-    for c in ("footprint", "scaling", "sweep", "heap", "memcheck", "attribute", "all", "report"):
-        assert c in out.stdout
+    for c in ("footprint", "scaling", "sweep", "heap", "memcheck", "attribute",
+              "load", "fault", "churn", "all", "report", "compare", "update-baseline"):
+        assert c in out.stdout, out.stdout

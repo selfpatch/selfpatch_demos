@@ -64,15 +64,34 @@ def per_sample_cores(samples, clk_tck):
             for p, s in zip(samples, samples[1:])]
 
 
+# Consecutive failed /proc reads after which the window stops and summarizes:
+# one transient hiccup is skipped, but this many in a row means the process is
+# genuinely gone, so we break and keep the samples gathered so far.
+_MAX_CONSECUTIVE_READ_ERRORS = 3
+
+
 def sample_window(read_fn, pid, clk_tck, host_load_fn, duration, interval, csv_path):
     samples = []
+    consecutive_errors = 0
     with open(csv_path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(CSV_HEADER)
         prev = None
         end = time.monotonic() + duration
         while time.monotonic() < end:
-            s = sample_once(read_fn, pid, host_load_fn())
+            try:
+                s = sample_once(read_fn, pid, host_load_fn())
+            except Exception:
+                # A single /proc read can hiccup (or the process may have just
+                # exited mid-window).  Don't discard the whole window's samples:
+                # skip this tick, and only break once reads fail repeatedly
+                # (process genuinely gone), summarizing what we collected.
+                consecutive_errors += 1
+                if consecutive_errors >= _MAX_CONSECUTIVE_READ_ERRORS:
+                    break
+                time.sleep(interval)
+                continue
+            consecutive_errors = 0
             write_sample_row(w, prev, s, clk_tck)
             fh.flush()
             samples.append(s)

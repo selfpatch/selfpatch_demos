@@ -17,7 +17,11 @@ from benchmark.lib.fault_injector import (
     count_rosbag_warns,
     build_fault_rows,
 )
-from benchmark.lib.report import render_fault_markdown, _fault_optimization_signals
+from benchmark.lib.report import (
+    render_fault_chart,
+    render_fault_markdown,
+    _fault_optimization_signals,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -114,14 +118,33 @@ def test_build_fault_rows_rosbag_total_is_n():
     assert rows[0]["rosbag_got"] == 2
 
 
-def test_build_fault_rows_missing_key_gives_zeros():
-    # No entry in burst_results -> row uses safe defaults.
+def test_build_fault_rows_missing_key_marks_error():
+    # No entry in burst_results -> the cell FAILED; it must be marked status=error
+    # rather than rendered as a genuine zero-valued measurement.
     rows = build_fault_rows([8], ["data"], {}, {})
     assert len(rows) == 1
     r = rows[0]
-    assert r["peak_uss_delta_mib"] == 0.0
-    assert r["capture_duration_s"] == 0.0
-    assert r["recovered"] is False
+    assert r["status"] == "error"
+    assert r["n"] == 8 and r["mode"] == "data"
+    # No fabricated measurement fields on a failed cell.
+    assert "peak_uss_delta_mib" not in r
+    assert "capture_duration_s" not in r
+    assert "recovered" not in r
+
+
+def test_build_fault_rows_marks_ok_cells():
+    burst_results = {(1, "data"): _sample_burst_result(512, 0.3, 1.5)}
+    rows = build_fault_rows([1], ["data"], burst_results, {(1, "data"): 0})
+    assert rows[0]["status"] == "ok"
+
+
+def test_build_fault_rows_mixed_ok_and_error():
+    # One measured cell, one failed cell -> one ok row, one error row.
+    burst_results = {(1, "data"): _sample_burst_result()}
+    rows = build_fault_rows([1, 2], ["data"], burst_results, {(1, "data"): 0})
+    by_n = {r["n"]: r for r in rows}
+    assert by_n[1]["status"] == "ok"
+    assert by_n[2]["status"] == "error"
 
 
 def test_build_fault_rows_all_ns():
@@ -237,3 +260,51 @@ def test_render_fault_markdown_single_sample_disclosure():
     md = render_fault_markdown(rows)
     # The output must disclose that values are single-sample point estimates.
     assert "n=1" in md or "single-sample" in md
+
+
+def test_render_fault_markdown_error_row():
+    """A failed (status=error) cell renders as ERROR, not a zero-valued row, and
+    is excluded from the optimization signals."""
+    rows = [
+        {"n": 1, "mode": "data", "status": "ok", "peak_uss_delta_mib": 1.0,
+         "peak_cpu_cores": 0.3, "capture_duration_s": 1.0, "residual_mib": 0.0,
+         "recovered": True, "rosbag_got": 0, "rosbag_total": 0},
+        {"n": 8, "mode": "data", "status": "error", "rosbag_total": 0},
+    ]
+    md = render_fault_markdown(rows)
+    assert "ERROR" in md
+    # The failed cell must not appear as a recovered/zero data row.
+    assert "| 8 | data | ERROR" in md
+
+
+def test_render_fault_chart_excludes_error_rows(tmp_path):
+    """render_fault_chart must skip status=error rows (no measurement keys) rather
+    than KeyError on them or plot a crash as a zero point."""
+    rows = [
+        {"n": 1, "mode": "data", "status": "ok", "peak_uss_delta_mib": 0.5,
+         "capture_duration_s": 1.0},
+        {"n": 2, "mode": "data", "status": "ok", "peak_uss_delta_mib": 0.6,
+         "capture_duration_s": 1.1},
+        {"n": 8, "mode": "data", "status": "error", "rosbag_total": 0},
+    ]
+    out = tmp_path / "fault.png"
+    render_fault_chart(rows, str(out))  # must not raise KeyError on the error row
+    assert out.exists()
+
+
+def test_build_fault_rows_error_excluded_from_signals():
+    """An error cell must not feed _fault_optimization_signals (no zero defaults),
+    and rendering must not raise on the error row's missing measurement keys."""
+    rows = [
+        {"n": 1, "mode": "data", "status": "ok", "peak_uss_delta_mib": 0.5,
+         "peak_cpu_cores": 0.3, "capture_duration_s": 1.0, "residual_mib": 0.0,
+         "recovered": True, "rosbag_got": 0, "rosbag_total": 0},
+        {"n": 8, "mode": "data", "status": "error", "rosbag_total": 0},
+    ]
+    md = render_fault_markdown(rows)
+    assert "Fault / snapshot lane" in md
+    # The error cell carries no capture_duration, so it cannot be the second
+    # point of a "capture duration grows with N" signal.
+    signals = _fault_optimization_signals([r for r in rows
+                                           if r.get("status") != "error"])
+    assert not any("capture duration" in s for s in signals)

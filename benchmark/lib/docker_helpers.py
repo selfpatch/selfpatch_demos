@@ -15,12 +15,30 @@
 from __future__ import annotations
 import subprocess
 
+# Per-call subprocess timeouts (seconds). A wedged `docker exec` or a gateway
+# that accepts a connection but never responds must not hang the whole harness
+# indefinitely - every call below is bounded.
+_EXEC_TIMEOUT = 60       # short docker exec / ps / inspect calls
+_BUILD_TIMEOUT = 3600    # compose up --build (a full ROS image build is slow)
+_DOWN_TIMEOUT = 300      # compose down -v
 
-def run(argv, env=None):
-    res = subprocess.run(argv, capture_output=True, text=True, env=env)
+
+def run(argv, env=None, timeout=None, merge_stderr=False):
+    """Run a subprocess, raising RuntimeError on failure or timeout.
+
+    ``timeout`` bounds the call (seconds); None means no bound. ``merge_stderr``
+    appends the captured stderr to the returned stdout - required for tools like
+    valgrind that write their summary to stderr, which ``docker logs`` forwards
+    on the container's stderr stream.
+    """
+    try:
+        res = subprocess.run(argv, capture_output=True, text=True, env=env,
+                             timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"{' '.join(argv)} timed out after {timeout}s")
     if res.returncode != 0:
         raise RuntimeError(f"{' '.join(argv)} failed: {res.stderr.strip()}")
-    return res.stdout
+    return res.stdout + res.stderr if merge_stderr else res.stdout
 
 
 def compose(args, file, project):
@@ -33,18 +51,20 @@ def compose_up(file, project, env=None, service=None):
     args = ["up", "-d", "--build"]
     if service:
         args.append(service)
-    run(compose(args, file, project), env=env)
+    run(compose(args, file, project), env=env, timeout=_BUILD_TIMEOUT)
 
 
 def compose_down(file, project):
     try:
-        run(compose(["down", "-v", "--remove-orphans"], file, project))
+        run(compose(["down", "-v", "--remove-orphans"], file, project),
+            timeout=_DOWN_TIMEOUT)
     except RuntimeError:
         pass
 
 
 def service_container(file, project, service):
-    out = run(compose(["ps", "-q", service], file, project)).strip()
+    out = run(compose(["ps", "-q", service], file, project),
+              timeout=_EXEC_TIMEOUT).strip()
     if not out:
         raise RuntimeError(f"no container for {service} in {project}")
     return out.splitlines()[0]
@@ -60,27 +80,37 @@ def parse_pgrep(out):
 
 
 def resolve_gateway_pid(container, proc="gateway_node"):
-    return parse_pgrep(run(["docker", "exec", container, "pgrep", "-x", proc]))
+    return parse_pgrep(run(["docker", "exec", container, "pgrep", "-x", proc],
+                           timeout=_EXEC_TIMEOUT))
 
 
 def read_proc(container, pid, fname):
-    return run(["docker", "exec", container, "cat", f"/proc/{pid}/{fname}"])
+    return run(["docker", "exec", container, "cat", f"/proc/{pid}/{fname}"],
+               timeout=_EXEC_TIMEOUT)
 
 
 def exec_text(container, *cmd):
-    return run(["docker", "exec", container, *cmd])
+    return run(["docker", "exec", container, *cmd], timeout=_EXEC_TIMEOUT)
 
 
 def getconf_clk_tck(container):
-    v = int(run(["docker", "exec", container, "getconf", "CLK_TCK"]).strip())
-    if v != 100:
-        raise RuntimeError(f"unexpected CLK_TCK={v} (expected 100)")
+    """Return the resolved CLK_TCK for the container.
+
+    Consumers thread this value through to compute_cpu_cores, so any positive
+    value is handled correctly - CLK_TCK is not guaranteed to be 100 across all
+    kernels/architectures, so we only reject non-positive (unusable) values.
+    """
+    v = int(run(["docker", "exec", container, "getconf", "CLK_TCK"],
+                timeout=_EXEC_TIMEOUT).strip())
+    if v <= 0:
+        raise RuntimeError(f"unusable CLK_TCK={v}")
     return v
 
 
 def image_digest_of_container(container):
     try:
-        return run(["docker", "inspect", "-f", "{{.Image}}", container]).strip()
+        return run(["docker", "inspect", "-f", "{{.Image}}", container],
+                   timeout=_EXEC_TIMEOUT).strip()
     except RuntimeError:
         return "unknown"
 
@@ -93,7 +123,8 @@ def read_gateway_sha(container):
     """
     for path in ("/ws/gateway_sha", "/root/demo_ws/gateway_sha"):
         try:
-            sha = run(["docker", "exec", container, "cat", path]).strip()
+            sha = run(["docker", "exec", container, "cat", path],
+                      timeout=_EXEC_TIMEOUT).strip()
             if sha:
                 return sha
         except RuntimeError:
@@ -104,7 +135,8 @@ def read_gateway_sha(container):
 def read_allocator_from_maps(container, pid):
     """Classify the memory allocator from /proc/<pid>/maps inside a container."""
     try:
-        maps = run(["docker", "exec", container, "cat", f"/proc/{pid}/maps"])
+        maps = run(["docker", "exec", container, "cat", f"/proc/{pid}/maps"],
+                   timeout=_EXEC_TIMEOUT)
         if "tcmalloc" in maps:
             return "tcmalloc"
         if "jemalloc" in maps:
@@ -117,7 +149,11 @@ def read_allocator_from_maps(container, pid):
 def curl_status_body(container, url):
     # Probe the gateway from INSIDE the container (DooD: the orchestrator cannot
     # route to the container's bridge IP; published-port localhost also fails).
-    out = run(["docker", "exec", container, "curl", "-s", "-w", "\\n%{http_code}", url])
+    # curl --max-time/--connect-timeout bound the request itself; the subprocess
+    # timeout is a slightly larger backstop so a wedged `docker exec` also unwinds.
+    out = run(["docker", "exec", container, "curl", "-s",
+               "--connect-timeout", "5", "--max-time", "10",
+               "-w", "\\n%{http_code}", url], timeout=20)
     nl = out.rfind("\n")
     if nl < 0:
         return 0, out
@@ -203,7 +239,8 @@ def thread_census(container: str, pid: int) -> dict:
     """
     try:
         raw = run(["docker", "exec", container, "sh", "-c",
-                   f"cat /proc/{pid}/task/*/comm 2>/dev/null || true"])
+                   f"cat /proc/{pid}/task/*/comm 2>/dev/null || true"],
+                  timeout=_EXEC_TIMEOUT)
     except RuntimeError:
         return {"total": 0}
 

@@ -29,7 +29,30 @@ on:
     - cron: "0 3 * * 1"
 
 jobs:
+  # Harness unit tests run on a GitHub-hosted runner: they are pure Python (no
+  # docker, no host-keyed baseline) so they do not need the self-hosted machine,
+  # and they gate the expensive live benchmark below so a harness regression is
+  # caught before any container is built.
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install harness dependencies
+        run: pip install -r benchmark/requirements.txt
+
+      - name: Run harness unit tests
+        run: python -m pytest benchmark/tests -q
+
   benchmark:
+    needs: unit-tests
     # A fixed self-hosted runner is REQUIRED. GitHub-hosted runners have variable
     # hardware; running on different hardware invalidates the host-keyed baseline
     # and compare will exit 2 (host mismatch) or produce meaningless deltas.
@@ -48,23 +71,28 @@ jobs:
       - name: Install harness dependencies
         run: pip install -r benchmark/requirements.txt
 
-      - name: Set gateway ref
-        run: echo "ROS2_MEDKIT_REF=${{ inputs.medkit_ref || 'main' }}" >> "$GITHUB_ENV"
+      - name: Set gateway ref and shared run dir
+        run: |
+          echo "ROS2_MEDKIT_REF=${{ inputs.medkit_ref || 'main' }}" >> "$GITHUB_ENV"
+          # Both lanes must land in ONE run dir so the single 'compare' below
+          # sees scaling AND footprint; separate timestamp dirs would leave
+          # compare looking at only the most recent lane.
+          echo "BENCH_RUN_DIR=ci-${{ github.run_id }}" >> "$GITHUB_ENV"
 
       - name: Run scaling lane
         run: |
-          python -m benchmark.benchmark --strict scaling \
+          python -m benchmark.benchmark --strict --run-dir "$BENCH_RUN_DIR" scaling \
             --entities 10,50,100,200 --refresh-ms 1000 --repeats 3
 
       - name: Run footprint lane
         run: |
-          python -m benchmark.benchmark --strict footprint \
+          python -m benchmark.benchmark --strict --run-dir "$BENCH_RUN_DIR" footprint \
             --duration 300 --repeats 3
 
       - name: Compare against baseline
         run: |
           python -m benchmark.benchmark compare \
-            --run latest \
+            --run "$BENCH_RUN_DIR" \
             --baseline benchmark/baseline/ci.json
 
       - name: Upload results

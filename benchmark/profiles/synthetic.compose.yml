@@ -11,6 +11,8 @@ services:
       BENCH_ENTITIES: "${BENCH_ENTITIES:-10}"
       BENCH_TOPICS_PER_NODE: "${BENCH_TOPICS_PER_NODE:-2}"
       BENCH_MSG_TYPES: "${BENCH_MSG_TYPES:-3}"
+      BENCH_CHURN_SEC: "${BENCH_CHURN_SEC:-0}"
+      BENCH_CHURN_COUNT: "${BENCH_CHURN_COUNT:-5}"
       TOOL: "${TOOL:-none}"
       BENCH_PARAMS_FILE: "${BENCH_PARAMS_FILE:-}"
     command: ["bash", "/ws/benchmark/profiles/run_gateway_and_graph.sh"]

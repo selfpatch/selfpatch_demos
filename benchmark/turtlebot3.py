@@ -27,7 +27,7 @@ class DemoConfig:
     domain_id: int
     api_base: str
     base_params_rel: str
-    override_root: list = field(default_factory=lambda: list(OVERRIDE_ROOT))
+    override_root: list[str] = field(default_factory=lambda: list(OVERRIDE_ROOT))
 
 
 TURTLEBOT3 = DemoConfig(

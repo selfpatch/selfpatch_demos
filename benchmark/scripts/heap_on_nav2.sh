@@ -13,211 +13,209 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Heap-on-Nav2: run the gateway under heaptrack while attached to the real Nav2
-# stack (turtlebot3 demo), then decide leak-vs-cache from heaptrack's own
-# heap-over-time series (a growing cache that is freed at exit does NOT show up
-# as "leaked", so the time series is the honest signal, not the leaked total).
+# Heap-on-Nav2: leak-vs-cache for the gateway attached to the real Nav2 stack
+# (turtlebot3 demo). Two phases, because heaptrack's own shadow memory lives in
+# the gateway address space and inflates /proc USS - a single long heaptrack run
+# therefore reports FALSE USS growth (measured: tracked heap ~15 MiB while USS
+# climbed 34 MiB under heaptrack, yet the same gateway USS plateaus without it):
 #
-# Usage: heap_on_nav2.sh [DURATION_SEC] [WARMUP_SEC]
+#   Phase A (PRIMARY, no heaptrack): sample /proc USS over the full window and fit
+#     an OLS slope with a 95% CI -> the authoritative leak-vs-plateau verdict,
+#     free of any heaptrack inflation.
+#   Phase B (ATTRIBUTION, heaptrack, SHORT): run the gateway under heaptrack for a
+#     short window so the trace stays small enough for heaptrack_print to actually
+#     summarize (a 25-min trace OOMs heaptrack_print), and report the leaked total
+#     + top allocation call-sites. Used to localize growth when Phase A flags it.
+#
+# Usage: heap_on_nav2.sh [USS_DURATION_SEC] [WARMUP_SEC] [ATTR_DURATION_SEC]
 set -eo pipefail
 
-DURATION="${1:-1500}"          # measurement window after warmup (default 25 min)
-WARMUP="${2:-120}"             # let Nav2 + gateway settle before the window
+USS_DURATION="${1:-1500}"       # Phase A measurement window (default 25 min)
+WARMUP="${2:-120}"              # settle Nav2 + gateway before each measurement
+ATTR_DURATION="${3:-300}"       # Phase B heaptrack window (short -> small trace)
 BASE_IMAGE="${BASE_IMAGE:-bench_fp-turtlebot3-demo-ci:latest}"
-IMAGE="medkit-heap-nav2:local"
-NAME="heap_nav2"
+HEAP_IMAGE="medkit-heap-nav2:local"
 SAMPLE_EVERY=30
 HERE="$(cd "$(dirname "$0")/.." && pwd)"   # benchmark/
 OUT="${HERE}/results/heap_nav2_$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT"
 
-echo "== build heap-on-Nav2 image (rebuild gateway with symbols + heaptrack) =="
-docker build -f "${HERE}/profiles/Dockerfile.benchmark-demo" \
-    --build-arg "BASE=${BASE_IMAGE}" -t "$IMAGE" "${HERE}/profiles" >"$OUT/build.log" 2>&1 \
-    || { echo "build failed; see $OUT/build.log"; tail -20 "$OUT/build.log"; exit 1; }
+NAME_A="heap_nav2_base"
+NAME_B="heap_nav2_ht"
+LAUNCH='mkdir -p /var/lib/ros2_medkit/rosbags /tmp/heap && \
+    source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && \
+    export TURTLEBOT3_MODEL=burger && \
+    ros2 launch turtlebot3_medkit_demo demo.launch.py headless:=true'
 
-docker rm -f "$NAME" >/dev/null 2>&1 || true
-echo "== launch Nav2 + gateway(heaptrack), domain 30 =="
-docker run -d --name "$NAME" --shm-size=1g -e ROS_DOMAIN_ID=30 -e TURTLEBOT3_MODEL=burger \
-    "$IMAGE" bash -c "mkdir -p /var/lib/ros2_medkit/rosbags /tmp/heap && \
-        source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash && \
-        export TURTLEBOT3_MODEL=burger && \
-        ros2 launch turtlebot3_medkit_demo demo.launch.py headless:=true" >/dev/null
-
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+cleanup() { docker rm -f "$NAME_A" "$NAME_B" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-echo "== wait for gateway HTTP ready =="
-ready=0
-for _ in $(seq 1 60); do
-    if docker exec "$NAME" curl -fs -o /dev/null http://localhost:8080/api/v1/health 2>/dev/null; then
-        ready=1; break
-    fi
-    sleep 5
-done
-[ "$ready" = 1 ] || { echo "gateway never became ready"; docker logs "$NAME" 2>&1 | tail -30; exit 1; }
+wait_ready() {  # $1=container name; returns 0 once /health answers 200
+    for _ in $(seq 1 60); do
+        if docker exec "$1" curl -fs -o /dev/null \
+                http://localhost:8080/api/v1/health 2>/dev/null; then
+            return 0
+        fi
+        sleep 5
+    done
+    return 1
+}
+
+resolve_gpid() {  # $1=container name; echoes the gateway_node pid
+    # comm is exactly "gateway_node"; -x avoids matching the heaptrack wrapper.
+    docker exec "$1" bash -c 'pgrep -x gateway_node | head -1' 2>/dev/null \
+        | tr -d '[:space:]'
+}
+
+sample_uss() {  # $1=container $2=pid $3=duration $4=outfile
+    local elapsed=0 uss
+    echo "t_s,uss_kib" > "$4"
+    while [ "$elapsed" -lt "$3" ]; do
+        uss="$(docker exec "$1" sh -c \
+            "awk '/^Private/{s+=\$2} END{print s}' /proc/$2/smaps_rollup 2>/dev/null \
+             || awk '/^Private/{s+=\$2} END{print s}' /proc/$2/smaps 2>/dev/null" \
+            2>/dev/null | tr -d '[:space:]')" || uss=""
+        echo "${elapsed},${uss:-NA}" >> "$4"
+        sleep "$SAMPLE_EVERY"; elapsed=$((elapsed + SAMPLE_EVERY))
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Phase A: PRIMARY verdict - gateway WITHOUT heaptrack (no shadow inflation)
+# ---------------------------------------------------------------------------
+echo "== Phase A: gateway WITHOUT heaptrack (clean USS), domain 30 =="
+docker rm -f "$NAME_A" >/dev/null 2>&1 || true
+docker run -d --name "$NAME_A" --shm-size=1g -e ROS_DOMAIN_ID=30 \
+    -e TURTLEBOT3_MODEL=burger "$BASE_IMAGE" bash -c "$LAUNCH" >/dev/null
+echo "   waiting for gateway HTTP ready ..."
+wait_ready "$NAME_A" || {
+    echo "Phase A: gateway never became ready"; docker logs "$NAME_A" 2>&1 | tail -30
+    exit 1
+}
 echo "   ready; warmup ${WARMUP}s (let Nav2 + caches settle) ..."
 sleep "$WARMUP"
+GPID_A="$(resolve_gpid "$NAME_A")"
+[ -n "$GPID_A" ] || { echo "Phase A: could not resolve gateway_node pid"; exit 1; }
+echo "   gateway pid=${GPID_A}; measuring USS ${USS_DURATION}s every ${SAMPLE_EVERY}s"
+sample_uss "$NAME_A" "$GPID_A" "$USS_DURATION" "$OUT/uss.csv"
+docker rm -f "$NAME_A" >/dev/null 2>&1 || true
 
-# Resolve the gateway PID (for /proc USS sampling as a cross-check).
-# The gateway runs as a child of heaptrack; its comm is exactly "gateway_node"
-# (heaptrack's comm is "heaptrack"), so -x targets the real gateway, not the wrapper.
-GPID="$(docker exec "$NAME" bash -c 'pgrep -x gateway_node | head -1' 2>/dev/null | tr -d '[:space:]')"
-if [ -z "$GPID" ]; then
-    echo "ERROR: could not resolve gateway_node PID inside container"
-    docker logs "$NAME" 2>&1 | tail -20; exit 1
-fi
-echo "   gateway pid=${GPID}; measuring ${DURATION}s, USS sample every ${SAMPLE_EVERY}s"
-echo "t_s,uss_kib" > "$OUT/uss.csv"
-elapsed=0
-while [ "$elapsed" -lt "$DURATION" ]; do
-    uss="$(docker exec "$NAME" sh -c "awk '/^Private/{s+=\$2} END{print s}' /proc/${GPID}/smaps_rollup 2>/dev/null || awk '/^Private/{s+=\$2} END{print s}' /proc/${GPID}/smaps 2>/dev/null" 2>/dev/null | tr -d '[:space:]')"
-    echo "${elapsed},${uss:-NA}" >> "$OUT/uss.csv"
-    sleep "$SAMPLE_EVERY"; elapsed=$((elapsed + SAMPLE_EVERY))
-done
-
-echo "== stop gateway gracefully so heaptrack finalizes =="
-# SIGINT ONLY the gateway child (comm=gateway_node), NOT the heaptrack wrapper
-# (whose cmdline also contains "gateway_node") - so heaptrack observes the child
-# exit and writes its trace instead of being killed mid-finalize.
-docker exec "$NAME" bash -c 'pkill -INT -x gateway_node || true'
-# heaptrack exits once it has finalized the trace; wait for it to go away.
+# ---------------------------------------------------------------------------
+# Phase B: ATTRIBUTION - gateway UNDER heaptrack, SHORT window -> call-sites
+# ---------------------------------------------------------------------------
+echo "== Phase B: build heaptrack image (gateway with symbols + heaptrack) =="
+docker build -f "${HERE}/profiles/Dockerfile.benchmark-demo" \
+    --build-arg "BASE=${BASE_IMAGE}" -t "$HEAP_IMAGE" "${HERE}/profiles" \
+    >"$OUT/build.log" 2>&1 \
+    || { echo "build failed; see $OUT/build.log"; tail -20 "$OUT/build.log"; exit 1; }
+echo "== Phase B: launch gateway(heaptrack), domain 30, ${ATTR_DURATION}s window =="
+docker rm -f "$NAME_B" >/dev/null 2>&1 || true
+docker run -d --name "$NAME_B" --shm-size=1g -e ROS_DOMAIN_ID=30 \
+    -e TURTLEBOT3_MODEL=burger "$HEAP_IMAGE" bash -c "$LAUNCH" >/dev/null
+wait_ready "$NAME_B" || {
+    echo "Phase B: gateway never became ready under heaptrack"
+    docker logs "$NAME_B" 2>&1 | tail -30; exit 1
+}
+echo "   ready; warmup ${WARMUP}s ..."
+sleep "$WARMUP"
+echo "   accumulating allocations ${ATTR_DURATION}s ..."
+sleep "$ATTR_DURATION"
+echo "   stop gateway gracefully so heaptrack finalizes ..."
+# SIGINT ONLY the gateway child (comm=gateway_node), not the heaptrack wrapper,
+# so heaptrack observes the exit and writes its trace instead of dying mid-finalize.
+docker exec "$NAME_B" bash -c 'pkill -INT -x gateway_node || true'
 for _ in $(seq 1 40); do
-    docker exec "$NAME" pgrep -x heaptrack >/dev/null 2>&1 || break
+    docker exec "$NAME_B" pgrep -x heaptrack >/dev/null 2>&1 || break
     sleep 3
 done
 sleep 3
-trace="$(docker exec "$NAME" sh -c 'ls -1 /tmp/heap/gateway* 2>/dev/null | head -1' | tr -d '[:space:]')"
-if [ -z "$trace" ]; then
-    echo "no heaptrack trace produced; /tmp/heap contents:"
-    docker exec "$NAME" ls -la /tmp/heap 2>&1 | head
-    docker logs "$NAME" 2>&1 | tail -20; exit 1
+trace="$(docker exec "$NAME_B" sh -c 'ls -1 /tmp/heap/gateway* 2>/dev/null | head -1' \
+    | tr -d '[:space:]')"
+if [ -n "$trace" ]; then
+    echo "   trace: $trace ; heaptrack_print (errors -> heaptrack_print.log) ..."
+    docker exec "$NAME_B" bash -c "heaptrack_print '$trace'" \
+        >"$OUT/summary.txt" 2>"$OUT/heaptrack_print.log" || true
+    docker cp "$NAME_B:$trace" "$OUT/" >/dev/null 2>&1 || true
+    if ! grep -q 'total memory leaked' "$OUT/summary.txt" 2>/dev/null; then
+        echo "   WARNING: heaptrack_print produced no summary (see "
+        echo "            $OUT/heaptrack_print.log); attribution unavailable."
+    fi
+else
+    echo "   WARNING: no heaptrack trace produced; attribution unavailable."
+    docker logs "$NAME_B" 2>&1 | tail -20
 fi
-echo "   trace: $trace"
+docker rm -f "$NAME_B" >/dev/null 2>&1 || true
 
-echo "== analyze inside container (heaptrack_print) =="
-# Two passes: one writes the massif heap-over-time series, one writes the text
-# summary (peak consumers / leaked). --print-massif suppresses the text summary,
-# so they cannot share a single invocation.
-docker exec "$NAME" bash -c "heaptrack_print --print-massif /tmp/heap/massif.out '$trace' >/dev/null 2>&1" || true
-docker exec "$NAME" bash -c "heaptrack_print '$trace' > /tmp/heap/summary.txt 2>/dev/null" || true
-docker cp "$NAME:/tmp/heap/summary.txt" "$OUT/summary.txt" 2>/dev/null || true
-docker cp "$NAME:/tmp/heap/massif.out" "$OUT/massif.out" 2>/dev/null || true
-docker cp "$NAME:$trace" "$OUT/" 2>/dev/null || true
-
-echo "== verdict: leak vs cache from wall-clock USS series =="
-# Primary signal: wall-clock USS from uss.csv (heaptrack-inflated but on the
-# correct time axis).  Secondary check: heaptrack massif held-heap plateau
-# (axis = cumulative-allocations, NOT wall-clock seconds).
-python3 - "$OUT/uss.csv" "$OUT/massif.out" "$OUT/summary.txt" <<'PY' | tee "$OUT/verdict.txt"
+# ---------------------------------------------------------------------------
+# Verdict: Phase A USS slope (primary) + Phase B call-site attribution
+# ---------------------------------------------------------------------------
+echo "== verdict =="
+# PYTHONPATH points at the repo root (benchmark/.. ) so the heredoc reuses the
+# harness's OLS slope+CI and heaptrack parsers instead of duplicating them.
+PYTHONPATH="${HERE}/.." python3 - "$OUT/uss.csv" "$OUT/summary.txt" \
+    <<'PY' | tee "$OUT/verdict.txt"
 import sys
-import re
 
-ussp, massif, summ = sys.argv[1], sys.argv[2], sys.argv[3]
+from benchmark.lib.metrics import slope_ci95
+from benchmark.lib.leak_parse import parse_heaptrack_summary
+
+ussp, summ = sys.argv[1], sys.argv[2]
 
 
-def mib(kib):
+def mib_from_kib(kib):
     return kib / 1024.0
 
 
-# ---------------------------------------------------------------------------
-# PRIMARY: wall-clock USS slope from uss.csv
-# ---------------------------------------------------------------------------
-uss_verdict = None
+# PRIMARY: clean wall-clock USS slope (Phase A, no heaptrack inflation).
+print("PRIMARY (no heaptrack): gateway /proc USS over time on real Nav2")
 try:
-    rows = [r.strip().split(',') for r in open(ussp).read().splitlines()[1:] if ',' in r]
-    vals = [(int(t), int(u)) for t, u in rows if t.strip().lstrip('-').isdigit() and u.strip().isdigit()]
-    print(f"USS /proc samples: {len(vals)} (heaptrack-inflated: heaptrack shadow memory "
-          "is included in gateway address-space USS)")
+    rows = [r.strip().split(',') for r in open(ussp).read().splitlines()[1:]
+            if ',' in r]
+    vals = [(int(t), int(u)) for t, u in rows
+            if t.strip().lstrip('-').isdigit() and u.strip().isdigit()]
+    print(f"  USS samples: {len(vals)}")
     if len(vals) >= 4:
-        first_t, first_u = vals[0]
-        last_t, last_u = vals[-1]
-        print(f"USS: {mib(first_u):.1f} MiB (t={first_t}s) -> {mib(last_u):.1f} MiB (t={last_t}s)")
-        # Late-window slope: last 40% of samples to avoid startup-burst bias
+        print(f"  USS: {mib_from_kib(vals[0][1]):.1f} MiB (t={vals[0][0]}s) -> "
+              f"{mib_from_kib(vals[-1][1]):.1f} MiB (t={vals[-1][0]}s)")
+        # OLS fit + 95% CI over the late window (last 40%) so a single noisy
+        # endpoint cannot decide leak-vs-cache.
         late = vals[int(len(vals) * 0.6):]
-        if len(late) >= 2:
-            span_s = (late[-1][0] - late[0][0]) or 1
-            slope_kib_s = (late[-1][1] - late[0][1]) / span_s
-            print(f"late-window USS slope: {slope_kib_s * 1024:.1f} B/s "
-                  f"over {span_s}s ({len(late)} samples)")
-            if slope_kib_s <= 0:
-                uss_verdict = "PLATEAU"
-                print("VERDICT: PLATEAU -> USS is flat or decreasing in the late window. "
-                      "Not a leak (startup-burst has settled).")
-            elif slope_kib_s * 1024 < 500:
-                uss_verdict = "STABLE"
-                print(f"VERDICT: STABLE -> late-window slope {slope_kib_s * 1024:.1f} B/s "
-                      "is below 500 B/s. Consistent with bounded cache or heaptrack overhead.")
-            else:
-                uss_verdict = "GROWING"
-                print(f"VERDICT: GROWING -> late-window slope {slope_kib_s * 1024:.1f} B/s "
-                      "exceeds 500 B/s. Investigate top allocators below.")
+        xs = [float(t) for t, _u in late]
+        ys = [float(u) * 1024 for _t, u in late]  # bytes
+        slope, lo, hi = slope_ci95(xs, ys)
+        span = (late[-1][0] - late[0][0]) or 1
+        print(f"  late-window OLS slope: {slope:.1f} B/s 95% CI [{lo:.1f},{hi:.1f}] "
+              f"over {span}s ({len(late)} samples)")
+        if hi <= 0:
+            print("  VERDICT: PLATEAU -> USS slope CI entirely <= 0; not a leak.")
+        elif lo > 0 and slope >= 500:
+            print(f"  VERDICT: GROWING -> slope {slope:.1f} B/s, CI excludes zero "
+                  "and >= 500 B/s; real growth - see attribution below.")
+        else:
+            print(f"  VERDICT: STABLE -> slope {slope:.1f} B/s, CI [{lo:.1f},{hi:.1f}] "
+                  "straddles zero or below 500 B/s; bounded cache, not a leak.")
     else:
-        print("USS series too short to judge (need >= 4 samples).")
+        print("  USS series too short to judge (need >= 4 samples).")
 except Exception as exc:
-    print(f"USS parse error: {exc}")
+    print(f"  USS parse error: {exc}")
 
-# ---------------------------------------------------------------------------
-# SECONDARY: heaptrack massif held-heap plateau check
-# Axis: cumulative-allocations (heaptrack time units), NOT wall-clock seconds.
-# Used only as a corroborating check, not as the primary verdict.
-# ---------------------------------------------------------------------------
-times, heaps = [], []
+# ATTRIBUTION: heaptrack top allocation call-sites (Phase B, short trace).
+print("\nATTRIBUTION (heaptrack, short run): top allocation call-sites")
 try:
-    t = None
-    for ln in open(massif):
-        m = re.match(r'\s*time=(\d+)', ln)
-        if m:
-            t = int(m.group(1))
-        m = re.match(r'\s*mem_heap_B=(\d+)', ln)
-        if m and t is not None:
-            times.append(t)
-            heaps.append(int(m.group(1)))
-            t = None
-except FileNotFoundError:
-    pass
-
-if len(heaps) >= 6:
-    n = len(heaps)
-    # Use last 40% of snapshots as the late window to match USS logic
-    late_h = heaps[int(n * 0.6):]
-    late_t = times[int(n * 0.6):]
-    span_alloc = (late_t[-1] - late_t[0]) or 1
-    # Slope in bytes per cumulative-allocation unit (NOT per second)
-    slope_alloc = (late_h[-1] - late_h[0]) / span_alloc
-    end_heap = heaps[-1]
-    peak_heap = max(heaps)
-    print(f"\nheaptrack massif (secondary check, axis=cumulative-allocations):")
-    print(f"  peak held-heap: {end_heap / 1024 / 1024:.1f} MiB, "
-          f"peak ever: {peak_heap / 1024 / 1024:.1f} MiB, "
-          f"snapshots: {n}")
-    print(f"  late-window slope: {slope_alloc:.2f} B / cumulative-allocation-unit "
-          "(NOT B/s - do not compare to USS slope)")
-    if slope_alloc <= 0:
-        print("  massif check: held-heap plateau confirmed (late slope <= 0).")
+    text = open(summ).read()
+    if 'total memory leaked' in text:
+        s = parse_heaptrack_summary(text)
+        print(f"  total leaked at exit: {s.total_leaked_bytes / 1024 / 1024:.1f} MiB")
+        print(f"  peak heap: {s.peak_heap_bytes / 1024 / 1024:.1f} MiB")
+        if s.top_sites:
+            for b, site in s.top_sites[:10]:
+                print(f"  - {b / 1024 / 1024:.2f} MiB :: {site}")
+        else:
+            print("  no per-call-site leaks attributed (clean shutdown).")
     else:
-        print("  massif check: held-heap still growing in late window; see top allocators.")
-else:
-    print("\nheaptrack massif series too short to check (< 6 snapshots).")
-
-print("\nPeak memory consumers (from heaptrack_print) - the call-sites holding heap:")
-try:
-    lines = open(summ).read().splitlines()
-    shown = 0
-    grab = 0
-    for ln in lines:
-        if re.search(r'peak (memory )?consum|peak contribution', ln, re.I):
-            grab = 30
-        if grab and ln.strip():
-            print("  " + ln[:150])
-            shown += 1
-            grab -= 1
-        if re.search(r'total memory leaked|peak heap memory consumption', ln, re.I):
-            print("  " + ln.strip()[:150])
-    if not shown:
-        print("  (no peak-consumer section parsed; see summary.txt)")
-except FileNotFoundError:
-    print("  (no summary.txt)")
+        print("  (heaptrack summary unavailable - see heaptrack_print.log)")
+except Exception as exc:
+    print(f"  attribution parse error: {exc}")
 PY
 
 echo ""
