@@ -33,6 +33,8 @@ WORKDIR ${COLCON_WS}/src
 RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} https://github.com/selfpatch/ros2_medkit.git && \
     mv ros2_medkit/src/ros2_medkit_cmake . && \
     mv ros2_medkit/src/ros2_medkit_gateway . && \
+    mv ros2_medkit/src/ros2_medkit_log_bridge . && \
+    mv ros2_medkit/src/ros2_medkit_action_status_bridge . && \
     mv ros2_medkit/src/ros2_medkit_serialization . && \
     mv ros2_medkit/src/ros2_medkit_msgs . && \
     mv ros2_medkit/src/ros2_medkit_fault_manager . && \
