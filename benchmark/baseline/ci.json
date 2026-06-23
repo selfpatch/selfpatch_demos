@@ -1,5 +1,5 @@
 {
-  "_comment": "Baseline seeded from run: 20260622-220119. gateway_sha may be 'unknown' for footprint lane if the turtlebot3 demo image was built before SHA capture was added.",
+  "_comment": "Baseline from run 20260622-220119. gateway_sha bdcc4ed08008fcb7c37e6af9b2074831f4f5abd8 is the measured gateway commit for every lane in this run.",
   "gateway_sha": "bdcc4ed08008fcb7c37e6af9b2074831f4f5abd8",
   "host": {
     "cpu_model": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
