@@ -1,19 +1,19 @@
 {
-  "_comment": "Seeded from scaling run 20260618-181019 + footprint run 20260618-185748 on Intel i7-10700K 16-core. gateway_sha for footprint was 'unknown' (demo image built before SHA capture; will be real on next footprint build). Scaling gateway_sha: 8569f213e7a1e4b4fd2f699546eda9a11e78dcf1.",
-  "gateway_sha": "8569f213e7a1e4b4fd2f699546eda9a11e78dcf1",
+  "_comment": "Baseline seeded from run: 20260622-220119. gateway_sha may be 'unknown' for footprint lane if the turtlebot3 demo image was built before SHA capture was added.",
+  "gateway_sha": "bdcc4ed08008fcb7c37e6af9b2074831f4f5abd8",
   "host": {
     "cpu_model": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
     "nproc": 16,
-    "mem_total_kb": 32824960
+    "mem_total_kb": 32824968
   },
   "footprint": {
-    "footprint.uss_kib_median": 92960.0,
-    "footprint.cpu_cores_median": 0.19535913385165726,
-    "footprint.num_threads_median": 53.0
+    "footprint.uss_kib_median": 54248.0,
+    "footprint.cpu_cores_median": 0.24552932830433832,
+    "footprint.num_threads_median": 31.0
   },
   "scaling": {
-    "scaling.exponent": 0.4556986360933056,
-    "scaling.ci_lo": 0.26119683252603965,
-    "scaling.ci_hi": 0.6502004396605715
+    "scaling.exponent": 0.2930011978650536,
+    "scaling.ci_lo": 0.03479966730245926,
+    "scaling.ci_hi": 0.551202728427648
   }
 }
