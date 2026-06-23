@@ -94,83 +94,59 @@ The goal is numbers you can trust and compare, not a single reading.
 dimension (and `--load light|heavy` composes onto `footprint`); `fault` measures a
 transient burst, not steady state.
 
-## Example results
+## Reading the results
 
-From one host (Intel i7-10700K, 16 cores, 32 GiB, glibc allocator). Absolute
-numbers depend on hardware; re-run for your own. The value is the method.
+Absolute numbers are per-host and per-build, so they live in the files each run
+generates, not hard-coded here. Read them at the source:
 
-Footprint on a real headless Nav2 stack (turtlebot3, ~22 discovered entities,
-5 repeats): gateway USS around 95-100 MiB, PSS ~104 MiB, RSS ~128 MiB, 53 threads,
-~0.2-0.3 CPU-cores under live diagnostics. Note: the gateway takes a while to settle
-on this stack, so some repeats are flagged not-steady and excluded from the median;
-the report shows the steady count.
+- **The committed baseline** - `benchmark/baseline/ci.json`: the footprint (USS, CPU,
+  threads) and the scaling exponent with its confidence interval that `compare` checks a
+  new run against, plus the host and gateway SHA it was measured on.
+- **Per-run output** - `benchmark/results/<timestamp>/<lane>/`: `report.md` (median +
+  IQR table), `summary.json` (machine-readable numbers and a one-line verdict), `*.png`
+  (the chart), and `run_metadata.json` (host, allocator, gateway version).
 
-Scaling, gateway against a synthetic graph (6 sizes, 3 repeats each):
+Re-run a lane to produce your own; the numbers depend on hardware, the **method** is
+what transfers.
 
-![USS vs entity count](docs/scaling-example.png)
+### What each lane tells you
 
-| entities | USS | USS per entity |
-|---|---|---|
-| 12 | 24 MiB | 2.01 MiB |
-| 32 | 28 MiB | 0.87 MiB |
-| 62 | 36 MiB | 0.58 MiB |
-| 102 | 48 MiB | 0.47 MiB |
-| 152 | 67 MiB | 0.44 MiB |
-| 252 | 95 MiB | 0.38 MiB |
+- **footprint** - steady-state USS/PSS/CPU/threads of the gateway process alone on a real
+  headless Nav2 stack (turtlebot3), median over repeats with not-steady repeats excluded.
+- **scaling** - fits `USS ~ entities^k` and reports `k` with a 95% CI: **sub-linear** only
+  when the CI upper bound is below 1, **super-linear** only when the lower bound exceeds 1,
+  otherwise **INDETERMINATE**. The fit, not a single ratio, is the claim.
 
-Fitted exponent **k = 0.46, 95% CI [0.26, 0.65]** (6 points, R2 = 0.91). Because the
-whole CI is below 1, this is **sub-linear, confirmed**: memory grows slower than the
-graph and per-entity cost falls as it grows. The gateway does not blow up on a large
-project. (On only 3-4 points the CI spans 1 and the harness reports INDETERMINATE
-instead - more points are needed to make the claim.) Absolute footprint is driven by
-graph *complexity* (topic and message-type count) more than node count - a Nav2 node
-with maps and scans costs several times more than a plain talker.
+  ![Example scaling fit - one host; regenerate for your own](docs/scaling-example.png)
 
-Config sweep showed the discovery refresh interval as the main CPU lever: 200 ms
-costs about 4x the CPU of the 1000 ms default, while memory differences across
-configs stayed within a few MiB.
-
-Heap: a short synthetic run reports `inconclusive: warmup/cache fill` (positive USS
-slope but no attributable leak call-sites). A 25-min heaptrack run on the **real Nav2
-demo** (gateway rebuilt with debug symbols, `benchmark/scripts/heap_on_nav2.sh`) settles
-the question: the tracked heap plateaus at ~15.7 MiB (the last 40 % of the run adds
-+0.7 MiB, final snapshots flat), so the gateway does **not** leak on Nav2. The slow USS
-creep some footprint repeats show is warmup / per-message-type cache fill that takes
-~15-20 min to settle (longer than the footprint lane's 120 s window), plus non-heap
-allocator-arena retention - not growing allocations.
-
-HTTP load (synthetic graph, off / 8 clients / 32 clients): USS 28 -> 29 -> 35 MiB,
-CPU 0.01 -> 0.02 -> 0.18 cores, request p95 latency 1.6 -> 2.3 ms. The thread census
-shows ~50 threads of which ~39 share the `gateway_node` comm (the rclcpp executor and
-cpp-httplib pools), 9 are DDS. Latency stays low under load; the thread count is the
-efficiency concern, not latency.
-
-Fault / snapshot (synthetic, fault count N, 20 s window, a fresh container per N so
-each baseline is clean): peak USS delta grows monotonically with N (~0.5 MiB at N=1 ->
-~5.8 MiB at N=16); capture recovers within the window only for N<=2, and at **N>=4 it
-no longer returns to baseline within 20 s**. Each cell is a single sample (n=1).
-Sequentially reported faults each get their own rosbag (no contention); simultaneous
-reporting would
-hit the single rosbag writer.
+- **sweep** - footprint and CPU per config variant; surfaces which single setting costs the
+  most (the discovery refresh interval is the main CPU lever).
+- **heap** / **memcheck** - the authoritative leak verdict: a long heaptrack run on the real
+  Nav2 demo (`benchmark/scripts/heap_on_nav2.sh`) shows whether the tracked heap plateaus or
+  grows, and memcheck gives a hard "definitely lost" count.
+- **load** - footprint, CPU, threads and p50/p95 request latency under M concurrent HTTP
+  clients; the thread count, not latency, is the efficiency signal.
+- **fault** - peak memory/CPU and recovery of snapshot capture across a burst of N faults,
+  with and without rosbag.
+- **churn** - PASS/FAIL leak gate: USS slope on a static graph vs a churning one.
 
 ## What to optimize
 
-The benchmark points at three concrete targets:
+The harness points at concrete targets - run `load`, `fault`, and `sweep` to see the
+current magnitudes on your own host:
 
-- **Cap the executor / HTTP thread pool.** ~50 threads at idle, ~39 of them the
-  rclcpp executor + cpp-httplib pools. The `MultiThreadedExecutor` defaults to one
-  thread per hardware core; a bounded pool sized to the actual work would cut thread
-  overhead. (`load`, thread census.)
-- **Make snapshot capture asynchronous / queued.** Capture stays fast for <=2
-  concurrent faults but at N>=4 it no longer returns to baseline within the window and
-  peak memory grows monotonically with N (~5.8 MiB at N=16), so captures queue faster
-  than they drain. An async capture queue with bounded buffers would keep a fault storm
-  from blocking.
-  (`fault`.)
-- **Watch the refresh interval for CPU.** A 200 ms discovery refresh costs ~4x the
-  CPU of the 1000 ms default for little memory benefit. (`sweep`.)
+- **Bound the executor / HTTP thread pool.** Most of the gateway's idle threads are the
+  rclcpp executor and cpp-httplib pools; `MultiThreadedExecutor` defaults to one thread per
+  hardware core, so a bounded pool sized to the actual work cuts thread overhead.
+  (`load`, thread census.)
+- **Make snapshot capture asynchronous / queued.** Capture stays fast for a couple of
+  concurrent faults but stops returning to baseline once several land at once, so captures
+  queue faster than they drain; an async queue with bounded buffers keeps a fault storm from
+  blocking. (`fault`.)
+- **Watch the discovery refresh interval for CPU.** A fast refresh costs several times the
+  CPU of the default for little memory benefit. (`sweep`.)
 
-These are signals to investigate, sized on one host - re-run to confirm on yours.
+These are signals to investigate, measured on one host - re-run to confirm on yours.
 
 ## Running it
 
@@ -212,11 +188,11 @@ Results are gitignored; commit your own copy if you want to track them over time
 
 ## Reference point
 
-The published example numbers (in [Example results](#example-results)) were measured on:
-
-- **Host:** Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz, 16 cores, 32 GiB RAM
-- **Gateway SHA:** `8569f213e7a1e4b4fd2f699546eda9a11e78dcf1` (scaling lane)
-- **Footprint gateway SHA:** captured from image digest (SHA capture added after this seed run; will be real on the next footprint build)
+Every result records what it was measured on, so there is no host to hard-code here: the
+committed baseline carries its host and gateway SHA in `benchmark/baseline/ci.json`, and
+each run writes host CPU/RAM, allocator, kernel and gateway version to `run_metadata.json`.
+`compare` refuses to compare across different hosts or under high load, so pin
+`ROS2_MEDKIT_REF` to a commit and run on the same machine to track a number over time.
 
 ### Benchmarking a specific commit
 
