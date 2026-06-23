@@ -882,13 +882,37 @@ def cmd_update_baseline(args):
             run_meta = json.loads(meta_path.read_text())
             break
 
+    # gateway_sha can differ per lane (synthetic image vs demo image), so collect
+    # every lane's value and describe the real source instead of a generic guess.
+    lane_shas = {}
+    for lane_dir in sorted(run_dir.iterdir()):
+        meta_path = lane_dir / "run_metadata.json"
+        if lane_dir.is_dir() and meta_path.exists():
+            lane_shas[lane_dir.name] = json.loads(
+                meta_path.read_text()).get("gateway_sha", "unknown")
+    real_shas = sorted({s for s in lane_shas.values() if s != "unknown"})
+    gateway_sha = real_shas[0] if real_shas else "unknown"
+    if lane_shas and all(s != "unknown" for s in lane_shas.values()) and len(real_shas) == 1:
+        comment = (
+            f"Baseline from run {run_dir.name}. gateway_sha {gateway_sha} is the "
+            "measured gateway commit for every lane in this run."
+        )
+    elif lane_shas:
+        per_lane = ", ".join(f"{k}={v}" for k, v in sorted(lane_shas.items()))
+        comment = (
+            f"Baseline from run {run_dir.name}. gateway_sha per lane: {per_lane}. "
+            "Top-level gateway_sha is the first measured commit; 'unknown' means "
+            "that lane's image predated SHA capture."
+        )
+    else:
+        comment = (
+            f"Baseline from run {run_dir.name}. gateway_sha unknown "
+            "(no lane run_metadata.json found)."
+        )
+
     baseline: dict = {
-        "_comment": (
-            "Baseline seeded from run: " + run_dir.name +
-            ". gateway_sha may be 'unknown' for footprint lane if "
-            "the turtlebot3 demo image was built before SHA capture was added."
-        ),
-        "gateway_sha": run_meta.get("gateway_sha", "unknown"),
+        "_comment": comment,
+        "gateway_sha": gateway_sha,
         "host": {
             "cpu_model": run_meta.get("cpu_model", "unknown"),
             "nproc": run_meta.get("nproc", 0),
