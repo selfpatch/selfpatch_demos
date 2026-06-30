@@ -49,6 +49,7 @@ All demos support:
 | [TurtleBot3 Integration](demos/turtlebot3_integration/) | Full ros2_medkit integration with TurtleBot3 and Nav2 | SOVD-compliant API, manifest-based discovery, fault management | ✅ Ready |
 | [MoveIt Pick-and-Place](demos/moveit_pick_place/) | Panda 7-DOF arm with MoveIt 2 manipulation and ros2_medkit | Planning fault detection, controller monitoring, joint limits | ✅ Ready |
 | [Multi-ECU Aggregation](demos/multi_ecu_aggregation/) | Multi-ECU peer aggregation with 3 ECUs (perception, planning, actuation), mDNS discovery, cross-ECU functions | Peer aggregation, mDNS discovery, cross-ECU functions | ✅ Ready |
+| [OTA over SOVD - nav2 sensor fix](demos/ota_nav2_sensor_fix/) | Dev-grade OTA plugin showing the SOVD `/updates` lifecycle - update a broken lidar node, install a new safety classifier, uninstall a deprecated package | SOVD-spec update / install / uninstall, native binary swap, fork+exec process management, Foxglove panel + curl scripts | ✅ Ready |
 
 ### Quick Start
 
@@ -150,6 +151,32 @@ cd demos/multi_ecu_aggregation
 - Unified SOVD-compliant REST API spanning all ECUs
 - Web UI for browsing aggregated entity hierarchy
 
+#### OTA over SOVD Demo (Dev-grade Update / Install / Uninstall)
+
+End-to-end demo of the SOVD `/updates` resource: a broken lidar node is
+swapped with a fixed version over HTTP, an extra safety classifier is
+installed from scratch, and a deprecated package is uninstalled - all
+without SSH, all spec-compliant.
+
+```bash
+cd demos/ota_nav2_sensor_fix
+./run-demo.sh                # build artifacts + bring up gateway/plugin/update server
+./check-demo.sh              # show registered updates + per-id status + live process state
+./trigger-update.sh          # broken_lidar -> fixed_lidar (the headline)
+./trigger-install.sh         # install obstacle_classifier_v2
+./trigger-uninstall.sh       # remove broken_lidar_legacy
+./stop-demo.sh
+```
+
+**Features:**
+
+- Dev-grade `ota_update_plugin` C++ gateway plugin (UpdateProvider + GatewayPlugin)
+- SOVD ISO 17978-3 compliant `/updates` resource: kind derived from
+  `updated_components` / `added_components` / `removed_components` metadata
+- Native binary swap + `fork+exec` process management (no containers, no signing)
+- Foxglove Studio panel mirrors the same SOVD client patterns as the web UI
+- Pairs with the [`ros2_medkit_foxglove_extension`](https://github.com/selfpatch/ros2_medkit_foxglove_extension) Updates panel
+
 ## Getting Started
 
 ### Prerequisites
@@ -209,9 +236,11 @@ Each demo has automated smoke tests that verify the gateway starts and the REST 
 ./tests/smoke_test.sh              # Sensor diagnostics (full API coverage + fault injection + beacons)
 ./tests/smoke_test_turtlebot3.sh   # TurtleBot3 (discovery, data, operations, scripts, triggers, logs)
 ./tests/smoke_test_moveit.sh       # MoveIt pick-and-place (discovery, data, operations, scripts, triggers, logs)
+./tests/smoke_test_multi_ecu.sh    # Multi-ECU aggregation (per-ECU discovery + aggregated view)
+./tests/smoke_test_ota.sh          # OTA over SOVD (catalog, /updates spec shape, prepare/execute, process swap)
 ```
 
-CI runs all 4 demos in parallel - each job builds the Docker image, starts the container, and runs the smoke tests against it. See [CI workflow](.github/workflows/ci.yml).
+CI runs all demos in parallel - each job builds the Docker image, starts the container, and runs the smoke tests against it. See [CI workflow](.github/workflows/ci.yml).
 
 ## Related Projects
 
