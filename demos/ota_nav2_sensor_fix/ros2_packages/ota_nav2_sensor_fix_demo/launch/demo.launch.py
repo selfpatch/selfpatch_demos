@@ -14,9 +14,9 @@
 #   - ros2_medkit_log_bridge + ros2_medkit_action_status_bridge, started
 #     15s after boot, turning Nav2's OWN downstream failure into SOVD
 #     faults (see the "Fault surfacing" comment below)
-#   - health_check, exposing 4 operator-invoked Trigger operations
-#     (lidar/localization/drivetrain/costmap) for differential diagnosis;
-#     independent of scan_sensor_node so it survives the OTA swap
+#   - health_check, exposing one run_health_checks operation that runs the
+#     requested lidar/localization/drivetrain/costmap checks for differential
+#     diagnosis; independent of scan_sensor_node so it survives the OTA swap
 #
 # /scan ownership
 # ---------------
@@ -73,6 +73,7 @@ def generate_launch_description():
     demo_pkg_dir = get_package_share_directory('ota_nav2_sensor_fix_demo')
 
     xacro_file = os.path.join(demo_pkg_dir, 'urdf', 'warehouse_rbtheron.urdf.xacro')
+    latched_relay_script = os.path.join(demo_pkg_dir, 'scripts', 'latched_relay.py')
     bridge_config = os.path.join(demo_pkg_dir, 'config', 'ros_gz_bridge.yaml')
     world_file = os.path.join(
         demo_pkg_dir, 'models', 'aws_small_warehouse', 'worlds', 'warehouse.sdf'
@@ -144,6 +145,23 @@ def generate_launch_description():
             'robot_description': robot_description,
             'frame_prefix': '',
         }],
+    )
+
+    # /robot_description and /tf_static are published exactly ONCE at startup
+    # (robot_state_publisher latches them with TRANSIENT_LOCAL QoS). The
+    # fault_manager's rosbag capture subscribes with a VOLATILE QoS at fault
+    # time, so it never receives those latched samples and downloaded MCAPs
+    # were missing the robot URDF + static TF tree - no robot mesh, no frame
+    # to place /scan against, on Foxglove playback. latched_relay caches the
+    # latched sample and re-publishes it on a plain VOLATILE topic ~2 Hz, so
+    # every ~7s capture window is guaranteed to contain a recent sample.
+    # A plain script, not a Node action, since it's an unregistered
+    # executable (installed via CMakeLists.txt scripts/ install, not
+    # ament_python) - ExecuteProcess just runs it with python3 directly.
+    latched_relay = ExecuteProcess(
+        name='latched_relay',
+        output='screen',
+        cmd=['python3', latched_relay_script, '--ros-args', '-p', ['use_sim_time:=', use_sim_time]],
     )
 
     # Spawn the RB-Theron from /robot_description at the pinned aisle pose.
@@ -301,9 +319,17 @@ def generate_launch_description():
             # subscription to transient_local so the latched /tf_static (published
             # once at startup) is actually recorded; without it the TF tree can't
             # be rebuilt on replay and /scan will not render in 3D.
+            # /robot_description is included too so the downloaded MCAP carries
+            # the URDF itself (Foxglove's 3D panel reads it to render the robot
+            # mesh) - latched_relay (below) is what actually makes this and
+            # /tf_static land in every capture window despite the volatile
+            # capture subscription, since both are otherwise published once,
+            # latched, at startup, long before any given fault fires.
             'snapshots.rosbag.topics': 'explicit',
             'snapshots.rosbag.qos_match': True,
-            'snapshots.rosbag.include_topics': ['/scan', '/cmd_vel', '/tf', '/tf_static', '/local_costmap/costmap'],
+            'snapshots.rosbag.include_topics': [
+                '/scan', '/cmd_vel', '/tf', '/tf_static', '/local_costmap/costmap', '/robot_description',
+            ],
             'snapshots.rosbag.storage_path': '/var/lib/ros2_medkit/rosbags',
         }],
     )
@@ -340,11 +366,12 @@ def generate_launch_description():
         parameters=[{'use_sim_time': use_sim_time}],
     )
 
-    # Operator-invoked differential-diagnosis node (4 Trigger operations:
-    # lidar/localization/drivetrain/costmap health checks). Independent of
-    # scan_sensor_node - it subscribes /scan directly rather than
-    # depending on the broken_lidar/fixed_lidar swap, so it survives the
-    # OTA update untouched and answers "broken" before the fix, "healthy"
+    # Operator-invoked differential-diagnosis node. One run_health_checks
+    # operation (health_check_msgs/RunHealthChecks) runs the requested
+    # lidar/localization/drivetrain/costmap checks and returns a combined
+    # report. Independent of scan_sensor_node - it subscribes /scan directly
+    # rather than depending on the broken_lidar/fixed_lidar swap, so it survives
+    # the OTA update untouched and answers "broken" before the fix, "healthy"
     # after it.
     health_check_node = Node(
         package='health_check',
@@ -448,6 +475,7 @@ def generate_launch_description():
         set_gz_model_path,
         gz_headless,
         robot_state_publisher,
+        latched_relay,
         spawn_robot,
         ros_gz_bridge,
         joint_state_broadcaster_spawner,

@@ -23,4 +23,9 @@ install(DIRECTORY maps/
   DESTINATION share/${PROJECT_NAME}/maps
 )
 
+install(DIRECTORY scripts/
+  DESTINATION share/${PROJECT_NAME}/scripts
+  USE_SOURCE_PERMISSIONS
+)
+
 ament_package()

@@ -21,6 +21,12 @@
   <exec_depend>robotnik_description</exec_depend>
   <exec_depend>robotnik_sensors</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
+  <!-- latched_relay.py: keeps /robot_description + /tf_static "fresh" on a
+       VOLATILE republish so the fault_manager's volatile-QoS rosbag capture
+       can see them (both are otherwise TRANSIENT_LOCAL, published once). -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
   <exec_depend>gz_ros2_control</exec_depend>
   <exec_depend>ros2_control</exec_depend>
   <exec_depend>ros2_controllers</exec_depend>
