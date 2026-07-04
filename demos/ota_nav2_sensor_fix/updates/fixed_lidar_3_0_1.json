@@ -1,7 +1,7 @@
 {
   "id": "fixed_lidar_3_0_1",
   "update_name": "fixed_lidar 3.0.1",
-  "automated": false,
+  "automated": true,
   "origins": ["remote"],
   "notes": "Fix regressed /scan noise filter (3.0.0 hotfix)",
   "duration": 10,
