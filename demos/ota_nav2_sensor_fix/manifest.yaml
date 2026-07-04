@@ -272,6 +272,13 @@ functions:
       - medkit-gateway
       - medkit-fault-manager
 
+  - id: health-checks
+    name: "Health Checks"
+    category: "diagnostics"
+    description: "Operator-invoked differential-diagnosis checks (lidar / localization / drivetrain / costmap) for root-cause confirmation"
+    hosted_by:
+      - health-check
+
   - id: live-telemetry
     name: "Live Telemetry"
     category: "observability"
