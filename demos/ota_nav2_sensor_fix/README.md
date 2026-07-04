@@ -40,12 +40,11 @@ The headline scene is a diagnostic loop, not just a button-press update:
    the replayed `/scan`. The Faults Dashboard panel's freeze-frame shows
    the same state at confirmation time.
    To confirm the root cause rather than guess, the operator runs the
-   `health-check` app's operations (`lidar_health_check`,
-   `localization_health_check`, `drivetrain_health_check`,
-   `costmap_health_check`) from the Operations tab: localization and
-   drivetrain come back healthy, but `lidar_health_check` reports a stuck
-   sector and `costmap_health_check` flags an obstacle ahead that is not in
-   the map - it is the lidar, not something downstream.
+   `health-check` app's single `run_health_checks` operation from the
+   Operations tab (all four checks default to enabled): localization and
+   drivetrain come back healthy, but the report shows lidar failed with a
+   stuck sector and costmap flags an obstacle ahead that is not in the map -
+   it is the lidar, not something downstream.
 7. `GET /api/v1/updates` shows only `broken_lidar_3_0_0` - the suspect
    recent change, and the fix the operator needs is not registered yet.
 8. The operator publishes the hotfix with `./publish-fix.sh` (SOVD
@@ -138,13 +137,11 @@ curl -s "${API}/apps/bt-navigator/faults/ACTION_NAVIGATE_TO_POSE_ABORTED" | jq .
 # 4. Download the MCAP recording and open it in Foxglove.
 curl -O -J "${API}/apps/bt-navigator/bulk-data/rosbags/ACTION_NAVIGATE_TO_POSE_ABORTED"
 
-# 4b. Confirm the root cause with the health-check operations. localization +
-#     drivetrain come back healthy; lidar_health_check reports a stuck sector.
-for op in lidar_health_check localization_health_check drivetrain_health_check costmap_health_check; do
-  echo "== ${op} =="
-  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
-    "${API}/apps/health-check/operations/${op}/executions" | jq '.parameters // .'
-done
+# 4b. Confirm the root cause with the single run_health_checks operation
+#     (all four checks default to enabled). localization + drivetrain come
+#     back healthy; the report line for lidar shows a stuck sector.
+curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+  "${API}/apps/health-check/operations/run_health_checks/executions" | jq '.parameters // .'
 
 # 5. Publish the forward hotfix (or use ./publish-fix.sh). It is not in the
 #    boot catalog - you register it by POSTing its descriptor, a JSON you

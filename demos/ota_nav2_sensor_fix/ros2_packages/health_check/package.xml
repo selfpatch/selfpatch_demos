@@ -2,7 +2,7 @@
 <package format="3">
   <name>health_check</name>
   <version>1.0.0</version>
-  <description>Operator-invoked SOVD health-check operations (lidar, localization, drivetrain, costmap) for differential diagnosis of the OTA nav2 sensor-fix demo.</description>
+  <description>Operator-invoked SOVD health-check operation (lidar, localization, drivetrain, costmap) for differential diagnosis of the OTA nav2 sensor-fix demo.</description>
   <maintainer email="bartoszburda93@gmail.com">bburda</maintainer>
   <license>Apache-2.0</license>
 
@@ -12,7 +12,7 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
-  <depend>std_srvs</depend>
+  <depend>health_check_msgs</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

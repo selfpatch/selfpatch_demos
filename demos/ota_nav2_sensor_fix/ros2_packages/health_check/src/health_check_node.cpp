@@ -3,25 +3,32 @@
 // Operator-invoked differential-diagnosis node. It does NOT raise faults -
 // the log/action-status bridges already turn Nav2's own stall into SOVD
 // faults once broken_lidar's phantom sector is applied. This node answers
-// four on-demand checks (std_srvs/Trigger operations) so an operator
-// working a "navigate_to_pose aborted" fault can narrow the root cause down
-// to a specific subsystem instead of guessing:
-//   ~/lidar_health_check        - is /scan reporting a stuck close sector?
-//   ~/localization_health_check - is AMCL still localizing?
-//   ~/drivetrain_health_check   - is odometry/joint-state telemetry live?
-//   ~/costmap_health_check      - does the local costmap show a live,
-//                                 sensor-only obstacle right in front (no
-//                                 matching static-map feature)?
+// a single on-demand operation (health_check_msgs/RunHealthChecks) so an
+// operator working a "navigate_to_pose aborted" fault can narrow the root
+// cause down to a specific subsystem instead of guessing. The request picks
+// which of the four checks to run (each bool defaults to true, so a bare
+// call runs everything):
+//   lidar        - is /scan reporting a stuck close sector?
+//   localization - is AMCL still localizing?
+//   drivetrain   - is odometry/joint-state telemetry live?
+//   costmap      - does the local costmap show a live, sensor-only
+//                  obstacle right in front (no matching static-map
+//                  feature)?
 //
-// Each handler only inspects the latest cached message per topic - no
+// The response carries one report line per requested check plus an overall
+// ok / checks_run / checks_failed summary - see
+// health_check_msgs/srv/RunHealthChecks.srv.
+//
+// Each check only inspects the latest cached message per topic - no
 // history, no state machine, no interaction with the OTA/fault-manager
 // flow. Subscribing independently of scan_sensor_node means this node
 // survives the broken_lidar <-> fixed_lidar swap untouched, so the same
-// four operations answer "broken" before the fix and "healthy" after it.
+// operation answers "broken" before the fix and "healthy" after it.
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -36,10 +43,11 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
-#include <std_srvs/srv/trigger.hpp>
+
+#include <health_check_msgs/srv/run_health_checks.hpp>
 
 namespace {
-// Lidar stuck-sector heuristic (see class comment above handle_lidar_health_check).
+// Lidar stuck-sector heuristic (see class comment above check_lidar_health).
 constexpr float kStuckBandM = 0.05f;
 constexpr float kStuckMaxRangeM = 1.5f;
 constexpr size_t kStuckMinRunRays = 30;
@@ -53,6 +61,13 @@ constexpr double kCostmapAheadMinM = 0.3;
 constexpr double kCostmapAheadMaxM = 0.8;
 constexpr double kCostmapLateralM = 0.3;
 constexpr int8_t kLethalCellValue = 99;
+
+// Result of a single check: whether it passed and a human-readable detail
+// message, combined into one "<name>: ok|FAIL - <message>" report line.
+struct CheckOutcome {
+  bool ok;
+  std::string message;
+};
 }  // namespace
 
 class HealthCheckNode : public rclcpp::Node {
@@ -98,32 +113,11 @@ class HealthCheckNode : public rclcpp::Node {
         costmap_received_ = true;
       });
 
-    lidar_health_check_srv_ = create_service<std_srvs::srv::Trigger>(
-      "~/lidar_health_check",
-      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
-             std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-        handle_lidar_health_check(response);
-      });
-
-    localization_health_check_srv_ = create_service<std_srvs::srv::Trigger>(
-      "~/localization_health_check",
-      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
-             std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-        handle_localization_health_check(response);
-      });
-
-    drivetrain_health_check_srv_ = create_service<std_srvs::srv::Trigger>(
-      "~/drivetrain_health_check",
-      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
-             std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-        handle_drivetrain_health_check(response);
-      });
-
-    costmap_health_check_srv_ = create_service<std_srvs::srv::Trigger>(
-      "~/costmap_health_check",
-      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
-             std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-        handle_costmap_health_check(response);
+    run_health_checks_srv_ = create_service<health_check_msgs::srv::RunHealthChecks>(
+      "~/run_health_checks",
+      [this](const std::shared_ptr<health_check_msgs::srv::RunHealthChecks::Request> request,
+             std::shared_ptr<health_check_msgs::srv::RunHealthChecks::Response> response) {
+        handle_run_health_checks(request, response);
       });
   }
 
@@ -143,16 +137,50 @@ class HealthCheckNode : public rclcpp::Node {
   HealthCheckNode & operator=(HealthCheckNode &&) = delete;
 
  private:
+  // Runs every check whose request flag is true, builds one report line per
+  // requested check ("<name>: ok|FAIL - <detail>"), and rolls the results up
+  // into ok/checks_run/checks_failed.
+  void handle_run_health_checks(
+    const std::shared_ptr<health_check_msgs::srv::RunHealthChecks::Request> request,
+    std::shared_ptr<health_check_msgs::srv::RunHealthChecks::Response> response) const {
+    std::vector<std::string> lines;
+    uint8_t checks_run = 0;
+    uint8_t checks_failed = 0;
+
+    const auto record = [&](const char * name, const CheckOutcome & outcome) {
+      ++checks_run;
+      if (!outcome.ok) ++checks_failed;
+      std::ostringstream line;
+      line << name << ": " << (outcome.ok ? "ok" : "FAIL") << " - " << outcome.message;
+      lines.push_back(line.str());
+    };
+
+    // Only evaluate (and report on) a check when it was actually requested.
+    if (request->lidar) record("lidar", check_lidar_health());
+    if (request->localization) record("localization", check_localization_health());
+    if (request->drivetrain) record("drivetrain", check_drivetrain_health());
+    if (request->costmap) record("costmap", check_costmap_health());
+
+    std::ostringstream report;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      if (i > 0) report << "\n";
+      report << lines[i];
+    }
+
+    response->checks_run = checks_run;
+    response->checks_failed = checks_failed;
+    response->report = report.str();
+    response->ok = (checks_failed == 0);
+  }
+
   // Scans for the longest run of consecutive FINITE ranges that are all
   // within kStuckBandM of one another and below kStuckMaxRangeM - a
   // contiguous band of near-equal close returns is the signature of the
   // broken_lidar phantom sector (a real environment practically never
   // presents 30+ consecutive rays all within 5 cm of each other).
-  void handle_lidar_health_check(std::shared_ptr<std_srvs::srv::Trigger::Response> response) const {
+  CheckOutcome check_lidar_health() const {
     if (!scan_received_ || !last_scan_) {
-      response->success = false;
-      response->message = "no /scan received";
-      return;
+      return {false, "no /scan received"};
     }
 
     const auto & ranges = last_scan_->ranges;
@@ -209,9 +237,7 @@ class HealthCheckNode : public rclcpp::Node {
       oss << "Stuck lidar sector: " << best_len << " rays pinned near " << std::fixed << std::setprecision(2)
           << best_value << " m around bearing " << std::setprecision(1) << bearing_deg
           << " deg - the lidar is reporting a phantom obstacle.";
-      response->success = false;
-      response->message = oss.str();
-      return;
+      return {false, oss.str()};
     }
 
     std::ostringstream oss;
@@ -220,27 +246,23 @@ class HealthCheckNode : public rclcpp::Node {
       oss << ", ranges " << std::fixed << std::setprecision(2) << finite_min << "-" << finite_max << " m";
     }
     oss << ", no stuck sector.";
-    response->success = true;
-    response->message = oss.str();
+    return {true, oss.str()};
   }
 
-  void handle_localization_health_check(std::shared_ptr<std_srvs::srv::Trigger::Response> response) const {
+  CheckOutcome check_localization_health() const {
     if (amcl_pose_received_) {
       const double age_s = (this->now() - last_amcl_pose_time_).seconds();
       if (age_s <= kLocalizationFreshSec) {
         std::ostringstream oss;
         oss << "Localization healthy: AMCL pose fresh (" << std::fixed << std::setprecision(1) << age_s
             << "s old), covariance nominal.";
-        response->success = true;
-        response->message = oss.str();
-        return;
+        return {true, oss.str()};
       }
     }
-    response->success = false;
-    response->message = "AMCL pose stale/absent";
+    return {false, "AMCL pose stale/absent"};
   }
 
-  void handle_drivetrain_health_check(std::shared_ptr<std_srvs::srv::Trigger::Response> response) const {
+  CheckOutcome check_drivetrain_health() const {
     const double odom_age =
       odom_received_ ? (this->now() - last_odom_time_).seconds() : std::numeric_limits<double>::infinity();
     const double joint_age = joint_state_received_ ? (this->now() - last_joint_state_time_).seconds()
@@ -249,9 +271,7 @@ class HealthCheckNode : public rclcpp::Node {
     const bool joint_fresh = joint_state_received_ && joint_age <= kDrivetrainFreshSec;
 
     if (odom_fresh && joint_fresh) {
-      response->success = true;
-      response->message = "Drivetrain healthy: odometry + joint states streaming, diff-drive active.";
-      return;
+      return {true, "Drivetrain healthy: odometry + joint states streaming, diff-drive active."};
     }
 
     std::vector<std::string> stale;
@@ -265,8 +285,7 @@ class HealthCheckNode : public rclcpp::Node {
       oss << stale[k];
     }
     oss << " stale/absent.";
-    response->success = false;
-    response->message = oss.str();
+    return {false, oss.str()};
   }
 
   // Counts lethal cells (>= kLethalCellValue) in a small window directly
@@ -275,13 +294,11 @@ class HealthCheckNode : public rclcpp::Node {
   // the robot, so this window is "in front of the robot" without needing a
   // TF lookup. A lethal hit here with no corresponding static-map feature
   // corroborates a live-sensor phantom rather than a real obstacle - this
-  // check only ever reports success=true, it is an observation, not a fault.
-  void handle_costmap_health_check(std::shared_ptr<std_srvs::srv::Trigger::Response> response) const {
+  // check only ever reports ok=true, it is an observation, not a fault.
+  CheckOutcome check_costmap_health() const {
     if (!costmap_received_ || !last_costmap_ || last_costmap_->data.empty() || last_costmap_->info.width == 0 ||
         last_costmap_->info.height == 0 || last_costmap_->info.resolution <= 0.0f) {
-      response->success = false;
-      response->message = "no /local_costmap/costmap received";
-      return;
+      return {false, "no /local_costmap/costmap received"};
     }
 
     const auto & info = last_costmap_->info;
@@ -323,13 +340,10 @@ class HealthCheckNode : public rclcpp::Node {
           << ahead_avg_m
           << " m ahead with no matching static-map feature - consistent with a live sensor (phantom), "
              "not the environment.";
-      response->success = true;
-      response->message = oss.str();
-      return;
+      return {true, oss.str()};
     }
 
-    response->success = true;
-    response->message = "Local costmap clear ahead.";
+    return {true, "Local costmap clear ahead."};
   }
 
   // Cached latest messages + reception time (node clock, so this follows
@@ -360,10 +374,7 @@ class HealthCheckNode : public rclcpp::Node {
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr costmap_sub_;
 
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr lidar_health_check_srv_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr localization_health_check_srv_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr drivetrain_health_check_srv_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr costmap_health_check_srv_;
+  rclcpp::Service<health_check_msgs::srv::RunHealthChecks>::SharedPtr run_health_checks_srv_;
 };
 
 int main(int argc, char ** argv) {
