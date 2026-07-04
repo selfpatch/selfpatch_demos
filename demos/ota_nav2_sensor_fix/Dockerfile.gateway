@@ -184,6 +184,16 @@ COPY --from=builder /ws/install /ws/install
 COPY gateway_config.yaml /etc/ros2_medkit/gateway_config.yaml
 COPY manifest.yaml /etc/ros2_medkit/manifest.yaml
 
+# nav2 loads its built-in default nav_to_pose behavior tree (the
+# default_nav_to_pose_bt_xml_filename param does not reliably override it under
+# this bringup), whose recovery subtree (spin, 5s wait, back-up, 6 retries)
+# makes a phantom-stuck robot thrash for 20-30s before navigate_to_pose aborts.
+# Overwrite that default with our fast-abort tree (recovery reduced to a costmap
+# clear, single retry) so the stall aborts cleanly in ~15s no matter which tree
+# nav2 ends up loading.
+RUN cp /ws/install/ota_nav2_sensor_fix_demo/share/ota_nav2_sensor_fix_demo/config/navigate_to_pose_fast_abort.xml \
+       /opt/ros/jazzy/share/nav2_bt_navigator/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml
+
 # Pre-create the fragments directory so the gateway's manifest manager
 # scans an existing (empty) dir at boot rather than logging "missing
 # fragments_dir" warnings. Plugin writes / removes yaml files here at
