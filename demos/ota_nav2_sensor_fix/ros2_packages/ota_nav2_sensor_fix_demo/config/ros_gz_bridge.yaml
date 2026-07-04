@@ -1,0 +1,19 @@
+# gz <-> ROS2. /tf and /odom are NOT bridged: robot_state_publisher (static+joints),
+# diff_drive_controller (odom + odom->base TF), and amcl (map->odom) own the TF tree.
+# Bridging gz Pose_V to /tf loses frame_ids and conflicts; do not add it.
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS
+# The real gz front-laser lands on /scan_sim, not /scan directly:
+# scan_sensor_node (broken_lidar/fixed_lidar) subscribes /scan_sim and
+# republishes onto /scan (clean passthrough for fixed_lidar, real scan +
+# a blocking phantom overlay for broken_lidar), same shadow trick as the
+# Earlier SetRemap /scan->/scan_sim. scan_sensor_node is the sole
+# publisher on /scan that nav2 + foxglove see.
+- ros_topic_name: "/scan_sim"
+  gz_topic_name: "/robot/front_laser/scan"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "gz.msgs.LaserScan"
+  direction: GZ_TO_ROS

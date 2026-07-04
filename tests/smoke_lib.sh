@@ -348,10 +348,21 @@ assert_triggers_crud() {
     fi
 }
 
-# Print test summary (called via EXIT trap - do not call exit here)
+# Print test summary and gate the process exit code on FAIL_COUNT (called via
+# EXIT trap - the exit here is intentional: it is how the harness fails CI
+# when a behavioral fail() was recorded, instead of always exiting 0).
 SUMMARY_PRINTED=false
 print_summary() {
-    # Guard against double-printing when called as both trap and explicit call
+    # Capture the real exit status FIRST, before anything else (including the
+    # SUMMARY_PRINTED guard/assignment below) can clobber $?. When this runs
+    # as an EXIT trap after a crash (e.g. `set -e` tripping on an unhandled
+    # command failure before any fail() was recorded), $? here is that crash's
+    # real exit status - it must survive to the final `exit` below, or a
+    # genuine crash with FAIL_COUNT still 0 would silently report green.
+    local rc=$?
+
+    # Guard against double-printing / recursive re-entry when called as both
+    # trap and explicit call.
     if [ "$SUMMARY_PRINTED" = true ]; then
         return
     fi
@@ -365,9 +376,20 @@ print_summary() {
     if [ "$FAIL_COUNT" -gt 0 ]; then
         echo -e "\n  ${RED}Failed tests:${FAILED_TESTS}${NC}"
         echo -e "${BLUE}================================${NC}"
-        return
+    elif [ "$rc" -eq 0 ]; then
+        echo -e "${BLUE}================================${NC}"
+        echo -e "\n${GREEN}All smoke tests passed!${NC}"
+    else
+        echo -e "${BLUE}================================${NC}"
+        echo -e "\n${RED}Script exited abnormally (no assertions recorded), exit code ${rc}${NC}"
     fi
 
-    echo -e "${BLUE}================================${NC}"
-    echo -e "\n${GREEN}All smoke tests passed!${NC}"
+    # Gate on FAIL_COUNT when behavioral fail()s were recorded; otherwise
+    # preserve whatever the script's real exit status was (0 on a clean run,
+    # non-zero if it crashed before recording any fail()).
+    if [ "$FAIL_COUNT" -gt 0 ]; then
+        exit "$FAIL_COUNT"
+    else
+        exit "$rc"
+    fi
 }

@@ -1,0 +1,216 @@
+# Copyright 2026 bburda
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Builds the ros2_medkit gateway, the ota_update_plugin, and the demo ROS 2
+# packages (including the RB-Theron AMR driving in the AWS warehouse under
+# Nav2) into a single ROS 2 Jazzy image. Plugin loads at gateway startup via
+# /etc/ros2_medkit/gateway_config.yaml. scan_sensor_node (fixed_lidar at
+# boot, broken_lidar once the entrypoint auto-applies the OTA regression)
+# owns /scan; the publish-then-apply hotfix flow swaps the process back at
+# runtime via the plugin.
+#
+# The gateway clone below is the FULL ros2_medkit workspace with no
+# --packages-select/--packages-up-to filter, so ros2_medkit_log_bridge and
+# ros2_medkit_action_status_bridge - the generic bridges demo.launch.py uses
+# to turn Nav2's own failure into SOVD faults - build and install
+# automatically alongside the gateway; no separate build step is needed for
+# them here.
+
+FROM ros:jazzy AS builder
+
+ARG GATEWAY_REPO=https://github.com/selfpatch/ros2_medkit.git
+ARG GATEWAY_REF=main
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git \
+      python3-colcon-common-extensions \
+      python3-rosdep \
+      build-essential \
+      cmake \
+      curl \
+      ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rosdep init || true
+RUN rosdep update --rosdistro=jazzy
+
+WORKDIR /ws/src
+RUN git clone --depth=1 --branch ${GATEWAY_REF} ${GATEWAY_REPO} ros2_medkit
+
+# Fetch the Robotnik RB-Theron description + sensors at build time (pinned commits),
+# instead of vendoring their mesh-heavy trees in the repo (see THIRD_PARTY_NOTICES.md).
+# Both are BSD-3-Clause; each clone's own LICENSE travels with it. The unused base
+# meshes (128 MB for 9 other robots) are pruned so only the RB-Theron geometry the
+# demo renders ships in the image. The RB-Theron xacro pulls only the SICK
+# picoScan120, VectorNav IMU and RealSense D435 sensor macros, so robotnik_sensors is
+# kept whole (its mesh bulk IS those three sensors).
+ARG ROBOTNIK_DESC_REF=751059edd6af3a9c083018cfaee59e4496d46580
+ARG ROBOTNIK_SENS_REF=e5186c343910b86a924201edb256f79eb0f73295
+RUN git clone --filter=blob:none https://github.com/RobotnikAutomation/robotnik_description.git && \
+    git -C robotnik_description checkout --quiet "${ROBOTNIK_DESC_REF}" && \
+    rm -rf robotnik_description/.git && \
+    find robotnik_description/meshes/bases -mindepth 1 -maxdepth 1 -type d ! -name rbtheron -exec rm -rf {} + && \
+    git clone --filter=blob:none https://github.com/RobotnikAutomation/robotnik_sensors.git && \
+    git -C robotnik_sensors checkout --quiet "${ROBOTNIK_SENS_REF}" && \
+    rm -rf robotnik_sensors/.git
+
+# Copy demo packages (broken_lidar, fixed_lidar, ota_nav2_sensor_fix_demo)
+# and the OTA plugin from the build context.
+# ota_nav2_sensor_fix_demo/models/aws_small_warehouse/worlds/warehouse.sdf
+# is ours (a gz-port that references the AWS models below via model:// URIs); the AWS
+# meshes themselves are fetched next, not vendored.
+COPY ros2_packages /tmp/ros2_packages
+RUN cp -r /tmp/ros2_packages/. /ws/src/ && rm -rf /tmp/ros2_packages
+COPY ota_update_plugin /ws/src/ota_update_plugin
+
+# Fetch the AWS RoboMaker small_warehouse models at build time (pinned commit,
+# MIT-0; see THIRD_PARTY_NOTICES.md) into the demo package's model tree, instead of
+# vendoring their COLLADA meshes in the repo. The meshes are upstream-verbatim; our gz
+# port is worlds/warehouse.sdf (committed) - upstream ships file://models/ paths, gz
+# resolves model:// against GZ_SIM_RESOURCE_PATH, so we rewrite the scheme. A handful
+# of upstream models also carry inertia tensors that violate the triangle inequality
+# (ixx+iyy < izz etc.), which libsdformat 14.x rejects fatally ("A link named link has
+# invalid inertia." -> "Failed to load a world."). We rewrite only the offending
+# tensors to a valid uniform diagonal so the world loads; these are static fixtures
+# (floor, roof, shelves), so the exact inertia is immaterial to the demo.
+ARG AWS_WAREHOUSE_REF=ee0af733315e78432408c3cd98d378ecee5f767c
+# The inertia-fix script: rewrite only the inertia tensors that fail libsdformat 14.x
+# validation (non-positive principal moment, or triangle-inequality violation) to a
+# valid uniform diagonal. Written to a file so the multi-command RUN stays a clean
+# &&-chain (no heredoc mixed with line continuations).
+RUN printf '%s\n' \
+  'import re, sys' \
+  'VALID = "<inertia><ixx>1000</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1000</iyy><iyz>0</iyz><izz>1000</izz></inertia>"' \
+  'def p(blk, k):' \
+  '    m = re.search(r"<%s>([-\d.eE]+)</%s>" % (k, k), blk)' \
+  '    return float(m.group(1)) if m else None' \
+  'def bad(blk):' \
+  '    ixx, iyy, izz = (p(blk, k) for k in ("ixx", "iyy", "izz"))' \
+  '    if None in (ixx, iyy, izz):' \
+  '        return False' \
+  '    if min(ixx, iyy, izz) <= 0:' \
+  '        return True' \
+  '    return ixx + iyy < izz or iyy + izz < ixx or ixx + izz < iyy' \
+  'for f in sys.argv[1:]:' \
+  '    t = open(f).read()' \
+  '    new = re.sub(r"<inertia>.*?</inertia>", lambda m: VALID if bad(m.group(0)) else m.group(0), t, flags=re.S)' \
+  '    if new != t:' \
+  '        open(f, "w").write(new)' \
+  '        print("fixed inertia in", f)' \
+  > /tmp/fix_inertia.py
+RUN cd /ws/src && \
+    git clone --filter=blob:none https://github.com/aws-robotics/aws-robomaker-small-warehouse-world.git aws_up && \
+    git -C aws_up checkout --quiet "${AWS_WAREHOUSE_REF}" && \
+    cp -r aws_up/models ota_nav2_sensor_fix_demo/models/aws_small_warehouse/models && \
+    sed -i 's#file://models/#model://#g' ota_nav2_sensor_fix_demo/models/aws_small_warehouse/models/*/model.sdf && \
+    python3 /tmp/fix_inertia.py ota_nav2_sensor_fix_demo/models/aws_small_warehouse/models/*/model.sdf && \
+    rm -rf aws_up
+
+WORKDIR /ws
+# rosdep needs the apt cache populated to install gateway dependencies
+# (nlohmann-json3-dev, libcpp-httplib-dev, etc.), plus xacro / ros-gz / robot_state_publisher
+# / gz_ros2_control / ros2_control / ros2_controllers / diff_drive_controller /
+# joint_state_broadcaster for the RB-Theron chain - resolved automatically from the
+# ota_nav2_sensor_fix_demo + robotnik_description + robotnik_sensors package.xml
+# exec_depends above, not a hardcoded apt list. robotnik_description also declares
+# exec_depend on ur_description / ur_simulation_gz (used by OTHER Robotnik robots we
+# don't build); those two rosdep keys don't resolve on Jazzy, so skip them - same fix
+# the upstream warehouse recipe applies. --dependency-types + -DBUILD_TESTING=OFF skip
+# robotnik's test-only deps (liburdfdom-tools, launch_testing_*) we don't need either.
+RUN apt-get update
+RUN . /opt/ros/jazzy/setup.sh && \
+    rosdep install --from-paths src --ignore-src -r -y --rosdistro=jazzy \
+      --dependency-types exec --dependency-types build --dependency-types buildtool \
+      --skip-keys ur_description \
+      --skip-keys ur_simulation_gz && \
+    colcon build \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF && \
+    rm -rf /var/lib/apt/lists/*
+
+
+FROM ros:jazzy
+
+# Runtime dependencies. Beyond the gateway/plugin bare minimum we also pull in
+# Nav2, gz-sim, and the ros2_control / gz_ros2_control chain so the container
+# can self-host the visual demo (RB-Theron AMR + headless Gazebo + Nav2) - no
+# external sim required, the OTA story becomes "Foxglove sees a stuck robot,
+# run an update, robot unsticks". The RB-Theron description + sensors are
+# cloned from Robotnik in the builder stage; the AWS warehouse world is baked
+# there too, so no turtlebot3-* runtime packages are needed here.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-jazzy-rclcpp \
+      ros-jazzy-rclcpp-lifecycle \
+      ros-jazzy-sensor-msgs \
+      ros-jazzy-visualization-msgs \
+      ros-jazzy-launch-ros \
+      ros-jazzy-test-msgs \
+      ros-jazzy-foxglove-bridge \
+      ros-jazzy-nav2-bringup \
+      ros-jazzy-nav2-bt-navigator \
+      ros-jazzy-nav2-controller \
+      ros-jazzy-nav2-planner \
+      ros-jazzy-nav2-behaviors \
+      ros-jazzy-nav2-costmap-2d \
+      ros-jazzy-nav2-lifecycle-manager \
+      ros-jazzy-nav2-map-server \
+      ros-jazzy-nav2-amcl \
+      ros-jazzy-ros-gz-sim \
+      ros-jazzy-ros-gz-bridge \
+      ros-jazzy-rmw-cyclonedds-cpp \
+      ros-jazzy-rosbag2-cpp \
+      ros-jazzy-rosbag2-storage-default-plugins \
+      ros-jazzy-rosbag2-storage-mcap \
+      libcpp-httplib-dev \
+      libsystemd-dev \
+      nlohmann-json3-dev \
+      curl \
+      procps \
+      ros-jazzy-xacro \
+      ros-jazzy-robot-state-publisher \
+      ros-jazzy-gz-ros2-control \
+      ros-jazzy-ros2-control \
+      ros-jazzy-ros2-controllers \
+      ros-jazzy-controller-manager \
+      ros-jazzy-joint-state-broadcaster \
+      ros-jazzy-diff-drive-controller \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /ws/install /ws/install
+COPY gateway_config.yaml /etc/ros2_medkit/gateway_config.yaml
+COPY manifest.yaml /etc/ros2_medkit/manifest.yaml
+
+# Pre-create the fragments directory so the gateway's manifest manager
+# scans an existing (empty) dir at boot rather than logging "missing
+# fragments_dir" warnings. Plugin writes / removes yaml files here at
+# OTA install / uninstall time.
+RUN mkdir -p /etc/ros2_medkit/manifest_fragments
+# Rosbag capture storage_path for ros2_medkit_fault_manager's RosbagCapture.
+RUN mkdir -p /var/lib/ros2_medkit/rosbags
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# RMW: jazzy's apt-shipped nav2_msgs fastrtps typesupport pulls
+# eprosima::fastcdr::Cdr::serialize(uint32_t), which the bundled
+# ros-jazzy-fastcdr 2.2.5 does NOT export - amcl/controller_server segfault
+# at startup. Switch to cyclonedds, which doesn't use the broken typesupport.
+#
+# GZ_SIM_RESOURCE_PATH (RB-Theron + AWS warehouse - actively used by
+# demo.launch.py's spawn + world load): the AWS models baked into the demo
+# package's own share dir at Docker build time, plus the robotnik_description /
+# robotnik_sensors share dirs (colcon-built into /ws/install by the builder
+# stage) so gz can resolve both model:// (AWS warehouse fixtures) and
+# package:// (RB-Theron meshes) URIs. demo.launch.py's own launch-time
+# AppendEnvironmentVariable adds the same warehouse models dir again
+# defensively for source-mounted runs.
+ENV ROS_DOMAIN_ID=42 \
+    GZ_SIM_RESOURCE_PATH=/ws/install/ota_nav2_sensor_fix_demo/share/ota_nav2_sensor_fix_demo/models/aws_small_warehouse/models:/ws/install/robotnik_description/share:/ws/install/robotnik_sensors/share \
+    HEADLESS=true \
+    RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+EXPOSE 8080 8765
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
