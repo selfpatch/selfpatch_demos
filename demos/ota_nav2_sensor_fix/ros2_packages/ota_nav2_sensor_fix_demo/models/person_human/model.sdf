@@ -1,0 +1,74 @@
+<?xml version="1.0" ?>
+
+<!-- Static human-shaped obstacle for the warehouse AMR demo.
+     Spawned in the gz world so it appears in the front_laser /scan and trips
+     Nav2's costmap/controller, stopping the RB-Theron. The collision is a SINGLE
+     box (0.6 x 0.5 x 1.7 m, centred 0.85 m up) - a touch deeper/wider than
+     person_obstacle's box - while the VISUAL is a recognisable human built from
+     primitives (legs box + torso cylinder + head sphere). Everything is mesh-free,
+     so the scene renders without any external mesh dependency and still returns a
+     near hit in /scan.
+     Pose offset z=0.0 on the link; geometry is lifted in each element. -->
+<sdf version="1.8">
+  <model name="person_human">
+    <static>true</static>
+    <link name="link">
+      <!-- ONE collision box, person footprint, centred 0.85 m up. This is the
+           sole reason /scan returns a near hit - keep it whole and unbroken. -->
+      <collision name="collision">
+        <pose>0 0 0.85 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.6 0.5 1.7</size>
+          </box>
+        </geometry>
+      </collision>
+
+      <!-- Legs: a box from the floor to the hips (~0.0 .. 0.9 m). -->
+      <visual name="legs">
+        <pose>0 0 0.45 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.34 0.24 0.9</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.12 0.13 0.28 1</ambient>
+          <diffuse>0.15 0.16 0.35 1</diffuse>
+          <specular>0.05 0.05 0.08 1</specular>
+        </material>
+      </visual>
+
+      <!-- Torso: a cylinder from the hips to the shoulders (~0.9 .. 1.5 m). -->
+      <visual name="torso">
+        <pose>0 0 1.2 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.2</radius>
+            <length>0.6</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.55 0.30 0.12 1</ambient>
+          <diffuse>0.78 0.42 0.16 1</diffuse>
+          <specular>0.10 0.06 0.03 1</specular>
+        </material>
+      </visual>
+
+      <!-- Head: a sphere on top of the torso (~1.5 .. 1.7 m). -->
+      <visual name="head">
+        <pose>0 0 1.6 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.12</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>0.70 0.56 0.45 1</ambient>
+          <diffuse>0.90 0.74 0.62 1</diffuse>
+          <specular>0.12 0.10 0.08 1</specular>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

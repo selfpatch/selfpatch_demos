@@ -163,3 +163,101 @@ jobs:
         if: always()
         working-directory: demos/multi_ecu_aggregation
         run: docker compose --profile ci down
+
+  build-and-test-ota:
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Show triggering source
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          SHA="${{ github.event.client_payload.sha }}"
+          RUN_URL="${{ github.event.client_payload.run_url }}"
+          echo "## Triggered by ros2_medkit" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${SHA:-unknown}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$RUN_URL" ]; then
+            echo "- Run: [View triggering run]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Run: (URL not provided)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and start OTA demo
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose up -d --build
+
+      - name: Run smoke tests
+        run: ./tests/smoke_test_ota.sh
+
+      - name: Show gateway logs on failure
+        if: failure()
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose logs gateway --tail=200
+
+      - name: Show update server logs on failure
+        if: failure()
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose logs ota_update_server --tail=200
+
+      - name: Teardown
+        if: always()
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose down
+
+  # Separate job from build-and-test-ota: this one drives the full
+  # latch/publish/apply/clear narrative through the operator scripts. The
+  # entrypoint auto-applies broken_lidar_3_0_0 at boot; send-goal.sh then
+  # drives the robot into the phantom sector so Nav2 cannot make progress
+  # and navigate_to_pose aborts, which the log + action-status bridges
+  # surface as ACTION_NAVIGATE_TO_POSE_ABORTED on bt-navigator (latched,
+  # with a freeze-frame + MCAP capture). publish-fix.sh registers the
+  # forward hotfix fixed_lidar_3_0_1 (not in the boot catalog), then
+  # apply-fix.sh swaps scan_sensor_node to it, but the fault stays
+  # latched (no self-heal) until clear-fault.sh explicitly clears it, and
+  # only then does a fresh send-goal.sh resume clean. Catches regressions
+  # in that loop (phantom not stalling Nav2, the bridges not promoting the
+  # failure, fault_manager latching/capture, the fault clearing itself on
+  # apply). Slower than the API-only smoke job because it has
+  # to wait for nav2 lifecycle to settle and for /cmd_vel to actually
+  # fire, so it's split out and can fail in isolation without blocking
+  # the quick OTA-endpoint check.
+  ota-demo-narrative:
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Show triggering source
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          SHA="${{ github.event.client_payload.sha }}"
+          RUN_URL="${{ github.event.client_payload.run_url }}"
+          echo "## Triggered by ros2_medkit" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${SHA:-unknown}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$RUN_URL" ]; then
+            echo "- Run: [View triggering run]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and start OTA demo
+        working-directory: demos/ota_nav2_sensor_fix
+        # docker compose up --build runs the multi-stage build for
+        # ota_update_server which produces the catalog + tarballs
+        # internally - no separate "build artifacts on host" step
+        # needed (and the host wouldn't have ros2_medkit_msgs anyway).
+        run: docker compose up -d --build
+
+      - name: Run demo narrative smoke
+        run: ./tests/smoke_test_demo_narrative.sh
+
+      - name: Show gateway logs on failure
+        if: failure()
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose logs gateway --tail=300
+
+      - name: Teardown
+        if: always()
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker compose down

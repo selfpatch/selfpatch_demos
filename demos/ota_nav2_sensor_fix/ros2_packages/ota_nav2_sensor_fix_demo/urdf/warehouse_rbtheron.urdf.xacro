@@ -1,0 +1,118 @@
+<?xml version="1.0" ?>
+<!--
+  Demo wrapper around the vendored RB-Theron description.
+
+  Why this file exists:
+  The vendored RB-Theron xacro (robotnik_description rbtheron.urdf.xacro) wires the
+  Gazebo/Ignition simulation bits behind a single gazebo_ignition arg. When that arg
+  is true the base xacro pulls in the vendored rbtheron_control.urdf.xacro, whose
+  gz_ros2_control parameters tag hardcodes the path to the CLOSED controller config
+  rbtheron_controller_params.yaml. That YAML declares
+  robotnik_controllers/RBTheronController, a controller type that is NOT installed,
+  so the controller_manager fails to load it and the robot never drives.
+
+  The same gazebo_ignition arg also gates every gz sensor block (lidar, imu, camera),
+  so we cannot just set it false: that would silently drop the LiDAR gz sensor and we
+  would lose /scan.
+
+  Strategy (approach b/c blend): instantiate the vendored description with
+  gazebo_ignition:=false (full robot geometry + sensor links, NO closed control plugin,
+  NO gz sensors), then add back ONLY the two gz-emitting elements we control:
+    1. our own gz_ros2_control plugin pointing at OUR config/controllers.yaml
+       (stock diff_drive_controller + joint_state_broadcaster, bare joints) plus the
+       matching ros2_control hardware/joint declaration, and
+    2. the front-laser gpu_lidar gz sensor (reusing the vendored lidar_2d_plugin macro)
+       publishing the gz topic robot/front_laser/scan, which config/ros_gz_bridge.yaml
+       maps to /scan directly in Phase 1 (no scan_sensor_node shadow yet - Phase 2
+       re-routes this to /scan_sim once broken_lidar/fixed_lidar come back to own /scan).
+
+  Everything gz-emitting in the simulated robot is therefore owned here and points at
+  our open config; nothing references the closed controller package.
+-->
+<robot
+  name="rbtheron"
+  xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ARGUMENTS -->
+  <!-- prefix:="" -> bare joints (left_wheel_joint / right_wheel_joint) and base frames
+       (base_footprint / base_link), matching config/controllers.yaml. -->
+  <xacro:arg name="prefix" default="" />
+  <!-- namespace controls the gz sensor topic prefix. The ros_gz_bridge expects the
+       front laser on gz topic robot/front_laser/scan, so keep the vendored default. -->
+  <xacro:arg name="namespace" default="robot" />
+
+  <!-- Pull in the vendored RB-Theron description WITHOUT the closed gz control plugin
+       and without the vendored gz sensors (gazebo_ignition:=false). This still emits
+       all links/joints, including the front_laser_* link the LiDAR sensor attaches to. -->
+  <xacro:include
+    filename="$(find robotnik_description)/robots/rbtheron/rbtheron.urdf.xacro" />
+
+  <!-- Our gz_ros2_control plugin: controller_manager loaded INSIDE gz, configured from
+       OUR open controllers.yaml. No ros/namespace element here, so the controller_manager
+       lives at root (/controller_manager) and the spawners target /controller_manager. -->
+  <gazebo>
+    <plugin
+      name="gz_ros2_control::GazeboSimROS2ControlPlugin"
+      filename="gz_ros2_control-system">
+      <robot_param>robot_description</robot_param>
+      <robot_param_node>robot_state_publisher</robot_param_node>
+      <parameters>$(find ota_nav2_sensor_fix_demo)/config/controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+  <!-- ros2_control hardware + joint interfaces for the two drive wheels. Bare joint
+       names (prefix defaults to "") match controllers.yaml left/right_wheel_names. -->
+  <ros2_control
+    name="GazeboSystem"
+    type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <joint name="$(arg prefix)left_wheel_joint">
+      <command_interface name="velocity">
+        <param name="min">-10</param>
+        <param name="max">10</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="$(arg prefix)right_wheel_joint">
+      <command_interface name="velocity">
+        <param name="min">-10</param>
+        <param name="max">10</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+  </ros2_control>
+
+  <!-- Front-laser gpu_lidar gz sensor. The vendored sick_picoscan120 macro already
+       created the front_laser_* links (with gazebo_ignition:=false the gz <sensor> block
+       was skipped), so we attach the sensor to front_laser_link here, reusing the
+       vendored lidar plugin macro. Its gz topic is ${node_namespace}/${node_name}/scan
+       = robot/front_laser/scan, which config/ros_gz_bridge.yaml maps straight to /scan
+       in Phase 1 (Phase 2 re-routes it to /scan_sim - see the bridge config).
+
+       GEOMETRY NOTE: front_laser_link's mount transform comes from the vendored
+       robotnik_description front_laser joint (min_angle -2.3 / max_angle 2.3 rad,
+       810 samples). Phase 2's scan_sensor_node (broken_lidar/fixed_lidar) will
+       republish this real scan onto /scan, optionally overlaying a blocking phantom -
+       see the ros2_packages README for the exact sample index that corresponds to
+       bearing 0 (straight ahead) for this geometry. -->
+  <xacro:include
+    filename="$(find robotnik_sensors)/urdf/2d_lidar/lidar_2d_plugin.urdf.xacro" />
+  <xacro:lidar_2d_plugin
+    node_namespace="$(arg namespace)"
+    node_name="front_laser"
+    gazebo_ignition="true"
+    min_range="0.05"
+    max_range="25.0"
+    min_angle="-2.3"
+    max_angle="2.3"
+    frame_link="$(arg prefix)front_laser_link"
+    rate="15.0"
+    resolution="0.00575"
+    samples="810" />
+</robot>

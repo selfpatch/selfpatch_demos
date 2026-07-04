@@ -1,0 +1,26 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 50
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    diff_drive_controller:
+      type: diff_drive_controller/DiffDriveController
+
+diff_drive_controller:
+  ros__parameters:
+    left_wheel_names: ["left_wheel_joint"]
+    right_wheel_names: ["right_wheel_joint"]
+    wheel_separation: 0.5032   # metres; 2 * wheel_offset_y (0.2516) from robotnik_description/urdf/bases/rbtheron/rbtheron_base.xacro:20
+    wheel_radius: 0.0762       # metres; wheel_radius property from robotnik_description/urdf/wheels/rubber_wheel/rubber_wheel_150.urdf.xacro:13
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    enable_odom_tf: true
+    publish_rate: 50.0
+    # Terminal fail-safe: if /cmd_vel stops arriving (nav2 stalls, the goal is
+    # cancelled, or the controller crashes) the wheels halt after this timeout
+    # rather than repeating the last command forever.
+    cmd_vel_timeout: 0.5
+    # Jazzy diff_drive_controller subscribes ~/cmd_vel as geometry_msgs/TwistStamped
+    # unconditionally; no use_stamped_vel parameter exists on Jazzy. Our
+    # nav2_params.yaml already publishes TwistStamped end to end
+    # (enable_stamped_cmd_vel: True), so no adapter/shim is needed here.

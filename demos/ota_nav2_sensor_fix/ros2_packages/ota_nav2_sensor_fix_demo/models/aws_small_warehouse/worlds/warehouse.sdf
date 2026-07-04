@@ -1,0 +1,210 @@
+<?xml version="1.0" ?>
+<sdf version="1.10">
+  <world name="warehouse">
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre2</render_engine></plugin>
+
+    <scene>
+      <ambient>1 1 1 1</ambient>
+      <background>0.8 0.8 0.8 1</background>
+      <grid>false</grid>
+    </scene>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Demo viz camera: renders a scene snapshot of the RB-Theron in the warehouse
+         (publishes gz topic `scene_cam`; not used by the runtime, viz/recording only).
+         Vantage chosen for a clear, unobstructed line of sight to the robot driving
+         the pick->drop lane (the original -2.5,2.0 spot looked straight into a
+         ClutteringC pallet ~1 m in front of the lens). -->
+    <model name="demo_cam">
+      <static>true</static>
+      <link name="l">
+        <!-- SW of the canonical drive corridor (robot drives -y at x~2 from y~-2),
+             looking NE: robot mid-frame, the dead-ahead human dead-centre, a wide
+             clear floor in the foreground, shelves framing the top. -->
+        <pose>-0.3 -5.9 1.9 0 0.28 0.97</pose>
+        <sensor name="cam" type="camera">
+          <update_rate>30</update_rate>
+          <always_on>1</always_on>
+          <topic>scene_cam</topic>
+          <camera>
+            <horizontal_fov>1.3</horizontal_fov>
+            <image><width>1600</width><height>900</height></image>
+            <clip><near>0.1</near><far>60</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+
+    <!-- Ground + walls -->
+    <include>
+      <name>aws_robomaker_warehouse_GroundB_01_001</name>
+      <uri>model://aws_robomaker_warehouse_GroundB_01</uri>
+      <pose>0.0 0.0 -0.090092 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_WallB_01_001</name>
+      <uri>model://aws_robomaker_warehouse_WallB_01</uri>
+      <pose>0.0 0.0 0 0 0 0</pose>
+    </include>
+
+    <!-- Shelves F -->
+    <include>
+      <name>aws_robomaker_warehouse_ShelfF_01_001</name>
+      <uri>model://aws_robomaker_warehouse_ShelfF_01</uri>
+      <pose>-5.795143 -0.956635 0 0 0 0</pose>
+    </include>
+
+    <!-- Shelves E -->
+    <include>
+      <name>aws_robomaker_warehouse_ShelfE_01_001</name>
+      <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      <pose>4.73156 0.57943 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ShelfE_01_002</name>
+      <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      <pose>4.73156 -4.827049 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ShelfE_01_003</name>
+      <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      <pose>4.73156 -8.6651 0 0 0 0</pose>
+    </include>
+
+    <!-- Shelves D -->
+    <include>
+      <name>aws_robomaker_warehouse_ShelfD_01_001</name>
+      <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      <pose>4.73156 -1.242668 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ShelfD_01_002</name>
+      <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      <pose>4.73156 -3.038551 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ShelfD_01_003</name>
+      <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      <pose>4.73156 -6.750542 0 0 0 0</pose>
+    </include>
+
+    <!-- Lamp -->
+    <include>
+      <name>aws_robomaker_warehouse_Lamp_01_005</name>
+      <uri>model://aws_robomaker_warehouse_Lamp_01</uri>
+      <pose>0 0 -4 0 0 0</pose>
+    </include>
+
+    <!-- Buckets -->
+    <include>
+      <name>aws_robomaker_warehouse_Bucket_01_020</name>
+      <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      <pose>0.433449 9.631706 0 0 0 -1.563161</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_Bucket_01_021</name>
+      <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      <pose>-1.8321 -6.3752 0 0 0 -1.563161</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_Bucket_01_022</name>
+      <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      <pose>0.433449 8.59 0 0 0 -1.563161</pose>
+    </include>
+
+    <!-- Cluttering A -->
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringA_01_016</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      <pose>5.708138 8.616844 -0.017477 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringA_01_017</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      <pose>3.408638 8.616844 -0.017477 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringA_01_018</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      <pose>-1.491287 5.222435 -0.017477 0 0 -1.583185</pose>
+    </include>
+
+    <!-- Cluttering C -->
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringC_01_027</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      <pose>3.324959 3.822449 -0.012064 0 0 1.563871</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringC_01_028</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      <pose>5.54171 3.816475 -0.015663 0 0 -1.583191</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringC_01_029</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      <pose>5.384239 6.137154 0 0 0 3.150000</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringC_01_030</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      <pose>3.236 6.137154 0 0 0 3.150000</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringC_01_031</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      <pose>-1.573677 2.301994 -0.015663 0 0 -3.133191</pose>
+    </include>
+
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringC_01_032</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      <pose>-1.2196 9.407 -0.015663 0 0 1.563871</pose>
+    </include>
+
+    <!-- Cluttering D -->
+    <include>
+      <name>aws_robomaker_warehouse_ClutteringD_01_005</name>
+      <uri>model://aws_robomaker_warehouse_ClutteringD_01</uri>
+      <pose>-1.634682 -7.811813 -0.319559 0 0 0</pose>
+    </include>
+
+    <!-- Trash can -->
+    <include>
+      <name>aws_robomaker_warehouse_TrashCanC_01_002</name>
+      <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      <pose>-1.592441 7.715420 0 0 0 0</pose>
+    </include>
+
+    <!-- Pallet jack -->
+    <include>
+      <name>aws_robomaker_warehouse_PalletJackB_01_001</name>
+      <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      <pose>-0.276098 -9.481944 0.023266 0 0 0</pose>
+    </include>
+
+  </world>
+</sdf>

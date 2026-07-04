@@ -1,0 +1,34 @@
+<?xml version="1.0" ?>
+
+<!-- Static person-sized obstacle: 0.5(x) x 0.4(y) x 1.7(z) m box.
+     Spawned in the warehouse gz world so it appears in the front_laser /scan and
+     trips Nav2's costmap/controller, stopping the RB-Theron. Pose offset z=0.85
+     centres the box on the ground plane. No external mesh dependencies - pure
+     SDF geometry. -->
+<sdf version="1.8">
+  <model name="person_obstacle">
+    <static>true</static>
+    <link name="link">
+      <pose>0 0 0.85 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.5 0.4 1.7</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.5 0.4 1.7</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.15 0.15 0.18 1</ambient>
+          <diffuse>0.15 0.15 0.18 1</diffuse>
+          <specular>0.05 0.05 0.05 1</specular>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

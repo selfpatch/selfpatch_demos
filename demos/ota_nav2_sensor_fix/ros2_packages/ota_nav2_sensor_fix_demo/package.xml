@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ota_nav2_sensor_fix_demo</name>
+  <version>0.1.0</version>
+  <description>Launch + config glue for the OTA over SOVD nav2 sensor-fix demo (RB-Theron AMR + Nav2 + AWS warehouse + broken_lidar/fixed_lidar swap).</description>
+  <maintainer email="bartoszburda93@gmail.com">bburda</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>ros2launch</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>ros_gz_interfaces</exec_depend>
+  <!-- RB-Theron AMR (Phase 1 sim swap): vendored wrapper urdf/warehouse_rbtheron.urdf.xacro
+       pulls robotnik_description + robotnik_sensors (cloned at Docker build time - see
+       Dockerfile.gateway + THIRD_PARTY_NOTICES.md, not released to the rosdistro index),
+       plus xacro to process it and the gz_ros2_control chain to drive it. -->
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robotnik_description</exec_depend>
+  <exec_depend>robotnik_sensors</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>gz_ros2_control</exec_depend>
+  <exec_depend>ros2_control</exec_depend>
+  <exec_depend>ros2_controllers</exec_depend>
+  <exec_depend>diff_drive_controller</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_bt_navigator</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_planner</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>foxglove_bridge</exec_depend>
+  <exec_depend>ros2_medkit_gateway</exec_depend>
+  <exec_depend>ros2_medkit_fault_manager</exec_depend>
+  <!-- Generic bridges that surface Nav2's own failure as SOVD faults
+       (log_bridge: /rosout ERROR; action_status_bridge: action ABORTED) -
+       no per-project fault-reporting code in the scan nodes. -->
+  <exec_depend>ros2_medkit_log_bridge</exec_depend>
+  <exec_depend>ros2_medkit_action_status_bridge</exec_depend>
+  <exec_depend>broken_lidar</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

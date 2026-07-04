@@ -1,0 +1,15 @@
+{
+  "id": "fixed_lidar_3_0_1",
+  "update_name": "fixed_lidar 3.0.1",
+  "automated": false,
+  "origins": ["remote"],
+  "notes": "Fix regressed /scan noise filter (3.0.0 hotfix)",
+  "duration": 10,
+  "x_medkit_version": "3.0.1",
+  "size": 717,
+  "updated_components": ["scan_sensor_node"],
+  "x_medkit_artifact_url": "/artifacts/fixed_lidar-3.0.1.tar.gz",
+  "x_medkit_target_package": "fixed_lidar",
+  "x_medkit_executable": "fixed_lidar_node",
+  "x_medkit_replaces_executable": "broken_lidar_node"
+}
