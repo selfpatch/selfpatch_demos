@@ -292,6 +292,17 @@ def generate_launch_description():
             'snapshots.rosbag.lazy_start': False,          # keep buffering so the pre-trigger window is captured
             'snapshots.rosbag.duration_sec': 5.0,
             'snapshots.rosbag.duration_after_sec': 2.0,
+            # topics 'explicit' -> write EXACTLY include_topics. The fault_manager
+            # default is 'entity', which narrows the flush to the fault source
+            # node's subgraph (bt_navigator: /odom /tf /bond /navigate_to_pose/*)
+            # and discards /scan, /cmd_vel and /local_costmap from the buffer -
+            # so the downloaded MCAP had none of the diagnostic topics and
+            # Foxglove playback showed nothing. qos_match upgrades the capture
+            # subscription to transient_local so the latched /tf_static (published
+            # once at startup) is actually recorded; without it the TF tree can't
+            # be rebuilt on replay and /scan will not render in 3D.
+            'snapshots.rosbag.topics': 'explicit',
+            'snapshots.rosbag.qos_match': True,
             'snapshots.rosbag.include_topics': ['/scan', '/cmd_vel', '/tf', '/tf_static', '/local_costmap/costmap'],
             'snapshots.rosbag.storage_path': '/var/lib/ros2_medkit/rosbags',
         }],
