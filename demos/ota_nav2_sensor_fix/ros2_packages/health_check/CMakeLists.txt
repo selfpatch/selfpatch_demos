@@ -14,7 +14,7 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(std_srvs REQUIRED)
+find_package(health_check_msgs REQUIRED)
 
 add_executable(health_check_node src/health_check_node.cpp)
 ament_target_dependencies(health_check_node
@@ -22,7 +22,7 @@ ament_target_dependencies(health_check_node
   geometry_msgs
   nav_msgs
   sensor_msgs
-  std_srvs
+  health_check_msgs
 )
 
 install(TARGETS health_check_node DESTINATION lib/${PROJECT_NAME})

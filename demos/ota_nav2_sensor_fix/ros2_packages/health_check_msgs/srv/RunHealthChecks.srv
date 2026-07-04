@@ -1,0 +1,28 @@
+# Copyright 2026 bburda
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# RunHealthChecks.srv - Single differential-diagnosis operation for the
+# health_check node, replacing four separate empty-request Trigger services
+# with one call an operator can parameterize.
+
+# Which checks to run (all default true so a bare call runs everything)
+bool lidar true
+bool localization true
+bool drivetrain true
+bool costmap true
+---
+bool ok               # true iff every REQUESTED check passed
+uint8 checks_run
+uint8 checks_failed
+string report         # one human-readable line per requested check
