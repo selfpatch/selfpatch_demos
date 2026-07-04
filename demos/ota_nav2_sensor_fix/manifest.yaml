@@ -267,16 +267,10 @@ functions:
   - id: fleet-diagnostics
     name: "Fleet Diagnostics"
     category: "diagnostics"
-    description: "SOVD REST surface + fault aggregation - this panel"
+    description: "SOVD REST surface + fault aggregation + operator health checks (lidar / localization / drivetrain / costmap) for root-cause confirmation"
     hosted_by:
       - medkit-gateway
       - medkit-fault-manager
-
-  - id: health-checks
-    name: "Health Checks"
-    category: "diagnostics"
-    description: "Operator-invoked differential-diagnosis checks (lidar / localization / drivetrain / costmap) for root-cause confirmation"
-    hosted_by:
       - health-check
 
   - id: live-telemetry
