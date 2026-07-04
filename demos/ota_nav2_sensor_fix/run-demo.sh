@@ -125,6 +125,54 @@ if ! curl -fsS "${GATEWAY_URL}/api/v1/health" >/dev/null 2>&1; then
     exit 1
 fi
 
+# Drive-readiness gate. The gz_ros2_control hardware interface + the
+# joint_state_broadcaster / diff_drive_controller spawners race the sim's
+# cold start; when they lose, diff_drive publishes no odometry, the
+# odom->base_footprint TF never appears, and Nav2 aborts every goal instantly
+# (the robot never moves). That race is more likely when the host CPU is
+# loaded. Rather than hand off a demo that cannot drive, wait for real
+# odometry; if it does not come up, restart the sim and try again (bounded),
+# so `run-demo.sh` only reports "up" once the robot is genuinely drive-ready.
+GW_CONTAINER="${OTA_DEMO_GATEWAY_CONTAINER:-ota_demo_gateway}"
+drive_ready() {
+    docker exec "${GW_CONTAINER}" bash -lc \
+        'source /opt/ros/jazzy/setup.bash >/dev/null 2>&1; \
+         timeout 6 ros2 run tf2_ros tf2_echo odom base_footprint > /tmp/_navcheck 2>&1; \
+         grep -qE "Translation|At time" /tmp/_navcheck' >/dev/null 2>&1
+}
+
+echo ""
+echo "[3b/3] Waiting for the robot to become drive-ready (odometry + TF)..."
+DRIVE_READY=false
+for boot_try in 1 2 3; do
+    for _ in $(seq 1 13); do
+        if drive_ready; then DRIVE_READY=true; break; fi
+        sleep 10
+    done
+    if [[ "$DRIVE_READY" == "true" ]]; then
+        echo "      Drive-ready: odometry and odom->base_footprint TF are live."
+        break
+    fi
+    if [[ "$boot_try" -lt 3 ]]; then
+        echo "      No odometry after ~130s (gz_ros2_control cold-start race)."
+        echo "      Restarting the sim (attempt $((boot_try + 1))/3)..."
+        ${COMPOSE_CMD} restart gateway >/dev/null 2>&1 || true
+        for _ in $(seq 1 40); do
+            curl -fsS "${GATEWAY_URL}/api/v1/health" >/dev/null 2>&1 && break
+            sleep 3
+        done
+    fi
+done
+
+if [[ "$DRIVE_READY" != "true" ]]; then
+    echo ""
+    echo "WARNING: the robot's odometry/TF did not come up after 3 sim starts."
+    echo "  This is a gz_ros2_control cold-start race, more likely under host CPU load."
+    echo "  Free host CPU (close heavy apps; on WSL, 'wsl --shutdown') and re-run ./run-demo.sh."
+    echo "  Check manually:"
+    echo "    docker exec ${GW_CONTAINER} bash -lc 'source /opt/ros/jazzy/setup.bash && ros2 run tf2_ros tf2_echo odom base_footprint'"
+fi
+
 echo ""
 echo "Demo is up."
 echo ""
