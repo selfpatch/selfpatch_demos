@@ -327,8 +327,15 @@ def generate_launch_description():
             # latched, at startup, long before any given fault fires.
             'snapshots.rosbag.topics': 'explicit',
             'snapshots.rosbag.qos_match': True,
+            # /local_costmap/published_footprint (a polygon at the robot pose)
+            # draws the robot's outline on MCAP playback using only /tf. The URDF
+            # mesh itself does NOT render on replay - Foxglove resolves the
+            # robot's package:// meshes through the live foxglove_bridge asset
+            # service, which a bag replay has no equivalent for, so the mesh is a
+            # live-only view. The footprint + /tf frames show WHERE the robot is.
             'snapshots.rosbag.include_topics': [
-                '/scan', '/cmd_vel', '/tf', '/tf_static', '/local_costmap/costmap', '/robot_description',
+                '/scan', '/cmd_vel', '/tf', '/tf_static', '/local_costmap/costmap',
+                '/robot_description', '/local_costmap/published_footprint',
             ],
             'snapshots.rosbag.storage_path': '/var/lib/ros2_medkit/rosbags',
         }],
