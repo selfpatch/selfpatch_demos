@@ -129,6 +129,11 @@ RUN . /opt/ros/jazzy/setup.sh && \
       --skip-keys ur_description \
       --skip-keys ur_simulation_gz && \
     colcon build \
+      --packages-up-to \
+        ros2_medkit_gateway ros2_medkit_fault_manager \
+        ros2_medkit_log_bridge ros2_medkit_action_status_bridge \
+        ota_update_plugin broken_lidar fixed_lidar health_check \
+        ota_nav2_sensor_fix_demo \
       --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF && \
     rm -rf /var/lib/apt/lists/*
 
