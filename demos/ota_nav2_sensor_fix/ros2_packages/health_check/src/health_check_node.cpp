@@ -53,7 +53,7 @@ constexpr float kStuckMaxRangeM = 1.5f;
 constexpr size_t kStuckMinRunRays = 30;
 
 // Freshness windows.
-constexpr double kLocalizationFreshSec = 10.0;
+constexpr double kLocalizationMaxVar = 1.0;  // AMCL xy covariance (m^2); above this = diverged
 constexpr double kDrivetrainFreshSec = 5.0;
 
 // Costmap "directly ahead" window, robot/grid-frame relative.
@@ -250,16 +250,26 @@ class HealthCheckNode : public rclcpp::Node {
   }
 
   CheckOutcome check_localization_health() const {
-    if (amcl_pose_received_) {
+    // AMCL only republishes /amcl_pose on a motion-triggered filter update, so a
+    // stationary robot that is already localized lets it go stale - that is NOT a
+    // localization loss (AMCL keeps broadcasting map->odom the whole time). Judge
+    // on the last pose's covariance (small = converged), not its age, so a robot
+    // sitting still after the OTA fix still reports healthy; a genuine divergence
+    // still trips the covariance bound.
+    if (amcl_pose_received_ && last_amcl_pose_) {
+      const auto & cov = last_amcl_pose_->pose.covariance;
+      const double xy_var = cov[0] + cov[7];  // var(x) + var(y), m^2
       const double age_s = (this->now() - last_amcl_pose_time_).seconds();
-      if (age_s <= kLocalizationFreshSec) {
+      if (xy_var <= kLocalizationMaxVar) {
         std::ostringstream oss;
-        oss << "Localization healthy: AMCL pose fresh (" << std::fixed << std::setprecision(1) << age_s
-            << "s old), covariance nominal.";
+        oss << "Localization healthy: AMCL converged (xy variance " << std::fixed
+            << std::setprecision(3) << xy_var << " m^2, last update "
+            << std::setprecision(1) << age_s << "s ago).";
         return {true, oss.str()};
       }
+      return {false, "AMCL localization diverged (high covariance)"};
     }
-    return {false, "AMCL pose stale/absent"};
+    return {false, "AMCL pose absent - never localized"};
   }
 
   CheckOutcome check_drivetrain_health() const {
