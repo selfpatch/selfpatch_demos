@@ -40,9 +40,12 @@ class LatchedRelay(Node):
 
     def __init__(self) -> None:
         super().__init__('latched_relay')
-        # Default True: this node only exists to keep the sim-time bag
-        # capture self-contained, so it always follows the sim clock.
-        self.declare_parameter('use_sim_time', True)
+        # use_sim_time is auto-declared by every rclpy node and set to True via
+        # the launch's `--ros-args -p use_sim_time:=True`, so this node follows
+        # the sim clock. Do NOT re-declare it here - declare_parameter on an
+        # already-declared parameter raises ParameterAlreadyDeclaredException and
+        # kills the node on startup (which silently left the fault MCAP without
+        # /robot_description + /tf_static, so playback showed no robot).
 
         latched_qos = QoSProfile(
             depth=1,
