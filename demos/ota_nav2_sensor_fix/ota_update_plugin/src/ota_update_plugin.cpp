@@ -334,7 +334,11 @@ tl::expected<void, UpdateBackendErrorInfo> OtaUpdatePlugin::execute(
 }
 
 tl::expected<bool, UpdateBackendErrorInfo> OtaUpdatePlugin::supports_automated(const std::string & /*id*/) {
-  return false;
+  // This plugin applies updates itself on execute (kill + respawn the target
+  // binary), so every update it serves supports automated application. The UI's
+  // combined "Prepare & execute" action gates on this; returning false made it
+  // report "package does not support automatic updates".
+  return true;
 }
 
 namespace {
