@@ -22,6 +22,7 @@ docker exec -e GOAL_X="$X" -e GOAL_Y="$Y" -i ota_demo_gateway bash -lc \
   'source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && python3 -' <<'PYEOF'
 import os
 import sys
+import time
 
 import rclpy
 from rclpy.action import ActionClient
@@ -43,11 +44,26 @@ goal.pose.pose.position.x = x
 goal.pose.pose.position.y = y
 goal.pose.pose.orientation.w = 1.0
 
-send_future = client.send_goal_async(goal)
-rclpy.spin_until_future_complete(node, send_future)
-handle = send_future.result()
-if handle is None or not handle.accepted:
-    print("send-goal: goal was rejected by /navigate_to_pose", file=sys.stderr)
+# bt_navigator can be lifecycle-active yet still reject a goal for a short window
+# after startup: amcl has not produced map->odom yet, or the global costmap is
+# not populated, so it has no robot pose to plan from. Retry until it accepts,
+# so a goal fired right after boot (as the smoke test does) is not lost.
+deadline = time.monotonic() + 90.0
+accepted = False
+attempt = 0
+while time.monotonic() < deadline:
+    attempt += 1
+    send_future = client.send_goal_async(goal)
+    rclpy.spin_until_future_complete(node, send_future, timeout_sec=10.0)
+    handle = send_future.result()
+    if handle is not None and handle.accepted:
+        accepted = True
+        break
+    print(f"send-goal: goal not accepted yet (attempt {attempt}); nav2 not ready, retrying...", file=sys.stderr)
+    time.sleep(3.0)
+
+if not accepted:
+    print("send-goal: /navigate_to_pose kept rejecting the goal (nav2 never became ready)", file=sys.stderr)
     sys.exit(1)
 
 rclpy.shutdown()
