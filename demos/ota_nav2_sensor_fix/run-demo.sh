@@ -193,7 +193,7 @@ echo "  ./publish-fix.sh          # register fixed_lidar_3_0_1 (SOVD POST /updat
 echo "  ./apply-fix.sh            # apply the published fix: broken_lidar -> fixed_lidar_3_0_1"
 echo "  ./trigger-bad-update.sh   # re-arm broken_lidar (root cause) for a rerun"
 echo "  ./clear-fault.sh          # operator clear of the latched bt-navigator/controller-server faults"
-echo "  ./send-goal.sh            # publish a nav goal (mission start / resume)"
+echo "  ./send-goal.sh            # send a nav goal (mission start / resume)"
 echo "  ./stop-demo.sh            # tear down"
 echo ""
 echo "Connect a UI:"
