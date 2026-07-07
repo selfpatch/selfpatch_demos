@@ -33,7 +33,9 @@ class ProcessRunner {
   ProcessRunner(ProcessRunner &&) = delete;
   ProcessRunner & operator=(ProcessRunner &&) = delete;
 
-  /// Find PIDs of processes whose /proc/<pid>/comm matches the given basename.
+  /// Find PIDs of processes whose /proc/<pid>/cmdline argv[0] basename matches
+  /// the given basename. (cmdline, not comm: the kernel truncates comm to 15
+  /// chars, which would clip e.g. "broken_lidar_node" to "broken_lidar_no".)
   virtual std::vector<int> pgrep(const std::string & executable_basename);
 
   /// Send SIGTERM to all matching PIDs, wait up to `timeout_ms` for exit, then

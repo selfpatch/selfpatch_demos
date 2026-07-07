@@ -24,6 +24,13 @@ services:
     # Gazebo / DDS appreciate generous shared memory; without this
     # /dev/shm fills and gz-sim tends to wedge on shutdown.
     shm_size: "2gb"
+    # OTA execute() runs kill/extract/spawn inside this container. This is a
+    # trusted-local demo (see README "Security model & demo scope"), but block
+    # privilege escalation as a free, no-UX-cost hardening. cap_drop:[ALL] and a
+    # non-root USER are documented as production hardening rather than applied
+    # here - they risk breaking gz-sim / DDS in this all-in-one demo container.
+    security_opt:
+      - no-new-privileges:true
     tty: true
     stdin_open: true
     depends_on:

@@ -45,6 +45,24 @@ def test_main_parses_basic_args(monkeypatch, tmp_path):
     assert captured["skip_build"] is True
 
 
+def test_main_update_without_version_fails_loud(tmp_path):
+    # --version defaults to '' (not '0.0.0'), so an omitted version for an
+    # update fails loudly in run() instead of silently packing a 0.0.0 artifact.
+    with pytest.raises(SystemExit):
+        pack_artifact.main(
+            [
+                "--package", "fixed_lidar",
+                "--kind", "update",
+                "--target-component", "scan_sensor_node",
+                "--executable", "fixed_lidar_node",
+                "--skip-build",
+                "--out-dir", str(tmp_path / "artifacts"),
+                "--catalog", str(tmp_path / "artifacts" / "catalog.json"),
+                "--workspace", str(tmp_path / "ws"),
+            ]
+        )
+
+
 def test_build_entry_update_kind():
     entry = pack_artifact.build_entry(
         package="fixed_lidar",

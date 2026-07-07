@@ -20,8 +20,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--package", required=True, help="ROS 2 package name to pack.")
     parser.add_argument(
         "--version",
-        default="0.0.0",
-        help="Semantic version of the artifact (pass '' for uninstall).",
+        default="",
+        help="Semantic version of the artifact (required for update/install; omit for uninstall).",
     )
     parser.add_argument(
         "--kind",
