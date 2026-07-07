@@ -174,6 +174,35 @@ tl::expected<int, std::string> ProcessRunner::kill_by_executable(const std::stri
   return signalled;
 }
 
+bool ProcessRunner::kill_pid(int pid, const std::string & expected_basename, int timeout_ms) {
+  if (pid <= 0) {
+    return false;
+  }
+  // Existence probe. A dead pid (or one we do not own) fails here.
+  if (::kill(pid, 0) != 0) {
+    return false;
+  }
+  // Pid-reuse guard: refuse to signal a pid the kernel has recycled onto an
+  // unrelated process. argv[0] basename must still match what we spawned.
+  if (proc_cmdline_arg0(pid) != expected_basename) {
+    return false;
+  }
+  if (::kill(pid, SIGTERM) != 0) {
+    return false;
+  }
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (::kill(pid, 0) != 0) {
+      return true;  // exited on its own
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  if (::kill(pid, 0) == 0) {
+    ::kill(pid, SIGKILL);
+  }
+  return true;
+}
+
 tl::expected<int, std::string> ProcessRunner::spawn(const std::string & executable_path) {
   // Double-fork so the grandchild is reparented to init and never becomes a
   // zombie in the gateway process. The intermediate child exits immediately
