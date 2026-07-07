@@ -43,6 +43,14 @@ class ProcessRunner {
   virtual tl::expected<int, std::string> kill_by_executable(const std::string & executable_basename,
                                                             int timeout_ms = 2000);
 
+  /// Terminate a specific pid, guarding against pid reuse: signals only if
+  /// /proc/<pid>/cmdline argv[0] basename == `expected_basename`. Sends
+  /// SIGTERM, waits up to `timeout_ms` for exit, then SIGKILL. Returns true if
+  /// the pid was ours and was signalled; false if pid <= 0, already gone, or
+  /// now a different process (so the caller can drop a stale record without
+  /// signalling an unrelated one).
+  virtual bool kill_pid(int pid, const std::string & expected_basename, int timeout_ms = 2000);
+
   /// fork+exec the executable at `executable_path`. Returns child PID or error.
   virtual tl::expected<int, std::string> spawn(const std::string & executable_path);
 };

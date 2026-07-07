@@ -241,12 +241,29 @@ reaches it with a clean `/scan`.
 This is **dev-grade** OTA. Deliberately missing for production:
 
 - No artifact signing or signature verification
-- No atomic swap (in-place overwrite)
+- Staged swap: the new build is extracted and verified into a staging dir
+  before the live install is replaced and the old process is killed, but
+  no rollback-respawn if the new process fails to spawn
 - No A/B partition rollout
 - No fleet-wide staged rollout
 - No persistent update state across gateway restarts
 - No automated health-gated rollback policy
 - No audit log
+
+**Security model & demo scope.** This is a self-contained docker-compose
+demo on a trusted local network, driven with `curl` against a catalog
+authored locally by `scripts/build_artifacts.sh`. The update API is
+unauthenticated by design (bound to `0.0.0.0:8080`, origins `[*]`, updates
+enabled) so the demo stays curl-drivable. A production deployment would add:
+
+- An authenticated, TLS-terminated update API in place of the open,
+  plaintext one
+- A signed catalog and a per-artifact `sha256` verified before extraction,
+  with artifacts fetched only from the configured origin (not an arbitrary
+  URL taken from the catalog)
+- The gateway running as a non-root user with dropped capabilities
+  (`cap_drop: [ALL]`); `no-new-privileges` is already set in
+  `docker-compose.yml`
 
 Perfect for: prototypes, lab robots, internal demos, dev environments.
 

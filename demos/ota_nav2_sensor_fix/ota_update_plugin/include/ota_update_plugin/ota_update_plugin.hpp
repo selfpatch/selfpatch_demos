@@ -74,11 +74,25 @@ class OtaUpdatePlugin : public ros2_medkit_gateway::GatewayPlugin, public ros2_m
   // are expected to drop a fragment yaml in `fragments_dir_` and then
   // notify the gateway so its ManifestManager re-merges. Without this
   // the new app shows up as an "Orphan node (not in manifest)" warn
-  // log and never attaches to the manifest entity tree.
+  // log and never attaches to the manifest entity tree. The fragment
+  // filename keys on the target component (added/removed_components[0]),
+  // shared by install + uninstall, so uninstall removes the same file.
   tl::expected<void, std::string> write_install_fragment(const std::string & update_id,
                                                           const nlohmann::json & metadata);
-  tl::expected<void, std::string> remove_install_fragment(const std::string & update_id);
+  tl::expected<void, std::string> remove_install_fragment(const nlohmann::json & metadata);
   void notify_manifest_changed();
+
+  /// A process this plugin itself spawned, tracked so a later re-apply or
+  /// uninstall can kill exactly that process (by recorded pid, pid-reuse
+  /// guarded) instead of guessing at a catalog-supplied basename.
+  struct SpawnedProc {
+    int pid{-1};
+    std::string executable;
+  };
+
+  /// If we spawned a process for `component`, terminate it (by recorded pid)
+  /// and drop the record. No-op if we never spawned one for that component.
+  void kill_previous_spawn(const std::string & component);
 
   std::string catalog_url_;
   std::string staging_dir_;
@@ -90,9 +104,26 @@ class OtaUpdatePlugin : public ros2_medkit_gateway::GatewayPlugin, public ros2_m
   std::mutex mu_;
   std::map<std::string, nlohmann::json> registry_;
   std::map<std::string, std::string> staged_artifacts_;
+  // Keyed by target component: the process THIS plugin spawned for it.
+  std::map<std::string, SpawnedProc> spawned_;
 
   std::unique_ptr<CatalogClient> catalog_client_;
   std::unique_ptr<ProcessRunner> process_runner_;
 };
+
+namespace detail {
+
+/// Escape a string for emission as a double-quoted YAML scalar. Backslash and
+/// double-quote are backslash-escaped; control characters (newline, CR, tab)
+/// are emitted as YAML escapes so a value can never break out of its scalar or
+/// inject a sibling key. Exposed for direct testing of the quoting behavior.
+std::string yaml_quote(const std::string & value);
+
+/// Render the manifest-fragment YAML body for one OTA-installed app, emitting
+/// app_id / node_name / description as quoted scalars. Exposed for testing.
+std::string render_install_fragment(const std::string & app_id, const std::string & node_name,
+                                    const std::string & description);
+
+}  // namespace detail
 
 }  // namespace ota_update_plugin
