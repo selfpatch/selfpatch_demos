@@ -29,27 +29,42 @@ GATEWAY_CONTAINER="${OTA_DEMO_GATEWAY_CONTAINER:-ota_demo_gateway}"
 BOOT_ID="broken_lidar_3_0_0"
 FIX_ID="fixed_lidar_3_0_1"
 
-# Confirm a process is or is not running inside the gateway container.
-# Usage: assert_process_running <pattern> <description>
-#        assert_process_gone   <pattern> <description>
+# Confirm a process is or is not running inside the gateway container. Both
+# POLL (pgrep -f retry loop) rather than checking once: the boot auto-apply and
+# the fix apply swap scan_sensor_node's executable asynchronously, so a one-shot
+# check races the spawn/kill. Usage:
+#   assert_process_running <pattern> <description> [timeout_s]
+#   assert_process_gone    <pattern> <description> [timeout_s]
 assert_process_running() {
     local pattern="$1"
     local desc="$2"
-    if docker exec "$GATEWAY_CONTAINER" pgrep -f "$pattern" >/dev/null 2>&1; then
-        pass "$desc"
-    else
-        fail "$desc" "no process matching '$pattern' in $GATEWAY_CONTAINER"
-    fi
+    local timeout="${3:-25}"
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if docker exec "$GATEWAY_CONTAINER" pgrep -f "$pattern" >/dev/null 2>&1; then
+            pass "$desc"
+            return
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    fail "$desc" "no process matching '$pattern' in $GATEWAY_CONTAINER after ${timeout}s"
 }
 
 assert_process_gone() {
     local pattern="$1"
     local desc="$2"
-    if ! docker exec "$GATEWAY_CONTAINER" pgrep -f "$pattern" >/dev/null 2>&1; then
-        pass "$desc"
-    else
-        fail "$desc" "process matching '$pattern' still alive in $GATEWAY_CONTAINER"
-    fi
+    local timeout="${3:-25}"
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if ! docker exec "$GATEWAY_CONTAINER" pgrep -f "$pattern" >/dev/null 2>&1; then
+            pass "$desc"
+            return
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    fail "$desc" "process matching '$pattern' still alive in $GATEWAY_CONTAINER after ${timeout}s"
 }
 
 # --- Wait for gateway startup ---
@@ -62,6 +77,21 @@ if poll_until "/updates" ".items[] | select(. == \"${BOOT_ID}\")" 30; then
     echo "  Catalog registered"
 else
     echo "  Catalog NOT registered within 30s"
+    exit 1
+fi
+
+# The entrypoint auto-applies broken_lidar_3_0_0 asynchronously (prepare +
+# execute) AFTER the catalog registers. Catalog registration only proves the
+# entry is listed, NOT that the regression was applied - so wait for the boot
+# update to actually reach 'completed' before the "Initial process state" check
+# below asserts broken_lidar_node is the live process. Without this gate that
+# check is a one-shot race against the async apply (this mirrors the boot gate
+# smoke_test_demo_narrative.sh already has).
+echo "  Waiting for ${BOOT_ID} boot auto-apply to reach 'completed' (max 90s)..."
+if poll_until "/updates/${BOOT_ID}/status" '.status == "completed"' 90; then
+    echo "  Boot regression applied"
+else
+    echo "  Boot regression NOT applied within 90s"
     exit 1
 fi
 
