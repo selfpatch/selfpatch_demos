@@ -138,6 +138,25 @@ RUN . /opt/ros/jazzy/setup.sh && \
     rm -rf /var/lib/apt/lists/*
 
 
+# Test stage: rebuild ONLY the OTA plugin with tests enabled and run its gtest
+# suite (ament_add_gtest -> test_ota_update_plugin). Because it is FROM builder,
+# the heavy gateway + demo build above is reused as-is; only the plugin
+# recompiles with BUILD_TESTING=ON. A failing gtest makes colcon test-result
+# return non-zero, which fails this image build - CI drives it via
+# `docker build --target ota-plugin-test`. The runtime stage below is a
+# separate FROM and is unaffected; a full build/compose build (which targets
+# the final stage) never runs this stage.
+FROM builder AS ota-plugin-test
+WORKDIR /ws
+RUN . /opt/ros/jazzy/setup.sh && \
+    . /ws/install/setup.sh && \
+    colcon build --packages-select ota_update_plugin \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON && \
+    colcon test --packages-select ota_update_plugin \
+      --event-handlers console_direct+ && \
+    colcon test-result --verbose
+
+
 FROM ros:jazzy
 
 # Runtime dependencies. Beyond the gateway/plugin bare minimum we also pull in

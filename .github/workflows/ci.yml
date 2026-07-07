@@ -207,6 +207,37 @@ jobs:
         working-directory: demos/ota_nav2_sensor_fix
         run: docker compose down
 
+  # Actually runs the OTA demo's own test suites (they never run in the demo
+  # up/smoke jobs). The C++ gtest is built and executed inside the plugin test
+  # stage of Dockerfile.gateway (a failing test fails the docker build); the two
+  # pytest suites run natively.
+  plugin-tests:
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run ota_update_plugin C++ gtest (in image build)
+        working-directory: demos/ota_nav2_sensor_fix
+        run: docker build --target ota-plugin-test -f Dockerfile.gateway .
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python test dependencies
+        run: pip install pytest fastapi 'uvicorn[standard]' httpx
+
+      - name: Run ota_update_server pytest suite
+        working-directory: demos/ota_nav2_sensor_fix/ota_update_server
+        run: pytest tests
+
+      - name: Run pack_artifact pytest suite
+        working-directory: demos/ota_nav2_sensor_fix/scripts
+        run: pytest test_pack_artifact.py
+
   # Separate job from build-and-test-ota: this one drives the full
   # latch/publish/apply/clear narrative through the operator scripts. The
   # entrypoint auto-applies broken_lidar_3_0_0 at boot; send-goal.sh then
