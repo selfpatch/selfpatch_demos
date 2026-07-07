@@ -191,15 +191,16 @@ jobs:
       - name: Run smoke tests
         run: ./tests/smoke_test_ota.sh
 
-      - name: Show gateway logs on failure
+      - name: Diagnostics on failure
         if: failure()
-        working-directory: demos/ota_nav2_sensor_fix
-        run: docker compose logs gateway --tail=200
+        run: ./tests/dump_ota_diagnostics.sh ota_diagnostics.log
 
-      - name: Show update server logs on failure
+      - name: Upload diagnostics
         if: failure()
-        working-directory: demos/ota_nav2_sensor_fix
-        run: docker compose logs ota_update_server --tail=200
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-diagnostics-smoke
+          path: ota_diagnostics.log
 
       - name: Teardown
         if: always()
@@ -252,10 +253,16 @@ jobs:
       - name: Run demo narrative smoke
         run: ./tests/smoke_test_demo_narrative.sh
 
-      - name: Show gateway logs on failure
+      - name: Diagnostics on failure
         if: failure()
-        working-directory: demos/ota_nav2_sensor_fix
-        run: docker compose logs gateway --tail=300
+        run: ./tests/dump_ota_diagnostics.sh ota_diagnostics.log
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-diagnostics-narrative
+          path: ota_diagnostics.log
 
       - name: Teardown
         if: always()
