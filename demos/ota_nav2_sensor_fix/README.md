@@ -82,7 +82,7 @@ In another terminal, drive the demo:
 
 ```bash
 ./check-demo.sh           # at a glance: scan node, applied updates, faults
-./send-goal.sh            # publish a nav goal (mission start / resume)
+./send-goal.sh            # send a nav goal (mission start / resume)
 ./publish-fix.sh          # register fixed_lidar_3_0_1 (SOVD POST /updates) - not in the boot catalog
 ./apply-fix.sh            # broken_lidar -> fixed_lidar_3_0_1 (prepare + execute the published fix)
 ./clear-fault.sh          # operator clear of the latched bt-navigator/controller-server faults
@@ -99,8 +99,9 @@ registered first and tells you to run `./publish-fix.sh` if it isn't.
 `DELETE /apps/bt-navigator/faults/ACTION_NAVIGATE_TO_POSE_ABORTED` plus a
 clear-all `DELETE /apps/controller-server/faults` (the `LOG_*` code there
 is content-hashed, so it is cleared by entity rather than by exact code).
-`send-goal.sh` publishes `/goal_pose` once via `ros2 topic pub` inside the
-gateway container.
+`send-goal.sh` sends the goal through the `/navigate_to_pose` action inside the
+gateway container (an action client that waits for the server and confirms the
+goal is accepted, so a transient publisher never drops it before nav2 sees it).
 
 Port overrides (set as env vars before `./run-demo.sh`):
 
@@ -221,8 +222,8 @@ deterministic for CI. Use `./send-goal.sh` to drive the loop yourself:
 ```
 
 `send-goal.sh` `docker exec`s into the gateway container (sourcing the ROS
-overlay itself, since `docker exec` skips the image entrypoint) and
-publishes `/goal_pose` once via `ros2 topic pub`. Foxglove's **3D** panel
+overlay itself, since `docker exec` skips the image entrypoint) and sends the
+goal through the `/navigate_to_pose` action. Foxglove's **3D** panel
 also has a built-in "Publish" tool - select pose mode, click a point ahead
 of the robot, and Foxglove publishes `/goal_pose` for you.
 
