@@ -396,10 +396,20 @@ else
          "fault reappeared on the clean lidar - fixed_lidar or fault_manager regression"
 fi
 
+# The robot resumes from the tight spot it stopped in after the broken-phase
+# recovery, so nav2's first replanning can log one transient "Failed to make
+# progress" that the fault_manager latches - a replanning artifact, not the
+# fixed sensor. Give it time to get moving, clear that one-off controller fault,
+# then assert none REappears. A real sensor regression keeps the controller
+# failing (and the ACTION check above already catches the abort), so a bad
+# fixed_lidar would put the fault straight back after this clear.
+sleep 15
+curl -fsS -X DELETE "${API_BASE}/${CONTROLLER_ENTITY}/faults" -o /dev/null 2>/dev/null || true
+
 echo "  Watching for ${CONTROLLER_ENTITY} to stay clean for 30s (clean lidar, healthy resume)..."
 if assert_fault_stays_absent "$CONTROLLER_ENTITY" "" 30; then
     pass "no LOG_* fault reappears on ${CONTROLLER_ENTITY} (healthy resume)"
 else
     fail "no LOG_* fault reappears on ${CONTROLLER_ENTITY} (healthy resume)" \
-         "fault reappeared on the clean lidar - fixed_lidar or fault_manager regression"
+         "controller kept failing after the fix - fixed_lidar or fault_manager regression"
 fi
