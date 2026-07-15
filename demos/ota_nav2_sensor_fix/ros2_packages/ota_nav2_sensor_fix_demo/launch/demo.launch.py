@@ -8,7 +8,7 @@
 #   - the Robotnik RB-Theron AMR spawned in that world, driven through
 #     gz_ros2_control + a stock diff_drive_controller
 #   - the full Nav2 stack (bringup_launch.py) with the warehouse map
-#   - foxglove_bridge on :8765 so Foxglove Studio can render /tf, /scan, /map etc.
+#   - foxglove_bridge on :8765 so Foxglove can render /tf, /scan, /map etc.
 #   - ros2_medkit fault_manager (the gateway's /faults endpoint depends on it)
 #   - the gateway with our ota_update_plugin loaded via gateway_config.yaml
 #   - ros2_medkit_log_bridge + ros2_medkit_action_status_bridge, started
