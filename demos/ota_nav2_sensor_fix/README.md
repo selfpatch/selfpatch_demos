@@ -4,6 +4,15 @@ End-to-end demo: a `ros2_medkit` gateway with a dev-grade OTA plugin that
 demonstrates a real update / publish-a-hotfix loop on a ROS 2 node without
 SSH-ing into the robot.
 
+## Architecture
+
+Off-board tooling drives the on-board robot over one SOVD REST API: the gateway
+registers and applies OTA updates (the OTA Update Agent hot-swaps the lidar
+node), while the fault bridges and the Fault Manager turn Nav2's own failures
+into SOVD faults.
+
+![OTA over SOVD - nav2 sensor-fix demo architecture](docs/architecture.svg)
+
 ## What this shows
 
 The headline scene is a diagnostic loop, not just a button-press update:
@@ -168,7 +177,7 @@ curl -X DELETE "${API}/apps/controller-server/faults"
 # 8. Resume the mission (or use ./send-goal.sh).
 ```
 
-## Foxglove Studio visualization
+## Foxglove visualization
 
 The gateway container bakes in a Robotnik RB-Theron AMR + Nav2 stack running
 on top of headless Gazebo in the AWS small-warehouse world. `foxglove_bridge`
@@ -177,7 +186,7 @@ runs on port `8765` and exposes the full topic set: `/tf`, `/tf_static`,
 `/local_costmap/costmap`, etc. - so a Foxglove **3D** panel renders the actual
 robot in the warehouse out of the box.
 
-1. Open Foxglove Studio -> **Open connection** -> **Foxglove WebSocket** ->
+1. Open Foxglove -> **Open connection** -> **Foxglove WebSocket** ->
    `ws://localhost:8765`. The Topics panel should list all of the topics
    above.
 2. Drop in a **3D** panel. In its settings set **Scene -> Mesh up axis ->
