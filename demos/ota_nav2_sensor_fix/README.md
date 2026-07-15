@@ -4,6 +4,72 @@ End-to-end demo: a `ros2_medkit` gateway with a dev-grade OTA plugin that
 demonstrates a real update / publish-a-hotfix loop on a ROS 2 node without
 SSH-ing into the robot.
 
+## Architecture
+
+Two containers: the all-in-one `ota_demo_gateway` (Gazebo sim, the swappable
+`scan_sensor_node`, the Nav2 stack, and the `ros2_medkit` gateway with the OTA
+plugin, the fault bridges, `fault_manager`, `health_check` and
+`foxglove_bridge`) plus the `ota_update_server` that hosts the update catalog
+and artifacts. The coloured flows are the two storylines: the **OTA update**
+path (violet), the **fault detection** path (red), the live **node hot-swap**
+(green, dashed) and **live telemetry** to Foxglove (blue, dashed).
+
+```mermaid
+%%{init: {"theme": "neutral", "flowchart": {"curve": "basis"}, "themeVariables": {"fontFamily": "Inter, Liberation Sans, DejaVu Sans, sans-serif"}}}%%
+flowchart LR
+  classDef node fill:#faf5ff,stroke:#7c3aed,stroke-width:2px,color:#0f172a;
+  classDef plain fill:#ffffff,stroke:#cbd5e1,color:#0f172a;
+  classDef srv fill:#f0fdfa,stroke:#14b8a6,color:#0f172a;
+
+  operator["Operator<br/>SOVD CLI · shell scripts<br/>publish-fix · apply-fix · clear-fault · send-goal"]:::plain
+  foxglove["Foxglove Studio<br/>3D · faults · MCAP replay"]:::plain
+
+  subgraph GW["ota_demo_gateway  ·  container (ROS 2 Jazzy · CycloneDDS · DOMAIN 42)"]
+    direction TB
+    subgraph AUT["autonomy data plane"]
+      direction LR
+      gz["Gazebo<br/>AWS warehouse + RB-Theron"]:::plain
+      scan["scan_sensor_node<br/>OTA target · fixed_lidar ⇄ broken_lidar<br/>clean vs phantom sector"]:::node
+      nav2["Nav2 stack<br/>bt-navigator · controller-server<br/>planner · costmaps · amcl"]:::plain
+    end
+    subgraph MK["ros2_medkit gateway  ·  SOVD REST API :8080"]
+      direction LR
+      plugin["ota_update_plugin<br/>UpdateProvider<br/>stage → kill → swap → respawn"]:::plain
+      bridges["log + action-status bridges<br/>Nav2 errors / aborts → SOVD faults"]:::plain
+      fm["fault_manager<br/>latch (no self-heal)<br/>freeze-frame + MCAP"]:::plain
+      hc["health_check<br/>run_health_checks · fingers the lidar"]:::plain
+      fb["foxglove_bridge<br/>:8765 · WebSocket"]:::plain
+    end
+  end
+
+  subgraph US["ota_update_server  ·  container (FastAPI :9000)"]
+    cat["GET /catalog"]:::srv
+    art["GET /artifacts/*.tar.gz<br/>broken_lidar 3.0.0 · fixed_lidar 3.0.1"]:::srv
+  end
+
+  gz -->|/scan_sim| scan
+  scan -->|/scan| nav2
+  operator -->|/navigate_to_pose| nav2
+  nav2 -->|ERROR / ABORTED| bridges
+  bridges -->|ReportFault| fm
+  operator -->|POST/PUT /updates · DELETE faults| plugin
+  plugin -.->|kill + swap| scan
+  plugin -->|GET /catalog · /artifacts| cat
+  cat --- art
+  fb -.->|ws :8765| foxglove
+
+  %% flow colouring: 3,4 = fault | 5,7 = OTA | 6 = hot-swap | 9 = telemetry
+  linkStyle 3,4 stroke:#e11d48,stroke-width:2.5px;
+  linkStyle 5,7 stroke:#7c3aed,stroke-width:2.5px;
+  linkStyle 6 stroke:#059669,stroke-width:2.5px;
+  linkStyle 9 stroke:#0284c7,stroke-width:2.5px;
+
+  style GW fill:#f6f8ff,stroke:#c7d2fe,color:#4338ca;
+  style MK fill:#eef2ff,stroke:#c7d2fe,color:#4338ca;
+  style AUT fill:#ffffff,stroke:#e2e8f0,color:#475569;
+  style US fill:#f0fdfa,stroke:#99f6e4,color:#0d9488;
+```
+
 ## What this shows
 
 The headline scene is a diagnostic loop, not just a button-press update:
