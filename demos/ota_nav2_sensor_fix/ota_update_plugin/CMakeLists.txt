@@ -74,6 +74,7 @@ install(DIRECTORY include/ DESTINATION include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  include(ROS2MedkitTestDomain)
   ament_add_gtest(test_ota_update_plugin
     test/test_operation_dispatcher.cpp
     test/test_catalog_client.cpp
@@ -81,6 +82,17 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_ota_update_plugin ota_update_plugin_core)
   target_include_directories(test_ota_update_plugin PRIVATE src)
+  # The suite creates no ROS entity: the catalog client, the operation
+  # dispatcher and the plugin are exercised against doubles, and the one test
+  # that uses the real ProcessRunner spawns a path that does not exist. Nothing
+  # here touches DDS, so the test needs no domain of its own.
+  #
+  # Guarded, because ament_add_gtest registers nothing when the executable was
+  # not created, and declaring a property on a test that does not exist is a
+  # hard configure error rather than the skip ament intended.
+  if(TARGET test_ota_update_plugin)
+    medkit_test_needs_no_domain(test_ota_update_plugin)
+  endif()
 endif()
 
 ament_package()
