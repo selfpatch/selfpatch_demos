@@ -29,7 +29,8 @@
 #      scan_sensor_node is running broken_lidar_node; fixed_lidar_3_0_1 is
 #      NOT yet registered (boot catalog holds only the bad update).
 #   2. send-goal.sh -> ACTION_NAVIGATE_TO_POSE_ABORTED reaches CONFIRMED on
-#      bt-navigator, and controller-server picks up a supporting LOG_* fault.
+#      bt-navigator, and controller-server picks up a supporting LOG_* fault
+#      whose message is the controller's own stall, not just any error.
 #   3. Fault detail (bt-navigator) has environment_data.snapshots >= 1, and
 #      the rosbag bulk-data download returns a non-empty MCAP body.
 #   4. publish-fix.sh -> fixed_lidar_3_0_1 appears in /updates (SOVD
@@ -68,6 +69,17 @@ CONTROLLER_ENTITY="apps/controller-server"
 # controller-server's LOG_CONTROLLER_SERVER_* code is content-hashed (derived
 # from the log message), so it is never matched by exact code - only by
 # "does this entity have any fault at all" (see fault_present with code="").
+#
+# The message is matched instead, because "any fault on controller-server" is
+# too weak for the one assertion that says WHICH Nav2 node failed. The log
+# bridge promotes every controller_server ERROR at or above its severity floor,
+# so a TF error or a lifecycle error would satisfy a bare count check. These two
+# messages are the controller saying it cannot move: the progress checker
+# (movement_time_allowance) and the controller patience (failure_tolerance).
+# If the global costmap ever starts marking the phantom again, planner_server
+# aborts the goal first, controller_server logs neither of these, and this is
+# the assertion that goes red.
+CONTROLLER_STALL_MSG="Failed to make progress|Controller patience exceeded"
 
 # --- Helpers built on top of smoke_lib.sh's api_get/poll_until -------------
 
@@ -231,12 +243,14 @@ else
          "fault never reached CONFIRMED within 60s - either nav2 didn't accept the goal or the action-status bridge is broken"
 fi
 
-echo "  Waiting for a supporting LOG_* fault on ${CONTROLLER_ENTITY} (max 60s)..."
-if poll_until "/${CONTROLLER_ENTITY}/faults" '.items | length > 0' 60; then
-    pass "supporting LOG_* fault present on ${CONTROLLER_ENTITY}"
+echo "  Waiting for a supporting LOG_* stall fault on ${CONTROLLER_ENTITY} (max 60s)..."
+if poll_until "/${CONTROLLER_ENTITY}/faults" \
+    ".items[] | select(.description | test(\"${CONTROLLER_STALL_MSG}\"))" \
+    60; then
+    pass "supporting LOG_* fault present on ${CONTROLLER_ENTITY} and reports the controller stall"
 else
-    fail "supporting LOG_* fault present on ${CONTROLLER_ENTITY}" \
-         "no fault appeared within 60s - either nav2 didn't stall or the log bridge is broken"
+    fail "supporting LOG_* fault present on ${CONTROLLER_ENTITY} and reports the controller stall" \
+         "no fault matching '${CONTROLLER_STALL_MSG}' within 60s - either nav2 aborted somewhere other than the controller, or the log bridge is broken"
 fi
 
 # ---------------------------------------------------------------------
