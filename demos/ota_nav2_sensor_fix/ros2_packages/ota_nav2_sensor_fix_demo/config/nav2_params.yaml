@@ -233,17 +233,33 @@ global_costmap:
       robot_radius: 0.45
       resolution: 0.05
       track_unknown_space: true
-      # Map-only, no obstacle layer: the global plan comes from the static map
-      # plus inflation, and reacting to what the lidar sees is the local
-      # costmap's job. The warehouse is static, so the map already holds every
-      # obstacle a global plan has to route around. It also decides WHERE the
-      # AMR fails when the lidar regresses: the phantom sector is fixed to the
-      # robot, so a global obstacle layer would paint it around the robot's own
-      # position and navfn would abort with "failed to create plan" before the
-      # controller ever ran out of trajectories. The failure belongs at the
-      # controller that cannot find a way forward, which is the node the log
-      # bridge watches.
-      plugins: ["static_layer", "inflation_layer"]
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 3.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 2.5
+          # Global planning ignores anything closer than this, and that decides
+          # WHICH Nav2 node fails when the lidar regresses. The phantom sector
+          # broken_lidar overlays is fixed to the robot and reports a constant
+          # range (phantom_range_m, 0.22 m at the laser), so without this floor
+          # the global costmap paints it around the robot's own position and
+          # navfn aborts with "failed to create plan" before the controller
+          # runs out of trajectories - and the log bridge watches
+          # controller_server, not planner_server, so the supporting fault
+          # would go missing. The floor must therefore stay above
+          # phantom_range_m and below the distance at which real obstacles
+          # matter to a global plan; anything that close is the local
+          # costmap's problem, and it reads the same scan with no floor.
+          obstacle_min_range: 0.35
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
