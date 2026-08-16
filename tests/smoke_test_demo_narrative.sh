@@ -28,9 +28,11 @@
 #   1. Boot: broken_lidar_3_0_0 is applied (entrypoint auto-apply) and
 #      scan_sensor_node is running broken_lidar_node; fixed_lidar_3_0_1 is
 #      NOT yet registered (boot catalog holds only the bad update).
-#   2. send-goal.sh -> ACTION_NAVIGATE_TO_POSE_ABORTED reaches CONFIRMED on
-#      bt-navigator, and controller-server picks up a supporting LOG_* fault
-#      whose message is the controller's own stall, not just any error.
+#   2. Once action_status_bridge is watching /navigate_to_pose (the goal must
+#      not precede it - see wait_for_action_bridge), send-goal.sh ->
+#      ACTION_NAVIGATE_TO_POSE_ABORTED reaches CONFIRMED on bt-navigator, and
+#      controller-server picks up a supporting LOG_* fault whose message is
+#      the controller's own stall, not just any error.
 #   3. Fault detail (bt-navigator) has environment_data.snapshots >= 1, and
 #      the rosbag bulk-data download returns a non-empty MCAP body.
 #   4. publish-fix.sh -> fixed_lidar_3_0_1 appears in /updates (SOVD
@@ -170,6 +172,31 @@ poll_process_running() {
     return 1
 }
 
+# Wait until action_status_bridge says it is watching navigate_to_pose.
+#
+# The goal must not be sent before this. The bridge fixes a fault's source on
+# the FIRST status message it sees for an action, and the action status topic
+# is transient-local: a bridge that subscribes while a goal is already in
+# flight gets a latched sample immediately, before the ROS graph has resolved
+# the publisher's node name. The source then stays the action name
+# (/navigate_to_pose) instead of the server's node (/bt_navigator), and the
+# fault never lands on the bt-navigator entity this test asserts on.
+#
+# demo.launch.py starts the bridges on a 15 s timer while send-goal.sh retries
+# until nav2 accepts, so on a fast boot the goal wins that race.
+wait_for_action_bridge() {
+    local timeout="${1:-60}"
+    local elapsed=0
+    while [ $elapsed -lt "$timeout" ]; do
+        if docker logs "$GATEWAY_CONTAINER" 2>&1 | grep -q "Watching action '/navigate_to_pose'"; then
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    return 1
+}
+
 # Poll until `pgrep -af <pattern>` fails inside the gateway container
 # (process gone), up to $2 seconds.
 poll_process_gone() {
@@ -231,6 +258,15 @@ fi
 # Step 2: send-goal.sh -> reactive ACTION_NAVIGATE_TO_POSE_ABORTED
 # ---------------------------------------------------------------------
 section "Reactive fault: send-goal.sh triggers ACTION_NAVIGATE_TO_POSE_ABORTED"
+
+echo "  Waiting for action_status_bridge to watch /navigate_to_pose (max 60s)..."
+if wait_for_action_bridge 60; then
+    pass "action_status_bridge is watching /navigate_to_pose before the goal is sent"
+else
+    fail "action_status_bridge is watching /navigate_to_pose before the goal is sent" \
+         "bridge never reported the action within 60s - a goal sent now would be attributed to the action name, not to bt-navigator"
+    exit 1
+fi
 
 # x=1.8, y=2.3 (frame map) drives straight into the phantom sector so nav2
 # reliably stalls - the send-goal.sh script defaults elsewhere are for
