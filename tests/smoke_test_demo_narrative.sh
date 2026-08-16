@@ -73,13 +73,17 @@ CONTROLLER_ENTITY="apps/controller-server"
 # The message is matched instead, because "any fault on controller-server" is
 # too weak for the one assertion that says WHICH Nav2 node failed. The log
 # bridge promotes every controller_server ERROR at or above its severity floor,
-# so a TF error or a lifecycle error would satisfy a bare count check. These two
+# so a TF error or a lifecycle error would satisfy a bare count check. These
 # messages are the controller saying it cannot move: the progress checker
-# (movement_time_allowance) and the controller patience (failure_tolerance).
+# (FailedToMakeProgress), the controller patience (PatienceExceeded) and the
+# controller having no legal trajectory left (NoValidControl, which carries
+# DWB's own wording). The third only reaches ERROR when failure_tolerance is
+# zero - above zero the controller retries and logs it at WARN until patience
+# runs out - so it is here for the config, not for the run we expect.
 # If the global costmap ever starts marking the phantom again, planner_server
-# aborts the goal first, controller_server logs neither of these, and this is
+# aborts the goal first, controller_server logs none of these, and this is
 # the assertion that goes red.
-CONTROLLER_STALL_MSG="Failed to make progress|Controller patience exceeded"
+CONTROLLER_STALL_MSG="Failed to make progress|Controller patience exceeded|Could not find a legal trajectory"
 
 # --- Helpers built on top of smoke_lib.sh's api_get/poll_until -------------
 

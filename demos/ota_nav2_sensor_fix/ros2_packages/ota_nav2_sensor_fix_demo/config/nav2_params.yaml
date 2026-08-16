@@ -247,18 +247,29 @@ global_costmap:
           raytrace_max_range: 3.0
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
-          # Global planning ignores anything closer than this, and that decides
-          # WHICH Nav2 node fails when the lidar regresses. The phantom sector
-          # broken_lidar overlays is fixed to the robot and reports a constant
-          # range (phantom_range_m, 0.22 m at the laser), so without this floor
-          # the global costmap paints it around the robot's own position and
-          # navfn aborts with "failed to create plan" before the controller
-          # runs out of trajectories - and the log bridge watches
-          # controller_server, not planner_server, so the supporting fault
-          # would go missing. The floor must therefore stay above
-          # phantom_range_m and below the distance at which real obstacles
-          # matter to a global plan; anything that close is the local
-          # costmap's problem, and it reads the same scan with no floor.
+          # Global planning ignores anything the scan reports closer than this,
+          # and that decides WHICH Nav2 node fails when the lidar regresses.
+          # The phantom sector broken_lidar overlays is fixed to the robot and
+          # reports a constant range, so without a floor the global costmap
+          # paints it around the robot's own position and navfn aborts with
+          # "failed to create plan" before the controller runs out of
+          # trajectories - and the log bridge watches controller_server, not
+          # planner_server, so the supporting fault would go missing.
+          #
+          # This is a range in the LASER frame, not a distance from the robot.
+          # The laser sits ~0.268 m ahead of base_footprint, so 0.35 here is
+          # ~0.62 m ahead of centre, against robot_radius 0.45 on this costmap:
+          # roughly 0.17 m in which a real obstacle is already outside the
+          # footprint and still invisible to global planning. That band is the
+          # local costmap's, which reads the same scan with no floor at all.
+          # Global plans are routing, so trading that band for the phantom is
+          # the right way round.
+          #
+          # The floor must stay above the phantom range, which lives as the
+          # phantom_range_m default (0.22) in broken_lidar_node.cpp and is set
+          # nowhere else - a launch override raising it past 0.35 puts the
+          # planner back in the failure path, and the narrative smoke test is
+          # what catches that.
           obstacle_min_range: 0.35
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
