@@ -38,10 +38,22 @@ fault_manager:
     database_path: "/var/lib/ros2_medkit/faults.db"
 
     # === DEBOUNCE CONFIGURATION (Article 3) ===
-    confirmation_threshold: -3   # Need 3 sustained FAILED events to confirm
-    healing_enabled: true        # Auto-heal when problem resolves
-    healing_threshold: 3         # Need 3 PASSED events to heal
+    # -3 filters the no-progress reporter, which repeats every 5 s while the
+    # robot is stuck: three reports, so roughly 15 s of it, before an operator
+    # sees anything. That is the contrast with the storm profile.
+    confirmation_threshold: -3
+    healing_enabled: true
+    # Healing costs healing_threshold minus the counter at recovery, so from -3
+    # a value of 3 would need six PASSED events. The detector sends one per
+    # recovery, so anything above 0 never heals.
+    healing_threshold: 0
     auto_confirm_after_sec: 0.0  # Disabled
+
+    # The goal-status faults fire once per status change, so the -3 above would
+    # hide them permanently. They report under their own source and take their
+    # own thresholds from here.
+    entity_thresholds:
+      config_file: "/root/demo_ws/src/turtlebot3_medkit_demo/config/entity_thresholds.yaml"
 
     # Snapshot configuration (freeze frames)
     snapshots:

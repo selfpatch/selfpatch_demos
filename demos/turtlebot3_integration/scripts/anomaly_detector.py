@@ -46,6 +46,8 @@ SEVERITY_ERROR = 2
 SEVERITY_CRITICAL = 3
 
 # Event types
+GOAL_STATUS_SOURCE = '/goal_status'
+
 EVENT_FAILED = 0
 EVENT_PASSED = 1
 
@@ -153,6 +155,7 @@ class AnomalyDetectorNode(Node):
                 if status.status == GoalStatus.STATUS_ABORTED:
                     self.report_fault(
                         fault_code='NAVIGATION_GOAL_ABORTED',
+                        source_suffix=GOAL_STATUS_SOURCE,
                         severity=SEVERITY_ERROR,
                         description=f'Navigation goal ABORTED - path planning or execution failed (goal: {goal_id[:8]})',
                         event_type=EVENT_FAILED
@@ -162,6 +165,7 @@ class AnomalyDetectorNode(Node):
                 elif status.status == GoalStatus.STATUS_CANCELED:
                     self.report_fault(
                         fault_code='NAVIGATION_GOAL_CANCELED',
+                        source_suffix=GOAL_STATUS_SOURCE,
                         severity=SEVERITY_WARN,
                         description=f'Navigation goal CANCELED (goal: {goal_id[:8]})',
                         event_type=EVENT_FAILED
@@ -172,12 +176,14 @@ class AnomalyDetectorNode(Node):
                     # Clear navigation faults
                     self.report_fault(
                         fault_code='NAVIGATION_GOAL_ABORTED',
+                        source_suffix=GOAL_STATUS_SOURCE,
                         severity=SEVERITY_INFO,
                         description='Navigation goal succeeded',
                         event_type=EVENT_PASSED
                     )
                     self.report_fault(
                         fault_code='NAVIGATION_GOAL_CANCELED',
+                        source_suffix=GOAL_STATUS_SOURCE,
                         severity=SEVERITY_INFO,
                         description='Navigation goal succeeded',
                         event_type=EVENT_PASSED
@@ -274,14 +280,23 @@ class AnomalyDetectorNode(Node):
                 self.last_no_progress_report_time = now
                 self.get_logger().warn(f'No navigation progress for {time_since_progress:.1f}s')
 
-    def report_fault(self, fault_code: str, severity: int, description: str, event_type: int):
-        """Report a fault to FaultManager via service call."""
+    def report_fault(self, fault_code: str, severity: int, description: str, event_type: int,
+                     source_suffix: str = ''):
+        """Report a fault to FaultManager via service call.
+
+        source_suffix separates reporters that behave differently. The
+        no-progress check repeats while the condition holds, so a count-based
+        debounce can filter it. The goal-status faults fire once on a status
+        change, so any threshold past the first event would hide them for good.
+        Reporting them under their own source lets the debounce configuration
+        give each the threshold that suits it.
+        """
         request = ReportFault.Request()
         request.fault_code = fault_code
         request.event_type = event_type
         request.severity = severity
         request.description = description
-        request.source_id = self.get_fully_qualified_name()
+        request.source_id = self.get_fully_qualified_name() + source_suffix
 
         # Track active faults
         if event_type == EVENT_FAILED:
