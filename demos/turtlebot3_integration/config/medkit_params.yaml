@@ -50,7 +50,7 @@ fault_manager:
     database_path: "/var/lib/ros2_medkit/faults.db"
 
     # Debounce configuration
-    confirmation_threshold: 0  # Immediate confirmation
+    confirmation_threshold: -1  # Immediate confirmation; 0 is rejected and falls back to this
     healing_enabled: false
     healing_threshold: 3
     auto_confirm_after_sec: 0.0

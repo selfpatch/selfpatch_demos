@@ -15,7 +15,9 @@ services:
   turtlebot3-demo:
     volumes:
       - ./config/medkit_params_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/medkit_params.yaml:ro
+      - ./config/entity_thresholds_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/entity_thresholds.yaml:ro
 
   turtlebot3-demo-nvidia:
     volumes:
       - ./config/medkit_params_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/medkit_params.yaml:ro
+      - ./config/entity_thresholds_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/entity_thresholds.yaml:ro

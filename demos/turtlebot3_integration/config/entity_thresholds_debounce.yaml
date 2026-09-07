@@ -1,0 +1,26 @@
+# Copyright 2026 bburda
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Per-source debounce for the debounce demo. Keys match a source_id by longest
+# prefix, so the entry below applies only to the goal-status reporter and the
+# global thresholds still cover the no-progress one.
+
+/anomaly_detector/goal_status:
+  # A goal aborting or being cancelled is a single status change, so exactly one
+  # FAILED arrives and exactly one PASSED on the next success. -1 confirms on
+  # that one event and 0 heals on it. The global -3 would leave both codes in
+  # PREFAILED for good, which the default CONFIRMED-only fault list never shows.
+  confirmation_threshold: -1
+  healing_enabled: true
+  healing_threshold: 0
