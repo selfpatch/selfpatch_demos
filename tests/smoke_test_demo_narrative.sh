@@ -300,14 +300,21 @@ section "Fault detail: environment_data snapshot + MCAP rosbag capture"
 
 if api_get "/${NAV_ENTITY}/faults/${NAV_CODE}"; then
     pass "GET /${NAV_ENTITY}/faults/${NAV_CODE} returns 200"
-    if echo "$RESPONSE" | jq -e '(.environment_data.snapshots // []) | length >= 1' > /dev/null 2>&1; then
-        pass "fault detail has >=1 environment_data snapshot"
-    else
-        fail "fault detail has >=1 environment_data snapshot" \
-             "got $(echo "$RESPONSE" | jq -c '.environment_data.snapshots // []' 2>/dev/null)"
-    fi
 else
     fail "GET /${NAV_ENTITY}/faults/${NAV_CODE} returns 200" "unexpected status code"
+fi
+
+# Per-topic snapshots are captured on the fault manager's capture thread pool,
+# so they are written slightly AFTER the fault reports CONFIRMED - the status
+# the previous step polled for. Checking once races that write and reads an
+# empty snapshot list from a fault whose capture is still in flight.
+if poll_until "/${NAV_ENTITY}/faults/${NAV_CODE}" \
+    '(.environment_data.snapshots // []) | length >= 1' \
+    30; then
+    pass "fault detail has >=1 environment_data snapshot"
+else
+    fail "fault detail has >=1 environment_data snapshot" \
+         "no snapshot after ~30s: $(echo "$RESPONSE" | jq -c '.environment_data.snapshots // []' 2>/dev/null)"
 fi
 
 # The MCAP rosbag is written ASYNCHRONOUSLY - the ring buffer is flushed on
