@@ -32,5 +32,8 @@
   # count as confirmed: confirmedDTC stays 0, a confirmed-only query does not
   # return them, and nothing that keys off confirmation runs.
   confirmation_threshold: -1
+  # These two repeat the global values rather than changing them. They are stated
+  # so this source keeps confirming and healing on a single event even if the
+  # global profile is retuned later; only confirmation_threshold differs today.
   healing_enabled: true
   healing_threshold: 0

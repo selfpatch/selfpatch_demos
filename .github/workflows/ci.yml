@@ -104,6 +104,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Static check, so it also covers the cpu and nvidia services that CI
+      # never starts. A service missing from the override runs the default
+      # profile while the caller believes it is debouncing.
+      - name: Check the debounce override covers every demo service
+        run: ./tests/check_debounce_overlay.sh
+
       - name: Build and start turtlebot3 demo in debounce mode
         working-directory: demos/turtlebot3_integration
         run: |

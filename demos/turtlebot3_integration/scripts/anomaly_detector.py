@@ -186,21 +186,21 @@ class AnomalyDetectorNode(Node):
                     self.get_logger().info(f'Navigation goal {goal_id[:8]} CANCELED')
 
                 elif status.status == GoalStatus.STATUS_SUCCEEDED:
-                    # Clear navigation faults
-                    self.report_fault(
-                        fault_code='NAVIGATION_GOAL_ABORTED',
-                        source_suffix=GOAL_STATUS_SOURCE,
-                        severity=SEVERITY_INFO,
-                        description='Navigation goal succeeded',
-                        event_type=EVENT_PASSED
-                    )
-                    self.report_fault(
-                        fault_code='NAVIGATION_GOAL_CANCELED',
-                        source_suffix=GOAL_STATUS_SOURCE,
-                        severity=SEVERITY_INFO,
-                        description='Navigation goal succeeded',
-                        event_type=EVENT_PASSED
-                    )
+                    # Clear only the codes this detector still owes PASSED events
+                    # for. Reporting both unconditionally sends two events per
+                    # successful goal for the life of the process, and under a
+                    # profile with healing disabled a confirmed fault stays
+                    # confirmed, so each one publishes a further update about a
+                    # fault that is already over.
+                    for cleared_code in ('NAVIGATION_GOAL_ABORTED', 'NAVIGATION_GOAL_CANCELED'):
+                        if self.pending_heal_reports.get(cleared_code):
+                            self.report_fault(
+                                fault_code=cleared_code,
+                                source_suffix=GOAL_STATUS_SOURCE,
+                                severity=SEVERITY_INFO,
+                                description='Navigation goal succeeded',
+                                event_type=EVENT_PASSED
+                            )
 
     def amcl_pose_callback(self, msg: PoseWithCovarianceStamped):
         """Monitor AMCL localization covariance."""
@@ -350,12 +350,22 @@ class AnomalyDetectorNode(Node):
 
     def _handle_fault_response(self, future, fault_code: str, event_type: int):
         """Handle response from fault_manager service."""
+        delivered = False
         try:
             response = future.result()
-            if not response.accepted:
+            delivered = response.accepted
+            if not delivered:
                 self.get_logger().warn(f'Fault report rejected: {fault_code}')
         except Exception as e:
             self.get_logger().error(f'Failed to report fault {fault_code}: {e}')
+
+        # The burst is counted down when a PASSED is sent, not when it lands. One
+        # that never landed would otherwise spend part of the budget, leaving the
+        # fault manager short of its healing threshold with nothing left to send.
+        # Callbacks all run on the single spin thread, so this needs no lock.
+        if not delivered and event_type == EVENT_PASSED:
+            owed = min(self.pending_heal_reports.get(fault_code, 0) + 1, HEAL_PASSED_REPEATS)
+            self.pending_heal_reports[fault_code] = owed
 
 
 def main(args=None):
