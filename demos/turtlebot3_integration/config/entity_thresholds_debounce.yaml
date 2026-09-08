@@ -15,8 +15,15 @@
 # Per-source debounce for the debounce demo. Keys match a source_id by longest
 # prefix, so the entry below applies only to the goal-status reporter and the
 # global thresholds still cover the no-progress one.
+#
+# The prefix is anchored at the start of the source_id, which the detector builds
+# as its fully qualified node name plus a suffix. demo.launch.py puts the node in
+# the "bridge" namespace, so the name is /bridge/anomaly_detector and the leading
+# /bridge is part of the key. Renaming the node or its namespace in the launch
+# file breaks this match silently: the resolver falls back to the global
+# thresholds and the goal-status faults go back to hiding in PREFAILED.
 
-/anomaly_detector/goal_status:
+/bridge/anomaly_detector/goal_status:
   # A goal aborting or being cancelled is a single status change, so exactly one
   # FAILED arrives and exactly one PASSED on the next success. -1 confirms on
   # that one event and 0 heals on it. The global -3 would leave both codes in

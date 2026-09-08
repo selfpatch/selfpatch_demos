@@ -7,6 +7,13 @@
 #   DEBOUNCE (with filtering):
 #     docker compose --profile cpu -f docker-compose.yml -f docker-compose.debounce.yml up -d
 #
+#   DEBOUNCE in CI (headless, driven by tests/smoke_test_debounce.sh):
+#     docker compose --profile ci -f docker-compose.yml -f docker-compose.debounce.yml up -d
+#
+# Every service that can run the demo needs an entry here. A service left out
+# starts with the default profile while the caller believes it is debouncing,
+# and every assertion about thresholds then measures the wrong configuration.
+#
 # The override mounts the debounce config over the default one inside the container.
 # colcon build --symlink-install means the installed config points to the source,
 # so mounting over the source path works.
@@ -18,6 +25,11 @@ services:
       - ./config/entity_thresholds_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/entity_thresholds.yaml:ro
 
   turtlebot3-demo-nvidia:
+    volumes:
+      - ./config/medkit_params_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/medkit_params.yaml:ro
+      - ./config/entity_thresholds_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/entity_thresholds.yaml:ro
+
+  turtlebot3-demo-ci:
     volumes:
       - ./config/medkit_params_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/medkit_params.yaml:ro
       - ./config/entity_thresholds_debounce.yaml:/root/demo_ws/src/turtlebot3_medkit_demo/config/entity_thresholds.yaml:ro

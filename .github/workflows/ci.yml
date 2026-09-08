@@ -94,6 +94,41 @@ jobs:
         working-directory: demos/turtlebot3_integration
         run: docker compose --profile ci down
 
+  # The debounce profile is a second configuration of the same demo, so it needs
+  # its own run: the default profile never loads the per-source threshold file,
+  # and a key that stops matching it fails silently by falling back to the
+  # global thresholds.
+  build-and-test-turtlebot-debounce:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and start turtlebot3 demo in debounce mode
+        working-directory: demos/turtlebot3_integration
+        run: |
+          docker compose --profile ci \
+            -f docker-compose.yml -f docker-compose.debounce.yml \
+            up -d --build turtlebot3-demo-ci
+
+      - name: Run debounce smoke tests
+        run: ./tests/smoke_test_debounce.sh
+
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: demos/turtlebot3_integration
+        run: |
+          docker compose --profile ci \
+            -f docker-compose.yml -f docker-compose.debounce.yml \
+            logs turtlebot3-demo-ci --tail=200
+
+      - name: Teardown
+        if: always()
+        working-directory: demos/turtlebot3_integration
+        run: |
+          docker compose --profile ci \
+            -f docker-compose.yml -f docker-compose.debounce.yml down
+
   build-and-test-moveit:
     runs-on: ubuntu-24.04
     steps:
