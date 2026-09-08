@@ -254,20 +254,10 @@ class AnomalyDetectorNode(Node):
             distance = math.sqrt((x - last_x)**2 + (y - last_y)**2)
 
             if distance > self.min_progress_distance:
-                now = self.get_clock().now()
-                self.last_progress_time = now
-                # Clear no-progress fault if robot is moving. Odometry arrives far
-                # faster than the fault manager needs, and the burst has to be
-                # spread out, so this shares the FAILED side's throttle: one report
-                # per code per report_throttle_sec, whichever direction it goes.
-                if self.pending_heal_reports.get('NAVIGATION_NO_PROGRESS') and self._may_report_no_progress(now):
-                    self.report_fault(
-                        fault_code='NAVIGATION_NO_PROGRESS',
-                        severity=SEVERITY_INFO,
-                        description='Robot making progress',
-                        event_type=EVENT_PASSED
-                    )
-                    self.last_no_progress_report_time = now
+                # Movement only records progress. The PASSED events that clear the
+                # fault are sent from the periodic check, which keeps sending them
+                # after the robot stops.
+                self.last_progress_time = self.get_clock().now()
 
         self.last_position = (x, y)
 
@@ -283,17 +273,20 @@ class AnomalyDetectorNode(Node):
         return elapsed > self.report_throttle_sec
 
     def check_timer_callback(self):
-        """Periodic check for no-progress condition."""
-        if not self.has_active_goal:
-            return
-
-        if self.last_progress_time is None:
-            return
-
+        """Periodic check for the no-progress condition, in both directions."""
         now = self.get_clock().now()
-        time_since_progress = (now - self.last_progress_time).nanoseconds / 1e9
 
-        if time_since_progress > self.no_progress_timeout_sec:
+        time_since_progress = None
+        if self.last_progress_time is not None:
+            time_since_progress = (now - self.last_progress_time).nanoseconds / 1e9
+
+        stuck = (
+            self.has_active_goal
+            and time_since_progress is not None
+            and time_since_progress > self.no_progress_timeout_sec
+        )
+
+        if stuck:
             if self._may_report_no_progress(now):
                 self.report_fault(
                     fault_code='NAVIGATION_NO_PROGRESS',
@@ -303,6 +296,23 @@ class AnomalyDetectorNode(Node):
                 )
                 self.last_no_progress_report_time = now
                 self.get_logger().warn(f'No navigation progress for {time_since_progress:.1f}s')
+            return
+
+        # The condition does not hold: the robot is moving again, or no goal is
+        # active so the fault cannot apply. Spend whatever is left of the healing
+        # burst. Driving this from the timer rather than from odometry matters,
+        # because a recovery that ends before the burst is spent - the goal
+        # finishes, or the robot simply stops - would otherwise leave the fault
+        # confirmed for good, with the remaining PASSED events owed and nothing
+        # left to send them.
+        if self.pending_heal_reports.get('NAVIGATION_NO_PROGRESS') and self._may_report_no_progress(now):
+            self.report_fault(
+                fault_code='NAVIGATION_NO_PROGRESS',
+                severity=SEVERITY_INFO,
+                description='Robot making progress',
+                event_type=EVENT_PASSED
+            )
+            self.last_no_progress_report_time = now
 
     def report_fault(self, fault_code: str, severity: int, description: str, event_type: int,
                      source_suffix: str = ''):
