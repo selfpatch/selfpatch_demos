@@ -125,25 +125,47 @@ assert_status() {
     fi
 }
 
-# Assert a fault does NOT hold a status, giving it time to prove it would.
-# Usage: refute_status CODE FORBIDDEN_STATUS DESCRIPTION [settle_seconds]
-refute_status() {
-    local code="$1" forbidden="$2" description="$3" settle="${4:-5}"
+# Assert a fault still holds a status after a settle period.
+# Stronger than refuting one forbidden value, which also passes when the fault
+# moved to some other unexpected status, or vanished from the list entirely.
+# Usage: assert_stable_status CODE EXPECTED_STATUS DESCRIPTION [settle_seconds]
+assert_stable_status() {
+    local code="$1" expected="$2" description="$3" settle="${4:-5}"
     sleep "$settle"
-    # An unreachable endpoint must not read as "the status was not reached" -
-    # that turns every outage into a silent pass for this whole class of check.
+    # An unreachable endpoint must not read as a satisfied assertion - that turns
+    # every outage into a silent pass for this whole class of check.
     if ! api_get "/faults?status=all"; then
         fail "$description" "GET /faults?status=all did not return 200"
         return
     fi
-    if jq -e ".items[] | select(.fault_code == \"${code}\" and .status == \"${forbidden}\")" <<< "$RESPONSE" > /dev/null 2>&1; then
-        fail "$description" "status reached '${forbidden}'"
-    elif ! jq -e ".items[] | select(.fault_code == \"${code}\")" <<< "$RESPONSE" > /dev/null 2>&1; then
-        # The fault vanishing entirely is not the same as it holding a different
-        # status, and would make the refutation vacuous.
-        fail "$description" "fault ${code} is absent from the list"
-    else
+    local got
+    got=$(jq -r ".items[] | select(.fault_code == \"${code}\") | .status" <<< "$RESPONSE" 2>/dev/null)
+    if [ "$got" = "$expected" ]; then
         pass "$description"
+    else
+        fail "$description" "status is '${got:-<fault absent>}', expected '${expected}'"
+    fi
+}
+
+# Assert whether a fault is in the confirmed-only listing, which is what an
+# operator watching for active faults queries. The plain /faults list is not the
+# discriminator here: its default filter includes PREFAILED as well as CONFIRMED,
+# so a fault stuck in PREFAILED still appears there.
+# Usage: assert_confirmed_listing CODE present|absent DESCRIPTION
+assert_confirmed_listing() {
+    local code="$1" expected="$2" description="$3"
+    if ! api_get "/faults?status=confirmed"; then
+        fail "$description" "GET /faults?status=confirmed did not return 200"
+        return
+    fi
+    local found=absent
+    if jq -e ".items[] | select(.fault_code == \"${code}\")" <<< "$RESPONSE" > /dev/null 2>&1; then
+        found=present
+    fi
+    if [ "$found" = "$expected" ]; then
+        pass "$description"
+    else
+        fail "$description" "fault is ${found} in the confirmed listing, expected ${expected}"
     fi
 }
 
@@ -211,6 +233,8 @@ report_or_fail "$GOAL_CODE" "$EVENT_FAILED" "$SEVERITY_WARN" "$GOAL_SOURCE" \
     "reported one FAILED as ${GOAL_SOURCE}"
 
 assert_status "$GOAL_CODE" "CONFIRMED" "one FAILED confirms the goal-status fault"
+assert_confirmed_listing "$GOAL_CODE" present \
+    "the goal-status fault shows up in the confirmed listing"
 
 if api_get "/faults?status=all" && \
    jq -e --arg src "$GOAL_SOURCE" \
@@ -234,14 +258,22 @@ report_or_fail "$BASE_CODE" "$EVENT_FAILED" "$SEVERITY_WARN" "$BASE_SOURCE" \
     "reported one FAILED as ${BASE_SOURCE}"
 
 assert_status "$BASE_CODE" "PREFAILED" "one FAILED leaves the base fault PREFAILED"
-refute_status "$BASE_CODE" "CONFIRMED" "one FAILED does not confirm the base fault"
+assert_confirmed_listing "$BASE_CODE" absent \
+    "the base fault stays out of the confirmed listing after one FAILED"
 
-for _ in 1 2; do
-    report_or_fail "$BASE_CODE" "$EVENT_FAILED" "$SEVERITY_WARN" "$BASE_SOURCE" \
-        "reported a further FAILED as ${BASE_SOURCE}"
-done
+report_or_fail "$BASE_CODE" "$EVENT_FAILED" "$SEVERITY_WARN" "$BASE_SOURCE" \
+    "reported a second FAILED as ${BASE_SOURCE}"
+
+# Without this the sequence would also pass against a threshold of -2, so it is
+# what pins the configured -3.
+assert_stable_status "$BASE_CODE" "PREFAILED" "two FAILED still do not confirm the base fault"
+
+report_or_fail "$BASE_CODE" "$EVENT_FAILED" "$SEVERITY_WARN" "$BASE_SOURCE" \
+    "reported a third FAILED as ${BASE_SOURCE}"
 
 assert_status "$BASE_CODE" "CONFIRMED" "three FAILED confirm the base fault"
+assert_confirmed_listing "$BASE_CODE" present \
+    "the base fault reaches the confirmed listing on the third FAILED"
 
 # --- Base source: a confirmed fault still heals, but costs a burst ---
 
@@ -249,12 +281,14 @@ section "Healing a confirmed base fault"
 
 report_or_fail "$BASE_CODE" "$EVENT_PASSED" "$SEVERITY_INFO" "$BASE_SOURCE" \
     "reported one PASSED as ${BASE_SOURCE}"
-refute_status "$BASE_CODE" "HEALED" "one PASSED does not heal a confirmed base fault"
+assert_stable_status "$BASE_CODE" "CONFIRMED" "one PASSED leaves the confirmed base fault CONFIRMED"
 
-for _ in 1 2; do
-    report_or_fail "$BASE_CODE" "$EVENT_PASSED" "$SEVERITY_INFO" "$BASE_SOURCE" \
-        "reported a further PASSED as ${BASE_SOURCE}"
-done
+report_or_fail "$BASE_CODE" "$EVENT_PASSED" "$SEVERITY_INFO" "$BASE_SOURCE" \
+    "reported a second PASSED as ${BASE_SOURCE}"
+assert_stable_status "$BASE_CODE" "CONFIRMED" "two PASSED still do not heal the confirmed base fault"
+
+report_or_fail "$BASE_CODE" "$EVENT_PASSED" "$SEVERITY_INFO" "$BASE_SOURCE" \
+    "reported a third PASSED as ${BASE_SOURCE}"
 
 assert_status "$BASE_CODE" "HEALED" "three PASSED heal the confirmed base fault"
 

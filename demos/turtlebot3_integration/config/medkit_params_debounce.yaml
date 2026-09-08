@@ -1,8 +1,9 @@
 # ros2_medkit gateway configuration for TurtleBot3 demo
 # ARTICLE 3 - DEBOUNCE VERSION
-# Differences from default:
-#   confirmation_threshold: -3 (was 0) — requires 3 sustained FAILED events
-#   healing_enabled: true (was false) — auto-heal after PASSED events
+# Differences from the default profile in medkit_params.yaml:
+#   confirmation_threshold: -3, so three sustained FAILED events are needed
+#     before an operator sees the fault, instead of the default -1
+#   healing_enabled: true, so a fault clears itself once the condition is gone
 #
 # Node runs under /diagnostics namespace, so we need to match that here
 diagnostics:
