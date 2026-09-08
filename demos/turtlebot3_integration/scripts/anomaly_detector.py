@@ -51,6 +51,15 @@ GOAL_STATUS_SOURCE = '/goal_status'
 EVENT_FAILED = 0
 EVENT_PASSED = 1
 
+# How many PASSED events one recovery sends. The fault manager heals a fault when
+# its debounce counter climbs from confirmation_threshold back to
+# healing_threshold, so the burst has to be at least the span between them: 3 for
+# the debounce profile (-3 to 0), 1 for the goal-status source (-1 to 0). Sending
+# a fixed 3 covers both. It is deliberately not unbounded - a fault manager with
+# healing disabled keeps a fault CONFIRMED forever, and every further PASSED would
+# publish another EVENT_UPDATED onto the fault event stream.
+HEAL_PASSED_REPEATS = 3
+
 
 class AnomalyDetectorNode(Node):
     """Monitors navigation metrics and reports faults to FaultManager."""
@@ -123,8 +132,12 @@ class AnomalyDetectorNode(Node):
         self.last_no_progress_report_time: Optional[Time] = None
         self.report_throttle_sec = 5.0
 
-        # Track active faults for PASSED events
-        self.active_faults: set = set()
+        # Codes with PASSED reports still owed to the fault manager.
+        # A debounced fault heals only when its counter climbs from the
+        # confirmation threshold back to the healing one, which takes as many
+        # PASSED events as the span between them. One PASSED per recovery leaves
+        # a confirmed fault stuck, so each recovery owes a burst instead.
+        self.pending_heal_reports: dict = {}
 
         self.get_logger().info(
             f'AnomalyDetector started (cov_warn={self.covariance_warn_threshold}, '
@@ -222,7 +235,7 @@ class AnomalyDetectorNode(Node):
             self.last_covariance_report_time = now
         else:
             # Send PASSED to clear previous warnings
-            if 'LOCALIZATION_UNCERTAINTY' in self.active_faults:
+            if self.pending_heal_reports.get('LOCALIZATION_UNCERTAINTY'):
                 self.report_fault(
                     fault_code='LOCALIZATION_UNCERTAINTY',
                     severity=SEVERITY_INFO,
@@ -241,17 +254,33 @@ class AnomalyDetectorNode(Node):
             distance = math.sqrt((x - last_x)**2 + (y - last_y)**2)
 
             if distance > self.min_progress_distance:
-                self.last_progress_time = self.get_clock().now()
-                # Clear no-progress fault if robot is moving
-                if 'NAVIGATION_NO_PROGRESS' in self.active_faults:
+                now = self.get_clock().now()
+                self.last_progress_time = now
+                # Clear no-progress fault if robot is moving. Odometry arrives far
+                # faster than the fault manager needs, and the burst has to be
+                # spread out, so this shares the FAILED side's throttle: one report
+                # per code per report_throttle_sec, whichever direction it goes.
+                if self.pending_heal_reports.get('NAVIGATION_NO_PROGRESS') and self._may_report_no_progress(now):
                     self.report_fault(
                         fault_code='NAVIGATION_NO_PROGRESS',
                         severity=SEVERITY_INFO,
                         description='Robot making progress',
                         event_type=EVENT_PASSED
                     )
+                    self.last_no_progress_report_time = now
 
         self.last_position = (x, y)
+
+    def _may_report_no_progress(self, now: Time) -> bool:
+        """True when the no-progress throttle window has elapsed.
+
+        Shared by the FAILED and PASSED sides so the code is reported at most
+        once per report_throttle_sec regardless of direction.
+        """
+        if self.last_no_progress_report_time is None:
+            return True
+        elapsed = (now - self.last_no_progress_report_time).nanoseconds / 1e9
+        return elapsed > self.report_throttle_sec
 
     def check_timer_callback(self):
         """Periodic check for no-progress condition."""
@@ -265,12 +294,7 @@ class AnomalyDetectorNode(Node):
         time_since_progress = (now - self.last_progress_time).nanoseconds / 1e9
 
         if time_since_progress > self.no_progress_timeout_sec:
-            can_report = True
-            if self.last_no_progress_report_time is not None:
-                elapsed = (now - self.last_no_progress_report_time).nanoseconds / 1e9
-                can_report = elapsed > self.report_throttle_sec
-
-            if can_report:
+            if self._may_report_no_progress(now):
                 self.report_fault(
                     fault_code='NAVIGATION_NO_PROGRESS',
                     severity=SEVERITY_WARN,
@@ -298,11 +322,15 @@ class AnomalyDetectorNode(Node):
         request.description = description
         request.source_id = self.get_fully_qualified_name() + source_suffix
 
-        # Track active faults
+        # A FAILED event (re-)arms the healing burst; each PASSED spends one of it.
         if event_type == EVENT_FAILED:
-            self.active_faults.add(fault_code)
+            self.pending_heal_reports[fault_code] = HEAL_PASSED_REPEATS
         else:
-            self.active_faults.discard(fault_code)
+            remaining = self.pending_heal_reports.get(fault_code, 0) - 1
+            if remaining > 0:
+                self.pending_heal_reports[fault_code] = remaining
+            else:
+                self.pending_heal_reports.pop(fault_code, None)
 
         # Async service call
         future = self.fault_client.call_async(request)

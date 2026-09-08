@@ -43,9 +43,11 @@ fault_manager:
     # sees anything. That is the contrast with the storm profile.
     confirmation_threshold: -3
     healing_enabled: true
-    # Healing costs healing_threshold minus the counter at recovery, so from -3
-    # a value of 3 would need six PASSED events. The detector sends one per
-    # recovery, so anything above 0 never heals.
+    # A confirmed fault sits at the confirmation threshold, because the counter is
+    # clamped to the band, so healing costs healing_threshold minus -3 PASSED
+    # events: three at 0, six at 3. The detector answers a recovery with a burst
+    # of three, which is what makes 0 the value that heals and 3 the value that
+    # would not.
     healing_threshold: 0
     auto_confirm_after_sec: 0.0  # Disabled
 
