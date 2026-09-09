@@ -73,6 +73,9 @@ jobs:
 
   build-and-test-turtlebot:
     runs-on: ubuntu-24.04
+    # The navigation step drives a real goal in the simulator, so a wedged stack
+    # would otherwise sit here on the job default of six hours.
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
