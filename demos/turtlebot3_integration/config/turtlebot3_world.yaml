@@ -1,7 +1,11 @@
 image: /opt/ros/jazzy/share/turtlebot3_navigation2/map/map.pgm
 mode: trinary
 resolution: 0.05
-origin: [-1.76, -2.42, 0.0]
+# Must match the origin that ships with this exact map.pgm in
+# turtlebot3_navigation2. A shifted origin puts the map somewhere the robot is
+# not, so the spawn point falls outside the global costmap and every plan is
+# refused with "Start Coordinates ... was outside bounds".
+origin: [-10.0, -10.0, 0.0]
 negate: 0
 occupied_thresh: 0.65
 free_thresh: 0.196

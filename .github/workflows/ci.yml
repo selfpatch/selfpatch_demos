@@ -84,6 +84,12 @@ jobs:
       - name: Run smoke tests
         run: ./tests/smoke_test_turtlebot3.sh
 
+      # Reuses the stack the step above already started. Navigation is what the
+      # other smoke test deliberately leaves alone, so nothing else here notices
+      # when the simulator, the map or the initial pose stop lining up.
+      - name: Run navigation smoke tests
+        run: ./tests/smoke_test_navigation.sh
+
       - name: Show container logs on failure
         if: failure()
         working-directory: demos/turtlebot3_integration
