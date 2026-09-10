@@ -58,9 +58,14 @@ amcl:
     z_short: 0.05
     scan_topic: scan
     set_initial_pose: true
+    # Must match where the robot is spawned, which is x_pose and y_pose in
+    # demo.launch.py and the same place turtlebot3_world.launch.py uses in GUI
+    # mode. Headless has no RViz to set the pose by hand, so a mismatch here is
+    # never corrected: AMCL starts convinced the robot is somewhere else, the
+    # covariance stays high and navigation cannot make progress.
     initial_pose:
-      x: 0.0
-      y: 0.0
+      x: -2.0
+      y: -0.5
       z: 0.0
       yaw: 0.0
 

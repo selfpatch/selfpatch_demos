@@ -51,7 +51,7 @@ api_get() {
     local endpoint="$1"
     local expected_status="${2:-200}"
     local http_code
-    RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}${endpoint}" 2>/dev/null) || true
+    RESPONSE=$(curl -s -m 30 -w "\n%{http_code}" "${API_BASE}${endpoint}" 2>/dev/null) || true
     http_code=$(echo "$RESPONSE" | tail -1)
     RESPONSE=$(echo "$RESPONSE" | sed '$d')
     if [ "$http_code" != "$expected_status" ]; then
@@ -93,7 +93,7 @@ wait_for_gateway() {
     echo -e "  Polling ${API_BASE}/health (max ${max_wait}s)..."
     local elapsed=0
     while [ $elapsed -lt "$max_wait" ]; do
-        if curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
+        if curl -sf -m 10 "${API_BASE}/health" > /dev/null 2>&1; then
             echo -e "  ${GREEN}Gateway ready after ${elapsed}s${NC}"
             return 0
         fi
@@ -221,7 +221,7 @@ assert_script_execution() {
 
     # Start execution
     local exec_response
-    exec_response=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}${exec_endpoint}" \
+    exec_response=$(curl -s -m 30 -w "\n%{http_code}" -X POST "${API_BASE}${exec_endpoint}" \
         -H "Content-Type: application/json" \
         -d '{"execution_type": "now"}' 2>/dev/null) || true
     local exec_http
@@ -281,7 +281,7 @@ assert_triggers_crud() {
     payload=$(jq -n --arg resource "$resource_uri" \
         '{resource: $resource, trigger_condition: {condition_type: "OnChange"}, multishot: true, lifetime: 60}')
     local create_response
-    create_response=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}${triggers_endpoint}" \
+    create_response=$(curl -s -m 30 -w "\n%{http_code}" -X POST "${API_BASE}${triggers_endpoint}" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || true
 
@@ -327,7 +327,7 @@ assert_triggers_crud() {
 
     # Delete trigger
     local delete_status
-    delete_status=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+    delete_status=$(curl -s -m 30 -o /dev/null -w "%{http_code}" -X DELETE \
         "${API_BASE}${triggers_endpoint}/${trigger_id}" 2>/dev/null) || true
 
     if [ "$delete_status" = "204" ]; then
