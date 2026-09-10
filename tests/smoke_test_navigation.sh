@@ -1,9 +1,8 @@
 #!/bin/bash
 # Smoke tests for turtlebot3_integration navigation in headless mode
 #
-# Usage:
-#   cd demos/turtlebot3_integration
-#   docker compose --profile ci up -d --build turtlebot3-demo-ci
+# Usage (from the repository root):
+#   (cd demos/turtlebot3_integration && docker compose --profile ci up -d --build turtlebot3-demo-ci)
 #   ./tests/smoke_test_navigation.sh
 #
 # What this pins, and why each assertion is here:
@@ -75,11 +74,14 @@ DETECTOR_NODE="/bridge/anomaly_detector"
 # Read a lifecycle node's current state through its SOVD operation.
 # Usage: lifecycle_state APP
 lifecycle_state() {
-    local app="$1" body
+    local app="$1" body label
     body=$(curl -s -m 20 -X POST \
         "${API_BASE}/apps/${app}/operations/get_state/executions" \
         -H 'Content-Type: application/json' -d '{"parameters":{}}' 2>/dev/null) || true
-    jq -r '.parameters.current_state.label // "unavailable"' <<< "$body" 2>/dev/null
+    # A body cut short by a timeout is not JSON; jq then prints nothing and
+    # exits non-zero, and both cases mean the state is unavailable.
+    label=$(jq -r '.parameters.current_state.label // "unavailable"' <<< "$body" 2>/dev/null) || true
+    echo "${label:-unavailable}"
 }
 
 # Wait for a lifecycle node to report a state, then assert it.
@@ -145,14 +147,19 @@ localization_confirmed() {
         echo error
         return
     fi
-    if jq -e '.items[] | select(.fault_code == "LOCALIZATION_UNCERTAINTY"
-                               and .status == "CONFIRMED"
-                               and .severity_label == "ERROR")' \
-        <<< "$RESPONSE" > /dev/null 2>&1; then
-        echo yes
-    else
-        echo no
-    fi
+    # jq -e exits 0 when the select produced an item, 1 or 4 when it produced
+    # nothing, and 5 when the list could not be read at all. Only the last one
+    # is an error; an unreadable list must not pass as a clean one.
+    local rc=0
+    jq -e '.items[] | select(.fault_code == "LOCALIZATION_UNCERTAINTY"
+                              and .status == "CONFIRMED"
+                              and .severity_label == "ERROR")' \
+        <<< "$RESPONSE" > /dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0)   echo yes ;;
+        1|4) echo no ;;
+        *)   echo error ;;
+    esac
 }
 
 # Usage: assert_localization_certain WHEN
@@ -169,7 +176,7 @@ assert_localization_certain() {
 # Drive to a pose and require the goal to be accepted and to finish.
 # Usage: drive_to X Y
 drive_to() {
-    local goal_x="$1" goal_y="$2" body http_code payload execution_id status elapsed
+    local goal_x="$1" goal_y="$2" body http_code payload execution_id status elapsed poll_body
     payload=$(jq -nc --argjson x "$goal_x" --argjson y "$goal_y" \
         '{parameters: {pose: {header: {frame_id: "map"},
           pose: {position: {x: $x, y: $y, z: 0.0},
@@ -189,7 +196,7 @@ drive_to() {
         return
     fi
 
-    execution_id=$(jq -r '.id // empty' <<< "$body" 2>/dev/null)
+    execution_id=$(jq -r '.id // empty' <<< "$body" 2>/dev/null) || true
     if [ -z "$execution_id" ]; then
         fail "goal (${goal_x}, ${goal_y}) completes" "no execution id in the accept response"
         return
@@ -198,9 +205,14 @@ drive_to() {
     status="running"
     elapsed=0
     while [ "$elapsed" -lt "$GOAL_TIMEOUT" ]; do
-        status=$(curl -s -m 20 \
+        # A read that does not come back leaves the status unavailable, which
+        # the case below reports as a lost goal. jq prints nothing for an empty
+        # body and its // fallback never runs, so the fallback is set here.
+        poll_body=$(curl -s -m 20 \
             "${API_BASE}/apps/${NAV_APP}/operations/navigate_to_pose/executions/${execution_id}" \
-            2>/dev/null | jq -r '.status // "unavailable"' 2>/dev/null)
+            2>/dev/null) || true
+        status=$(jq -r '.status // "unavailable"' <<< "$poll_body" 2>/dev/null) || true
+        [ -n "$status" ] || status="unavailable"
         case "$status" in
             completed|succeeded|failed) break ;;
         esac
