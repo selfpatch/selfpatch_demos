@@ -400,7 +400,7 @@ GATEWAY_URL=http://192.168.1.10:8080 ./inject-nav-failure.sh
 | `reset-navigation` | Cancel goals and reset AMCL |
 | `inject-localization-failure` | Inject AMCL localization failure |
 | `inject-nav-failure` | Inject navigation failure (unreachable goal) |
-| `restore-normal` | Reset parameters and clear faults |
+| `restore-normal` | Cancel goals, reset parameters, re-localize AMCL and clear faults |
 
 ## Triggers (Condition-Based Alerts)
 
@@ -466,7 +466,7 @@ Faults are detected by `anomaly_detector` and reported directly to FaultManager.
 |--------|-----------|-------------|-----------------|
 | `inject-nav-failure.sh` | Navigation | Send goal to unreachable location | `NAVIGATION_GOAL_ABORTED` |
 | `inject-localization-failure.sh` | Localization | Reset AMCL with high uncertainty | `LOCALIZATION_UNCERTAINTY` |
-| `restore-normal.sh` | Recovery | Restore defaults and clear faults | - |
+| `restore-normal.sh` | Recovery | Restore defaults, re-localize AMCL and clear faults | - |
 
 ### Fault Injection Examples
 
@@ -493,13 +493,14 @@ curl http://localhost:8080/api/v1/faults | jq
 #### Restore Normal Operation
 
 ```bash
-# Clear all faults and restore default parameters
+# Cancel goals, restore default parameters, re-localize AMCL and clear all faults
 ./restore-normal.sh
 ```
 
-`restore-normal.sh` does not re-localize AMCL. After `inject-localization-failure.sh`
-the particle cloud stays spread until a pose is set again, for example with
-`POST /api/v1/apps/amcl/operations/set_initial_pose/executions` or RViz's 2D Pose Estimate.
+`restore-normal.sh` also recovers from `inject-localization-failure.sh`: it reads the
+robot's pose from the running Gazebo simulation and sets it on AMCL through
+`POST /api/v1/apps/amcl/operations/set_initial_pose/executions`, so the robot need not be
+at its spawn point.
 
 ### Fault Monitoring via API
 
@@ -601,7 +602,7 @@ demos/turtlebot3_integration/
 | `reset-navigation.sh` | Cancel goals and reset AMCL |
 | `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |
 | `inject-localization-failure.sh` | Inject localization failure (AMCL reset) |
-| `restore-normal.sh` | Restore normal operation and clear faults |
+| `restore-normal.sh` | Restore normal operation, re-localize AMCL and clear faults |
 | `setup-triggers.sh` | Create OnChange fault trigger |
 | `watch-triggers.sh` | Watch trigger events via SSE stream |
 
