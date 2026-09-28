@@ -500,7 +500,9 @@ curl http://localhost:8080/api/v1/faults | jq
 `restore-normal.sh` also recovers from `inject-localization-failure.sh`: it reads the
 robot's pose from the running Gazebo simulation and sets it on AMCL through
 `POST /api/v1/apps/amcl/operations/set_initial_pose/executions`, so the robot need not be
-at its spawn point.
+at its spawn point. When the gateway refuses one of its writes, for example with 409 while
+another client holds a lock on the app, the script still runs its other steps, then fails
+and names the refused write.
 
 ### Fault Monitoring via API
 
