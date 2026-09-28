@@ -124,9 +124,8 @@ else
     fail "NAVIGATION_GOAL_ABORTED fault appeared in /faults" "fault not found after 15s"
 fi
 
-CHECK_ENTITIES_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./check-entities.sh 2>&1) || true
-# shellcheck disable=SC2001
-CHECK_ENTITIES_PLAIN=$(sed 's/\x1b\[[0-9;]*m//g' <<< "$CHECK_ENTITIES_OUTPUT")
+CHECK_ENTITIES_PLAIN=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./check-entities.sh 2>&1 \
+    | sed 's/\x1b\[[0-9;]*m//g') || true
 
 if grep -q ': null' <<< "$CHECK_ENTITIES_PLAIN"; then
     fail "check-entities.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_ENTITIES_PLAIN" | head -10)"
@@ -140,9 +139,8 @@ else
     fail "check-entities.sh faults section shows the active fault code" "NAVIGATION_GOAL_ABORTED not in output"
 fi
 
-CHECK_FAULTS_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./check-faults.sh 2>&1) || true
-# shellcheck disable=SC2001
-CHECK_FAULTS_PLAIN=$(sed 's/\x1b\[[0-9;]*m//g' <<< "$CHECK_FAULTS_OUTPUT")
+CHECK_FAULTS_PLAIN=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./check-faults.sh 2>&1 \
+    | sed 's/\x1b\[[0-9;]*m//g') || true
 
 if grep -q ': null' <<< "$CHECK_FAULTS_PLAIN"; then
     fail "check-faults.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_FAULTS_PLAIN" | head -10)"
