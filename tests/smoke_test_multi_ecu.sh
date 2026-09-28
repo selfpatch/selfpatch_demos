@@ -214,6 +214,51 @@ assert_script_params() {
     done <<< "$writes"
 }
 
+# A valid value other than the launch value: a bool flips, a double moves by
+# 0.001, an integer by 1. Small steps keep drift and failure effects far from
+# the nodes' fault thresholds.
+away_value() {
+    case "$1" in
+        true) echo false ;;
+        false) echo true ;;
+        *[.eE]*) jq -n --argjson v "$1" '($v + 0.001) * 1000000 | round / 1000000' ;;
+        *) echo $(($1 + 1)) ;;
+    esac
+}
+
+# Moves every parameter a script writes away from its launch value through the
+# gateway, so a later check at the launch value proves the script wrote it.
+# A parameter already away from its launch value, such as an injected one,
+# keeps its value.
+move_params_away() {
+    local ecu="$1" script="$2" writes app param value launch away code
+    writes=$(script_writes "$ecu" "$script") || writes=""
+    while read -r app param value; do
+        [ -n "$app" ] || continue
+        launch=$(launch_value "$ecu" "$app" "$param")
+        if [ -z "$launch" ]; then
+            fail "before ${script} on ${ecu}: ${app}/${param} is away from its launch value" "no launch value found"
+            continue
+        fi
+        if api_get "/apps/${app}/configurations/${param}" \
+            && echo "$RESPONSE" | jq -e --argjson l "$launch" '.data != $l' > /dev/null 2>&1; then
+            pass "before ${script} on ${ecu}: ${app}/${param} is $(echo "$RESPONSE" | jq -c '.data'), \
+not its launch value ${launch}"
+            continue
+        fi
+        away=$(away_value "$launch")
+        code=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X PUT "${API_BASE}/apps/${app}/configurations/${param}" \
+            -H "Content-Type: application/json" -d "{\"value\": ${away}}") || true
+        if [[ "$code" == 2?? ]] && api_get "/apps/${app}/configurations/${param}" \
+            && echo "$RESPONSE" | jq -e --argjson a "$away" '.data == $a' > /dev/null 2>&1; then
+            pass "before ${script} on ${ecu}: ${app}/${param} is ${away}, not its launch value ${launch}"
+        else
+            fail "before ${script} on ${ecu}: ${app}/${param} is ${away}, not its launch value ${launch}" \
+                "PUT returned HTTP ${code}, read back: $(echo "$RESPONSE" | jq -c '.data // .' 2>/dev/null)"
+        fi
+    done <<< "$writes"
+}
+
 listed_scripts=$(cd "$CONTAINER_SCRIPTS" && find . -name script.bash | sed -e 's:^\./::' -e 's:/script\.bash$::' \
     | sort | tr '\n' ' ')
 exercised_scripts=$(echo "$EXERCISED_SCRIPTS" | tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ')
@@ -236,6 +281,47 @@ for script_file in "${CONTAINER_SCRIPTS}"/*/*/script.bash; do
     else
         fail "${script_name} writes parameters only through put_config calls" \
             "top-level put_config: ${read_calls}, all put_config calls: ${all_calls}, configuration URLs: ${config_urls}"
+    fi
+done
+
+# Lines of a script from the line equal to $2 to the next line equal to $3.
+script_block() {
+    awk -v first="$2" -v last="$3" '$0 == first { on = 1 } on { print } on && $0 == last { exit }' "$1"
+}
+
+# The write-failure test below runs one script. Every other script must carry
+# the same put_config and exit check, and must make all its writes before that
+# check.
+REFERENCE_SCRIPT="actuation-ecu/restore-normal"
+PUT_CONFIG_FIRST='put_config() {'
+EXIT_CHECK_FIRST="if [ \"\$ERRORS\" -gt 0 ]; then"
+ref_put=$(script_block "${CONTAINER_SCRIPTS}/${REFERENCE_SCRIPT}/script.bash" "$PUT_CONFIG_FIRST" "}")
+ref_exit=$(script_block "${CONTAINER_SCRIPTS}/${REFERENCE_SCRIPT}/script.bash" "$EXIT_CHECK_FIRST" "fi")
+for script_file in "${CONTAINER_SCRIPTS}"/*/*/script.bash; do
+    script_name="${script_file#"${CONTAINER_SCRIPTS}"/}"
+    script_name="${script_name%/script.bash}"
+    put_block=$(script_block "$script_file" "$PUT_CONFIG_FIRST" "}")
+    exit_block=$(script_block "$script_file" "$EXIT_CHECK_FIRST" "fi")
+    if [ -n "$ref_put" ] && [ "$put_block" = "$ref_put" ]; then
+        pass "${script_name} put_config is the same as in ${REFERENCE_SCRIPT}"
+    else
+        fail "${script_name} put_config is the same as in ${REFERENCE_SCRIPT}" \
+            "$(diff <(echo "$ref_put") <(echo "$put_block") | head -6)"
+    fi
+    if [ -n "$ref_exit" ] && [ "$exit_block" = "$ref_exit" ]; then
+        pass "${script_name} exit check is the same as in ${REFERENCE_SCRIPT}"
+    else
+        fail "${script_name} exit check is the same as in ${REFERENCE_SCRIPT}" \
+            "$(diff <(echo "$ref_exit") <(echo "$exit_block") | head -6)"
+    fi
+    error_inits=$(grep -c '^ERRORS=0$' "$script_file" || true)
+    last_write=$(grep -n '^put_config ' "$script_file" | tail -1 | cut -d: -f1)
+    exit_line=$(grep -n -F -x "$EXIT_CHECK_FIRST" "$script_file" | head -1 | cut -d: -f1)
+    if [ "$error_inits" -eq 1 ] && [ -n "$last_write" ] && [ -n "$exit_line" ] && [ "$last_write" -lt "$exit_line" ]; then
+        pass "${script_name} makes every write before its exit check"
+    else
+        fail "${script_name} makes every write before its exit check" \
+            "ERRORS=0 lines: ${error_inits}, last put_config line: ${last_write:-none}, exit check line: ${exit_line:-none}"
     fi
 done
 
@@ -311,6 +397,7 @@ path_period() {
 # Perception ECU
 assert_script_execution "perception-ecu" "inject-sensor-failure"
 assert_script_params "perception-ecu" "inject-sensor-failure" written
+move_params_away "perception-ecu" "restore-normal"
 assert_script_execution "perception-ecu" "restore-normal"
 assert_script_params "perception-ecu" "restore-normal" launch
 
@@ -336,18 +423,21 @@ else
         "period: ${period:-no second path within 20s}"
 fi
 
+move_params_away "planning-ecu" "restore-normal"
+
 # The planning cycle is still waiting out the delay here, and restore-normal
-# must not wait with it.
-RESTORE_BOUND_SEC=15
-restore_start=$SECONDS
-exec_json=$(run_script "planning-ecu" "restore-normal" "$RESTORE_BOUND_SEC") || exec_json=""
+# must not wait with it. Timed from before the POST until the completed status
+# is read; the wait runs past the bound so a slow restore reports its time.
+RESTORE_BOUND_MS=15000
+restore_start_ns=$(date +%s%N)
+exec_json=$(run_script "planning-ecu" "restore-normal" $((RESTORE_BOUND_MS * 4 / 1000))) || exec_json=""
+restore_ms=$((($(date +%s%N) - restore_start_ns) / 1000000))
 restore_status=$(echo "$exec_json" | jq -r '.status // empty' 2>/dev/null) || restore_status=""
-if [ "$restore_status" = "completed" ]; then
-    pass "planning restore-normal after inject-planning-delay completes within ${RESTORE_BOUND_SEC}s \
-($((SECONDS - restore_start))s)"
+if [ "$restore_status" = "completed" ] && [ "$restore_ms" -le "$RESTORE_BOUND_MS" ]; then
+    pass "planning restore-normal after inject-planning-delay completes within ${RESTORE_BOUND_MS} ms (${restore_ms} ms)"
 else
-    fail "planning restore-normal after inject-planning-delay completes within ${RESTORE_BOUND_SEC}s" \
-        "status after $((SECONDS - restore_start))s: ${restore_status:-still running} $(echo "$exec_json" \
+    fail "planning restore-normal after inject-planning-delay completes within ${RESTORE_BOUND_MS} ms" \
+        "status ${restore_status:-still running} after ${restore_ms} ms $(echo "$exec_json" \
         | jq -c '.error // empty' 2>/dev/null)"
 fi
 assert_script_params "planning-ecu" "restore-normal" launch
@@ -362,6 +452,7 @@ fi
 # Actuation ECU
 assert_script_execution "actuation-ecu" "inject-gripper-jam"
 assert_script_params "actuation-ecu" "inject-gripper-jam" written
+move_params_away "actuation-ecu" "restore-normal"
 assert_script_execution "actuation-ecu" "restore-normal"
 assert_script_params "actuation-ecu" "restore-normal" launch
 
@@ -389,21 +480,25 @@ else
     fail "PATH_PLANNER fault is reported after inject-cascade-failure.sh" "not reported within 30s"
 fi
 
+move_params_away "perception-ecu" "restore-normal"
+move_params_away "planning-ecu" "restore-normal"
+move_params_away "actuation-ecu" "restore-normal"
+
 # restore-normal.sh waits up to 120s for each ECU; with the delay injected it
 # must still finish far inside that.
-HOST_RESTORE_BOUND_SEC=30
-host_start=$SECONDS
+HOST_RESTORE_BOUND_MS=30000
+host_start_ns=$(date +%s%N)
 if host_out=$(GATEWAY_URL="$GATEWAY_URL" "${DEMO_DIR}/restore-normal.sh" 2>&1); then
     host_rc=0
 else
     host_rc=$?
 fi
-host_took=$((SECONDS - host_start))
-if [ "$host_rc" -eq 0 ] && [ "$host_took" -le "$HOST_RESTORE_BOUND_SEC" ]; then
-    pass "restore-normal.sh exits 0 within ${HOST_RESTORE_BOUND_SEC}s with a planning delay injected (${host_took}s)"
+host_ms=$((($(date +%s%N) - host_start_ns) / 1000000))
+if [ "$host_rc" -eq 0 ] && [ "$host_ms" -le "$HOST_RESTORE_BOUND_MS" ]; then
+    pass "restore-normal.sh exits 0 within ${HOST_RESTORE_BOUND_MS} ms with a planning delay injected (${host_ms} ms)"
 else
-    fail "restore-normal.sh exits 0 within ${HOST_RESTORE_BOUND_SEC}s with a planning delay injected" \
-        "exit ${host_rc} after ${host_took}s: $(echo "$host_out" | tail -5)"
+    fail "restore-normal.sh exits 0 within ${HOST_RESTORE_BOUND_MS} ms with a planning delay injected" \
+        "exit ${host_rc} after ${host_ms} ms: $(echo "$host_out" | tail -5)"
 fi
 assert_script_params "perception-ecu" "restore-normal" launch
 assert_script_params "planning-ecu" "restore-normal" launch
@@ -420,6 +515,7 @@ section "Parameter Write Failure Reporting"
 # A lock on gripper-controller's configurations held by another client makes
 # the gateway refuse those writes from the script, while the other actuation
 # writes still land.
+move_params_away "actuation-ecu" "restore-normal"
 LOCK_CLIENT="smoke-test-write-failure"
 lock_id=$(curl -s -m 30 -X POST "${API_BASE}/apps/gripper-controller/locks" \
     -H "X-Client-Id: ${LOCK_CLIENT}" -H "Content-Type: application/json" \
@@ -440,15 +536,31 @@ if exec_json=$(run_script "actuation-ecu" "restore-normal" 60); then
     fi
     while read -r app param value; do
         if [ "$app" = "gripper-controller" ]; then
+            if api_get "/apps/${app}/configurations/${param}" \
+                && echo "$RESPONSE" | jq -e --argjson v "$value" '.data != $v' > /dev/null 2>&1; then
+                pass "refused write ${app}/${param} did not change the parameter"
+            else
+                fail "refused write ${app}/${param} did not change the parameter" \
+                    "read back: $(echo "$RESPONSE" | jq -c '.data // .' 2>/dev/null)"
+            fi
             if echo "$exec_message" | grep -qF "FAIL: ${app}/${param}"; then
                 pass "failure message names the refused write ${app}/${param}"
             else
                 fail "failure message names the refused write ${app}/${param}" "message: ${exec_message}"
             fi
-        elif echo "$exec_message" | grep -qF "FAIL: ${app}/${param}"; then
-            fail "failure message does not name ${app}/${param}, which succeeded" "message: ${exec_message}"
         else
-            pass "failure message does not name ${app}/${param}, which succeeded"
+            if api_get "/apps/${app}/configurations/${param}" \
+                && echo "$RESPONSE" | jq -e --argjson v "$value" '.data == $v' > /dev/null 2>&1; then
+                pass "write ${app}/${param} landed while gripper-controller was locked"
+            else
+                fail "write ${app}/${param} landed while gripper-controller was locked" \
+                    "read back: $(echo "$RESPONSE" | jq -c '.data // .' 2>/dev/null)"
+            fi
+            if echo "$exec_message" | grep -qF "FAIL: ${app}/${param}"; then
+                fail "failure message does not name ${app}/${param}, which succeeded" "message: ${exec_message}"
+            else
+                pass "failure message does not name ${app}/${param}, which succeeded"
+            fi
         fi
     done <<< "$(script_writes "actuation-ecu" "restore-normal")"
 else
@@ -466,8 +578,14 @@ if [ -n "$lock_id" ]; then
 fi
 
 # Leave the demo restored.
+move_params_away "actuation-ecu" "restore-normal"
 assert_script_execution "actuation-ecu" "restore-normal"
 assert_script_params "actuation-ecu" "restore-normal" launch
+if poll_until "/faults" '.items | length == 0' 15; then
+    pass "no faults remain at the end of the test"
+else
+    fail "no faults remain at the end of the test" "found: $(echo "$RESPONSE" | jq -c '.items')"
+fi
 
 # --- Summary ---
 
