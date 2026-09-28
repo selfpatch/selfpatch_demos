@@ -206,8 +206,8 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ### How It Works
 
-1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/diagnostic_bridge/triggers`:
-   - **Resource:** `/api/v1/apps/diagnostic_bridge/faults` (watches fault collection)
+1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/diagnostic-bridge/triggers`:
+   - **Resource:** `/api/v1/apps/diagnostic-bridge/faults` (watches fault collection)
    - **Condition:** `OnChange` (fires on any new or updated fault)
    - **Multishot:** `true` (fires repeatedly, not just once)
    - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
@@ -218,23 +218,23 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ```bash
 # Create a trigger
-curl -X POST http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers \
+curl -X POST http://localhost:8080/api/v1/apps/diagnostic-bridge/triggers \
   -H "Content-Type: application/json" \
   -d '{
-    "resource": "/api/v1/apps/diagnostic_bridge/faults",
+    "resource": "/api/v1/apps/diagnostic-bridge/faults",
     "trigger_condition": {"condition_type": "OnChange"},
     "multishot": true,
     "lifetime": 3600
   }' | jq
 
 # List triggers
-curl http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers | jq
+curl http://localhost:8080/api/v1/apps/diagnostic-bridge/triggers | jq
 
 # Watch events (replace TRIGGER_ID)
-curl -N http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers/TRIGGER_ID/events
+curl -N http://localhost:8080/api/v1/apps/diagnostic-bridge/triggers/TRIGGER_ID/events
 
 # Delete a trigger
-curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers/TRIGGER_ID
+curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic-bridge/triggers/TRIGGER_ID
 ```
 
 ## API Examples
@@ -242,14 +242,14 @@ curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic_bridge/triggers/TRIG
 ### Read Sensor Data
 
 ```bash
-# Get LiDAR scan
-curl http://localhost:8080/api/v1/apps/lidar-sim/data/scan | jq '.ranges[:5]'
+# Get LiDAR scan (topic id is /sensors/scan, percent-encoded in the URL)
+curl http://localhost:8080/api/v1/apps/lidar-sim/data/sensors%2Fscan | jq '.data.ranges[:5]'
 
-# Get IMU data
-curl http://localhost:8080/api/v1/apps/imu-sim/data/imu | jq '.linear_acceleration'
+# Get IMU data (topic id is /sensors/imu)
+curl http://localhost:8080/api/v1/apps/imu-sim/data/sensors%2Fimu | jq '.data.linear_acceleration'
 
-# Get GPS fix
-curl http://localhost:8080/api/v1/apps/gps-sim/data/fix | jq '{lat: .latitude, lon: .longitude}'
+# Get GPS fix (topic id is /sensors/fix)
+curl http://localhost:8080/api/v1/apps/gps-sim/data/sensors%2Ffix | jq '{lat: .data.latitude, lon: .data.longitude}'
 ```
 
 ### View Configurations

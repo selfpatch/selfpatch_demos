@@ -133,6 +133,53 @@ else
     fail "GET fault detail returns 200" "unexpected status code"
 fi
 
+section "Check-Demo Script"
+
+# The rosbag recording finalizes duration_after_sec after confirmation, so
+# poll for it rather than racing check-demo.sh against the write.
+echo "  Waiting for rosbag recording to finish (max 15s)..."
+if poll_until "/apps/diagnostic-bridge/bulk-data/rosbags" '.items | length > 0' 15; then
+    pass "rosbag recording available before running check-demo.sh"
+else
+    fail "rosbag recording available before running check-demo.sh" "no rosbag after 15s"
+fi
+
+# check-demo.sh is the interactive tour a user runs by hand. Run it live
+# against the gateway while the LIDAR_SIM fault above is still active, and
+# check that every field it labels carries a real value, not a stale/wrong
+# resource path resolving to null.
+CHECK_DEMO_SCRIPT="${SCRIPT_DIR}/../demos/sensor_diagnostics/check-demo.sh"
+CHECK_DEMO_OUTPUT=$(GATEWAY_URL="$GATEWAY_URL" bash "$CHECK_DEMO_SCRIPT" 2>&1) || true
+# shellcheck disable=SC2001
+CHECK_DEMO_PLAIN=$(sed 's/\x1b\[[0-9;]*m//g' <<< "$CHECK_DEMO_OUTPUT")
+
+if grep -q ': null' <<< "$CHECK_DEMO_PLAIN"; then
+    fail "check-demo.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_DEMO_PLAIN" | head -10)"
+else
+    pass "check-demo.sh prints no null fields"
+fi
+
+if grep -q "10\. Fault Detail with Environment Data" <<< "$CHECK_DEMO_PLAIN"; then
+    pass "check-demo.sh runs the fault detail section for the active fault"
+else
+    fail "check-demo.sh runs the fault detail section for the active fault" \
+         "section 10 did not run: the owning App was not resolved"
+fi
+
+if grep -q '"snapshot_count": 0' <<< "$CHECK_DEMO_PLAIN"; then
+    fail "check-demo.sh fault detail shows real snapshot data" "snapshot_count is 0"
+elif grep -q '"snapshot_count":' <<< "$CHECK_DEMO_PLAIN"; then
+    pass "check-demo.sh fault detail shows real snapshot data"
+else
+    fail "check-demo.sh fault detail shows real snapshot data" "snapshot_count field missing"
+fi
+
+if grep -q '"id": "fault_LIDAR_SIM' <<< "$CHECK_DEMO_PLAIN"; then
+    pass "check-demo.sh bulk-data section lists a real rosbag recording"
+else
+    fail "check-demo.sh bulk-data section lists a real rosbag recording" "no fault_LIDAR_SIM rosbag id found"
+fi
+
 # Cleanup: restore config + delete fault
 echo "  Cleaning up: restoring config and clearing fault..."
 curl -s -X PUT "${API_BASE}/apps/lidar-sim/configurations/noise_stddev" \

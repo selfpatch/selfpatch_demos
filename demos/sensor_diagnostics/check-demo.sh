@@ -52,40 +52,45 @@ echo_step "2. Listing All Areas (Namespaces)"
 curl -s "${API_BASE}/areas" | jq '.items[] | {id: .id, name: .name, description: .description}'
 
 echo_step "3. Listing All Components"
-curl -s "${API_BASE}/components" | jq '.items[] | {id: .id, name: .name, area: .area}'
+curl -s "${API_BASE}/components" | jq '.items[] | {id: .id, name: .name, description: .description}'
 
 echo_step "4. Listing All Apps (ROS 2 Nodes)"
-curl -s "${API_BASE}/apps" | jq '.items[] | {id: .id, name: .name, namespace: .namespace}'
+curl -s "${API_BASE}/apps" | jq '.items[] | {id: .id, name: .name, component: .["x-medkit"].component_id}'
 
 echo_step "5. Reading LiDAR Data"
 echo "Getting latest scan from LiDAR simulator..."
-curl -s "${API_BASE}/apps/lidar-sim/data/scan" | jq '{
-  angle_min: .angle_min,
-  angle_max: .angle_max,
-  range_min: .range_min,
-  range_max: .range_max,
-  sample_ranges: .ranges[:5]
+curl -s "${API_BASE}/apps/lidar-sim/data/sensors%2Fscan" | jq '{
+  angle_min: .data.angle_min,
+  angle_max: .data.angle_max,
+  range_min: .data.range_min,
+  range_max: .data.range_max,
+  sample_ranges: .data.ranges[:5]
 }'
 
 echo_step "6. Reading IMU Data"
 echo "Getting latest IMU reading..."
-curl -s "${API_BASE}/apps/imu-sim/data/imu" | jq '{
-  linear_acceleration: .linear_acceleration,
-  angular_velocity: .angular_velocity
+curl -s "${API_BASE}/apps/imu-sim/data/sensors%2Fimu" | jq '{
+  linear_acceleration: .data.linear_acceleration,
+  angular_velocity: .data.angular_velocity
 }'
 
 echo_step "7. Reading GPS Fix"
 echo "Getting current GPS position..."
-curl -s "${API_BASE}/apps/gps-sim/data/fix" | jq '{
-  latitude: .latitude,
-  longitude: .longitude,
-  altitude: .altitude,
-  status: .status
+curl -s "${API_BASE}/apps/gps-sim/data/sensors%2Ffix" | jq '{
+  latitude: .data.latitude,
+  longitude: .data.longitude,
+  altitude: .data.altitude,
+  status: .data.status
 }'
 
 echo_step "8. Listing LiDAR Configurations"
 echo "These parameters can be modified at runtime to inject faults..."
-curl -s "${API_BASE}/apps/lidar-sim/configurations" | jq '.items[] | {name: .name, value: .value, type: .type}'
+# The list endpoint carries id/name/type only; the value is on each parameter's
+# own detail endpoint.
+LIDAR_CONFIG_IDS=$(curl -s "${API_BASE}/apps/lidar-sim/configurations" | jq -r '.items[].id')
+while IFS= read -r cfg_id; do
+    curl -s "${API_BASE}/apps/lidar-sim/configurations/${cfg_id}" | jq '{name: .id, value: .data, type: "parameter"}'
+done <<< "$LIDAR_CONFIG_IDS"
 
 echo_step "9. Checking Current Faults"
 FAULTS_JSON=$(curl -s "${API_BASE}/faults")
@@ -94,28 +99,22 @@ echo "$FAULTS_JSON" | jq '.'
 # If there are faults, demonstrate snapshot / bulk-data endpoints
 FAULT_COUNT=$(echo "$FAULTS_JSON" | jq '.items | length')
 if [ "$FAULT_COUNT" -gt 0 ]; then
-    # Find the first fault that has both a non-null entity_id and code
-    FIRST_FAULT_ENTRY=$(echo "$FAULTS_JSON" | jq -r '.items[] | select(.entity_id != null and .code != null) | "\(.entity_type) \(.entity_id) \(.code)"' | head -n 1)
+    # The fault collection carries fault_code and reporting_sources (ROS node
+    # paths), not an entity id. Resolve the owning App by matching the first
+    # reporting source against each App's ROS node.
+    FIRST_FAULT=$(echo "$FAULTS_JSON" | jq -r '.items[0].fault_code')
+    REPORTING_SOURCE=$(echo "$FAULTS_JSON" | jq -r '.items[0].reporting_sources[0] // empty')
+    FIRST_ENTITY=$(curl -s "${API_BASE}/apps" | jq -r --arg node "$REPORTING_SOURCE" \
+        '.items[] | select(.["x-medkit"].ros2.node == $node) | .id' | head -n 1)
 
-    if [ -z "$FIRST_FAULT_ENTRY" ]; then
+    if [ -z "$FIRST_ENTITY" ]; then
         echo ""
-        echo "   Faults exist but none provide both 'entity_id' and 'code'."
+        echo "   Could not map fault ${FIRST_FAULT} to a reporting App (source: ${REPORTING_SOURCE:-none})."
         echo "   Skipping snapshot and bulk-data demonstration."
     else
-        FIRST_ENTITY_TYPE=$(echo "$FIRST_FAULT_ENTRY" | awk '{print $1}')
-        FIRST_ENTITY=$(echo "$FIRST_FAULT_ENTRY" | awk '{print $2}')
-        FIRST_FAULT=$(echo "$FIRST_FAULT_ENTRY" | awk '{print $3}')
-        # Map entity_type to plural resource path (e.g., "app" -> "apps")
-        case "$FIRST_ENTITY_TYPE" in
-            app|apps) ENTITY_PATH="apps" ;;
-            component|components) ENTITY_PATH="components" ;;
-            area|areas) ENTITY_PATH="areas" ;;
-            *) ENTITY_PATH="apps" ;;
-        esac
-
         echo_step "10. Fault Detail with Environment Data (Snapshots)"
-        echo "Fetching fault ${FIRST_FAULT} on ${ENTITY_PATH}/${FIRST_ENTITY}..."
-        curl -s "${API_BASE}/${ENTITY_PATH}/${FIRST_ENTITY}/faults/${FIRST_FAULT}" | jq '{
+        echo "Fetching fault ${FIRST_FAULT} on apps/${FIRST_ENTITY}..."
+        curl -s "${API_BASE}/apps/${FIRST_ENTITY}/faults/${FIRST_FAULT}" | jq '{
           code: .item.code,
           status: .item.status,
           environment_data: {
@@ -126,11 +125,11 @@ if [ "$FAULT_COUNT" -gt 0 ]; then
 
         echo_step "11. Bulk-Data Categories (Rosbag Recordings)"
         echo "Checking available bulk-data categories..."
-        curl -s "${API_BASE}/${ENTITY_PATH}/${FIRST_ENTITY}/bulk-data" | jq '.'
+        curl -s "${API_BASE}/apps/${FIRST_ENTITY}/bulk-data" | jq '.'
 
         echo_step "12. Bulk-Data Descriptors (Rosbag Files)"
         echo "Listing available rosbag recordings..."
-        curl -s "${API_BASE}/${ENTITY_PATH}/${FIRST_ENTITY}/bulk-data/rosbags" | jq '.items[] | {
+        curl -s "${API_BASE}/apps/${FIRST_ENTITY}/bulk-data/rosbags" | jq '.items[] | {
           id: .id,
           name: .name,
           size: .size,
@@ -155,9 +154,9 @@ echo "   ./inject-drift.sh        # Inject sensor drift"
 echo "   ./restore-normal.sh      # Restore normal operation"
 echo ""
 echo "📸 After injecting a fault, check snapshots and rosbags:"
-echo "   curl ${API_BASE}/faults | jq                                    # List faults"
-echo "   curl ${API_BASE}/components/lidar-unit/faults/<CODE> | jq       # Fault detail + snapshots"
-echo "   curl ${API_BASE}/components/lidar-unit/bulk-data/rosbags | jq   # List rosbag recordings"
+echo "   curl ${API_BASE}/faults | jq                                      # List faults"
+echo "   curl ${API_BASE}/apps/diagnostic-bridge/faults/<CODE> | jq        # Fault detail + snapshots"
+echo "   curl ${API_BASE}/apps/diagnostic-bridge/bulk-data/rosbags | jq    # List rosbag recordings"
 echo ""
 echo "🌐 Web UI: http://localhost:3000"
 echo "🌐 REST API: http://localhost:8080/api/v1/"
