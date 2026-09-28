@@ -22,6 +22,7 @@ DEMO_DIR="$(cd "${SCRIPT_DIR}/../demos/moveit_pick_place" && pwd)"
 DEMO_CONTAINER="${MOVEIT_DEMO_CONTAINER:-moveit_medkit_demo_ci}"
 ACTION="/panda_arm_controller/follow_joint_trajectory"
 PICK_PLACE_PATTERN='^python3 /root/demo_ws/install/moveit_medkit_demo/lib/moveit_medkit_demo/pick_place_loop\.py'
+FAULT_MANAGER_PATTERN='^/root/demo_ws/install/ros2_medkit_fault_manager/lib/ros2_medkit_fault_manager/fault_manager_node '
 
 # container_python <args...>: run the Python script on stdin inside the demo
 # container, with the ROS 2 environment sourced. The process is killed after
@@ -185,6 +186,22 @@ resume_pick_place_loop() {
     " > /dev/null 2>&1 || true
 }
 
+# SIGSTOP on the fault manager makes the gateway's ListFaults call time out,
+# so GET /faults answers 503 as it does before the fault manager is up.
+stop_fault_manager() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        pid=\$(pgrep -f '${FAULT_MANAGER_PATTERN}') || exit 1
+        kill -STOP \"\${pid}\"
+    " > /dev/null 2>&1
+}
+
+resume_fault_manager() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        pid=\$(pgrep -f '${FAULT_MANAGER_PATTERN}') || exit 0
+        kill -CONT \"\${pid}\"
+    " > /dev/null 2>&1 || true
+}
+
 # start_preemptor <log>: start the preempt probe in the background and return
 # once it listens. Sets PREEMPTOR_PID.
 start_preemptor() {
@@ -290,6 +307,7 @@ cleanup_on_exit() {
     local rc=$?
     set +e
     resume_pick_place_loop
+    resume_fault_manager
     (exit "${rc}")
     print_summary
 }
@@ -488,6 +506,26 @@ while IFS= read -r code; do
     fi
 done <<< "${FAULT_CODES}"
 
+section "check-faults.sh: lists the active faults"
+
+CHECK_FAULTS_LOG=/tmp/moveit_smoke_check_faults.log
+if GATEWAY_URL="${GATEWAY_URL}" timeout 120 "${DEMO_DIR}/check-faults.sh" < /dev/null > "${CHECK_FAULTS_LOG}" 2>&1; then
+    CHECK_FAULTS_RC=0
+else
+    CHECK_FAULTS_RC=$?
+fi
+API_FAULTS_NOW=$(curl -s -m 30 "${API_BASE}/faults")
+API_FAULT_CODES=$(jq -r '.items[].fault_code' <<< "${API_FAULTS_NOW}" | sort) || API_FAULT_CODES=""
+SHOWN_FAULT_CODES=$(sed -nE 's/^ *"code": "([^"]+)",?$/\1/p' "${CHECK_FAULTS_LOG}" | sort)
+API_FAULT_TOTAL=$(jq '.items | length' <<< "${API_FAULTS_NOW}") || API_FAULT_TOTAL=0
+if [ "${CHECK_FAULTS_RC}" -eq 0 ] && [ -n "${API_FAULT_CODES}" ] && [ "${SHOWN_FAULT_CODES}" = "${API_FAULT_CODES}" ] \
+    && grep -qFx "   Total active faults: ${API_FAULT_TOTAL}" "${CHECK_FAULTS_LOG}"; then
+    pass "check-faults.sh exits 0 and lists the ${API_FAULT_TOTAL} faults the API lists"
+else
+    fail "check-faults.sh exits 0 and lists the faults the API lists" \
+        "rc=${CHECK_FAULTS_RC}; api=$(tr '\n' ' ' <<< "${API_FAULT_CODES}") shown=$(tr '\n' ' ' <<< "${SHOWN_FAULT_CODES}"); tail: $(tail -n 3 "${CHECK_FAULTS_LOG}" | tr '\n' ';')"
+fi
+
 section "move-arm.sh: a local ros2 that cannot reach the demo still moves the arm"
 
 # CI runners (and this dev container) have no ROS 2 wired to the demo's
@@ -684,6 +722,37 @@ if [ "${DEMO_FAILED_STEPS}" -gt 0 ]; then
     fi
 else
     fail "setup: a demo step really failed" "no step reached a non-SUCCEEDED final status"
+fi
+
+section "check-faults.sh: a failed fault read is not reported as no faults"
+
+FAILED_READ_LOG=/tmp/moveit_smoke_check_faults_503.log
+if stop_fault_manager; then
+    if api_get "/faults" 503; then
+        pass "setup: GET /faults answers 503 while the fault manager is stopped"
+    else
+        fail "setup: GET /faults answers 503 while the fault manager is stopped" "got: $(head -c 200 <<< "${RESPONSE}")"
+    fi
+    if GATEWAY_URL="${GATEWAY_URL}" timeout 120 "${DEMO_DIR}/check-faults.sh" < /dev/null > "${FAILED_READ_LOG}" 2>&1; then
+        FAILED_READ_RC=0
+    else
+        FAILED_READ_RC=$?
+    fi
+    resume_fault_manager
+    if [ "${FAILED_READ_RC}" -ne 0 ] && grep -q 'Could not read faults (HTTP 503)' "${FAILED_READ_LOG}" \
+        && ! grep -qE 'No active faults|Total active faults' "${FAILED_READ_LOG}"; then
+        pass "check-faults.sh exits non-zero on HTTP 503 and does not claim a fault count"
+    else
+        fail "check-faults.sh exits non-zero on HTTP 503 and does not claim a fault count" \
+            "rc=${FAILED_READ_RC}; output: $(grep -vE '^ *$' "${FAILED_READ_LOG}" | tail -n 6 | tr '\n' ';')"
+    fi
+    if poll_until "/faults" '.items | arrays' 30; then
+        pass "setup: GET /faults answers again after the fault manager resumes"
+    else
+        fail "setup: GET /faults answers again after the fault manager resumes" "still failing after 30 s"
+    fi
+else
+    fail "setup: fault manager stopped" "no fault_manager_node process in ${DEMO_CONTAINER}"
 fi
 
 # --- Summary ---

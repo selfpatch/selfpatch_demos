@@ -222,6 +222,10 @@ curl http://localhost:8080/api/v1/apps/move-group/operations | jq
 curl http://localhost:8080/api/v1/faults | jq
 ```
 
+While the fault manager is not available (for example right after startup), `GET /faults`
+answers `503`. `./check-faults.sh` then prints `Could not read faults (HTTP 503)` and exits
+non-zero; it reports "No active faults" only after a successful read of an empty list.
+
 ### Clear All Faults
 
 ```bash
