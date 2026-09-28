@@ -400,11 +400,11 @@ GATEWAY_URL=http://192.168.1.10:8080 ./inject-nav-failure.sh
 | `reset-navigation` | Cancel goals and reset AMCL |
 | `inject-localization-failure` | Inject AMCL localization failure |
 | `inject-nav-failure` | Inject navigation failure (unreachable goal) |
-| `restore-normal` | Reset parameters and clear faults |
+| `restore-normal` | Cancel goals, reset parameters, re-localize AMCL and clear faults |
 
 ## Triggers (Condition-Based Alerts)
 
-The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on any new or updated faults reported by the anomaly detector (including navigation failures).
+The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on any new or updated faults reported by the anomaly detector, such as localization uncertainty.
 
 ### Setup
 
@@ -419,13 +419,13 @@ The gateway supports condition-based triggers that fire when specific events occ
 ./watch-triggers.sh
 
 # Terminal 2: Inject a fault - the trigger fires in Terminal 3!
-./inject-nav-failure.sh
+./inject-localization-failure.sh
 ```
 
 ### How It Works
 
-1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/anomaly_detector/triggers`:
-   - **Resource:** `/api/v1/apps/anomaly_detector/faults` (watches fault collection)
+1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/anomaly-detector/triggers`:
+   - **Resource:** `/api/v1/apps/anomaly-detector/faults` (watches fault collection)
    - **Condition:** `OnChange` (fires on any new or updated fault)
    - **Multishot:** `true` (fires repeatedly, not just once)
    - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
@@ -436,23 +436,23 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ```bash
 # Create a trigger
-curl -X POST http://localhost:8080/api/v1/apps/anomaly_detector/triggers \
+curl -X POST http://localhost:8080/api/v1/apps/anomaly-detector/triggers \
   -H "Content-Type: application/json" \
   -d '{
-    "resource": "/api/v1/apps/anomaly_detector/faults",
+    "resource": "/api/v1/apps/anomaly-detector/faults",
     "trigger_condition": {"condition_type": "OnChange"},
     "multishot": true,
     "lifetime": 3600
   }' | jq
 
 # List triggers
-curl http://localhost:8080/api/v1/apps/anomaly_detector/triggers | jq
+curl http://localhost:8080/api/v1/apps/anomaly-detector/triggers | jq
 
 # Watch events (replace TRIGGER_ID)
-curl -N http://localhost:8080/api/v1/apps/anomaly_detector/triggers/TRIGGER_ID/events
+curl -N http://localhost:8080/api/v1/apps/anomaly-detector/triggers/TRIGGER_ID/events
 
 # Delete a trigger
-curl -X DELETE http://localhost:8080/api/v1/apps/anomaly_detector/triggers/TRIGGER_ID
+curl -X DELETE http://localhost:8080/api/v1/apps/anomaly-detector/triggers/TRIGGER_ID
 ```
 
 ## Fault Injection Scenarios
@@ -466,7 +466,7 @@ Faults are detected by `anomaly_detector` and reported directly to FaultManager.
 |--------|-----------|-------------|-----------------|
 | `inject-nav-failure.sh` | Navigation | Send goal to unreachable location | `NAVIGATION_GOAL_ABORTED` |
 | `inject-localization-failure.sh` | Localization | Reset AMCL with high uncertainty | `LOCALIZATION_UNCERTAINTY` |
-| `restore-normal.sh` | Recovery | Restore defaults and clear faults | - |
+| `restore-normal.sh` | Recovery | Restore defaults, re-localize AMCL and clear faults | - |
 
 ### Fault Injection Examples
 
@@ -493,9 +493,14 @@ curl http://localhost:8080/api/v1/faults | jq
 #### Restore Normal Operation
 
 ```bash
-# Clear all faults and restore default parameters
+# Cancel goals, restore default parameters, re-localize AMCL and clear all faults
 ./restore-normal.sh
 ```
+
+`restore-normal.sh` also recovers from `inject-localization-failure.sh`: it reads the
+robot's pose from the running Gazebo simulation and sets it on AMCL through
+`POST /api/v1/apps/amcl/operations/set_initial_pose/executions`, so the robot need not be
+at its spawn point.
 
 ### Fault Monitoring via API
 
@@ -597,7 +602,7 @@ demos/turtlebot3_integration/
 | `reset-navigation.sh` | Cancel goals and reset AMCL |
 | `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |
 | `inject-localization-failure.sh` | Inject localization failure (AMCL reset) |
-| `restore-normal.sh` | Restore normal operation and clear faults |
+| `restore-normal.sh` | Restore normal operation, re-localize AMCL and clear faults |
 | `setup-triggers.sh` | Create OnChange fault trigger |
 | `watch-triggers.sh` | Watch trigger events via SSE stream |
 

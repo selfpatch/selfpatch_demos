@@ -1,5 +1,5 @@
 {
   "name": "Restore Normal Operation",
-  "description": "Cancel active navigation goals, restore velocity parameters to defaults, and clear all faults",
+  "description": "Cancel active navigation goals, restore velocity parameters to defaults, re-localize AMCL at the robot's pose in the simulation, and clear all faults",
   "format": "bash"
 }
