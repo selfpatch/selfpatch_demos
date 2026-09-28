@@ -40,13 +40,13 @@ echo_step "1. Areas (Functional Groupings)"
 curl -s "${API_BASE}/areas" | jq '.items[] | {id: .id, name: .name, description: .description}'
 
 echo_step "2. Components (Hardware/Logical Units)"
-curl -s "${API_BASE}/components" | jq '.items[] | {id: .id, name: .name, type: .type, area: .area}'
+curl -s "${API_BASE}/components" | jq '.items[] | {id: .id, name: .name, description: .description}'
 
 echo_step "3. Apps (ROS 2 Nodes)"
-curl -s "${API_BASE}/apps" | jq '.items[] | {id: .id, name: .name, category: .category, component: .is_located_on}'
+curl -s "${API_BASE}/apps" | jq '.items[] | {id: .id, name: .name, description: .description, component: .["x-medkit"].component_id}'
 
 echo_step "4. Functions (High-level Capabilities)"
-curl -s "${API_BASE}/functions" | jq '.items[] | {id: .id, name: .name, category: .category, hosted_by: .hosted_by}'
+curl -s "${API_BASE}/functions" | jq '.items[] | {id: .id, name: .name, description: .description}'
 
 echo_step "5. Sample Data (Joint States)"
 echo "Getting latest joint states from Panda arm..."
@@ -57,7 +57,7 @@ curl -s "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" 2>/dev/null
 }' || echo "   (Joint state data not available — robot may still be starting)"
 
 echo_step "6. Faults"
-curl -s "${API_BASE}/faults" | jq '.items[] | {code: .code, severity: .severity, reporter: .reporter_id}'
+curl -s "${API_BASE}/faults" | jq '.items[] | {code: .fault_code, severity: .severity_label, status: .status, sources: .reporting_sources}'
 
 echo ""
 echo -e "${GREEN}✓ Entity hierarchy exploration complete!${NC}"
