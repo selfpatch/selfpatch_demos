@@ -186,7 +186,7 @@ assert_section_live() {
     direct=$(jq -c '.data' <<< "$RESPONSE" 2>/dev/null) || true
     if ! jq -e --argjson g "${direct:-null}" --argjson sigma "${sigma:-null}" "$filter" \
             <<< "$printed" > /dev/null 2>&1; then
-        fail "$description" "printed $(jq -c '.' <<< "$printed" 2>/dev/null || echo "no JSON"); direct read ${direct}"
+        fail "$description" "printed $(jq -c '.' <<< "$printed" 2>/dev/null || echo "no JSON"); direct read ${direct:0:300}"
     elif [ "$printed" = "$printed_again" ]; then
         fail "$description" "two runs printed the same values: $(jq -c '.' <<< "$printed")"
     else
