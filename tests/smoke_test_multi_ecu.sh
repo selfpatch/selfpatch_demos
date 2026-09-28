@@ -348,10 +348,7 @@ for inject_dir in "${CONTAINER_SCRIPTS}"/*/inject-*/; do
     done <<< "$(script_writes "$ecu" "$inject")"
 done
 
-section "Script Injection and Restore"
-
-# The first script executions on every ECU happen here, with no earlier script
-# or ros2 CLI call in that container.
+section "Restore Before Any Inject"
 
 # Runs a container script through the Scripts API and prints its execution
 # once it has ended. Returns 1 if it does not end within $3 seconds.
@@ -371,6 +368,22 @@ run_script() {
     done
     return 1
 }
+
+# restore-normal is the first script on every ECU, with no earlier script or
+# ros2 CLI call in that container, on parameters as launched.
+for ecu in perception-ecu planning-ecu actuation-ecu; do
+    exec_json=$(run_script "$ecu" "restore-normal" 30) || exec_json=""
+    first_status=$(echo "$exec_json" | jq -r '.status // empty' 2>/dev/null) || first_status=""
+    if [ "$first_status" = "completed" ]; then
+        pass "restore-normal on ${ecu} completes as the first script after start"
+    else
+        fail "restore-normal on ${ecu} completes as the first script after start" \
+            "status: ${first_status:-no end state within 30s} $(echo "$exec_json" | jq -c '.error // empty' 2>/dev/null)"
+    fi
+    assert_script_params "$ecu" "restore-normal" launch
+done
+
+section "Script Injection and Restore"
 
 # Latest path path-planner published. Its header stamp is taken at the end of
 # the planning cycle, after the injected delay.
