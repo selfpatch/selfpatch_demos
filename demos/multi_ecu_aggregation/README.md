@@ -337,6 +337,27 @@ curl -X POST http://localhost:8080/api/v1/components/actuation-ecu/scripts/injec
   -d '{"execution_type":"now"}' | jq
 ```
 
+### How the Scripts Change Parameters
+
+Each script sets node parameters through its own ECU's gateway, with the
+configuration API. The same call works from the host through the perception
+gateway:
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/apps/path-planner/configurations/planning_delay_ms \
+  -H "Content-Type: application/json" -d '{"value": 5000}'
+```
+
+A script whose write is refused exits non-zero, and the execution's error
+message names each failed write, for example
+`FAIL: gripper-controller/inject_jam (HTTP 409)`. `restore-normal` clears the
+ECU's faults only after all its writes succeeded.
+
+`path-planner` runs its planning timer in its own callback group, so its
+parameters stay writable while `inject-planning-delay` is active, and a new
+`planning_delay_ms` also shortens the cycle already in progress.
+`restore-normal` right after `inject-planning-delay` takes a few seconds.
+
 ### Available Scripts per ECU
 
 | ECU | Script | Description |
@@ -406,16 +427,6 @@ The perception ECU aggregator starts immediately but peers may take a few second
 - The aggregator retries peer connections periodically
 - Wait 20-30 seconds after `./run-demo.sh` before verifying
 - Check peer status: `curl http://localhost:8080/api/v1/health | jq '.peers'`
-
-### restore-normal Takes a While on the Planning ECU
-
-`path-planner` runs its planning loop on a single-threaded executor and blocks
-that thread for the full injected `planning_delay_ms` on every cycle, so its
-parameter service can be busy for a while after `inject-planning-delay`. The
-planning ECU's `restore-normal` script retries its writes to `path-planner`
-until they land, which can take up to a few minutes in the worst case. This
-is expected: the script always finishes, it can just be slow right after a
-delay injection.
 
 ### Port Conflicts
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Reset all perception node parameters to defaults
+# Reset all perception node parameters to defaults and clear faults
 set -eu
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
@@ -7,15 +7,20 @@ API_BASE="${GATEWAY_URL}/api/v1"
 
 ERRORS=0
 
+# Sets one parameter through this ECU's gateway. A refused write is named on
+# stderr, which the Scripts API returns as the error message.
 put_config() {
-    local app="$1" param="$2" value="$3"
-    if curl -sf -X PUT "${API_BASE}/apps/${app}/configurations/${param}" \
-        -H "Content-Type: application/json" -d "{\"value\": ${value}}" > /dev/null 2>&1; then
-        echo "${app}: ${param}=${value}"
-    else
-        echo "FAIL: ${app}/${param}"
-        ERRORS=$((ERRORS + 1))
-    fi
+    local app="$1" param="$2" value="$3" code
+    code=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X PUT \
+        "${API_BASE}/apps/${app}/configurations/${param}" \
+        -H "Content-Type: application/json" -d "{\"value\": ${value}}") || true
+    case "$code" in
+        2??) echo "${app}: ${param}=${value}" ;;
+        *)
+            echo "FAIL: ${app}/${param} (HTTP ${code})" >&2
+            ERRORS=$((ERRORS + 1))
+            ;;
+    esac
 }
 
 # LiDAR driver
@@ -39,8 +44,8 @@ put_config object-detector failure_probability 0.0
 put_config object-detector false_positive_rate 0.0
 put_config object-detector miss_rate 0.0
 
-if [ $ERRORS -gt 0 ]; then
-    echo "{\"status\": \"partial\", \"errors\": $ERRORS}"
+if [ "$ERRORS" -gt 0 ]; then
+    echo "${ERRORS} parameter write(s) failed" >&2
     exit 1
 fi
 
