@@ -201,6 +201,28 @@ reports_status() {
     fi
 }
 
+# check_goal_report <log> <rc> <label>: a real SUCCEEDED exits 0 with the
+# success line; any other real status exits non-zero with a failure line.
+check_goal_report() {
+    local log="$1" rc="$2" label="$3" status
+    status=$(real_status "${log}")
+    if [ "${status}" = "SUCCEEDED" ]; then
+        if [ "${rc}" -eq 0 ] && reports_status "${log}" "${label}" "${status}"; then
+            pass "move-arm.sh ${label}: real SUCCEEDED exits 0 with a success line"
+        else
+            fail "move-arm.sh ${label}: real SUCCEEDED exits 0 with a success line" \
+                "rc=${rc}; result lines: $(grep -E '^(✅ Done|Failed):' "${log}" | tr '\n' ';')"
+        fi
+    else
+        if [ "${rc}" -ne 0 ] && reports_status "${log}" "${label}" "${status}"; then
+            pass "move-arm.sh ${label}: real ${status:-no result} exits non-zero with a failure line"
+        else
+            fail "move-arm.sh ${label}: real ${status:-no result} exits non-zero with a failure line" \
+                "rc=${rc}; result lines: $(grep -E '^(✅ Done|Failed):' "${log}" | tr '\n' ';')"
+        fi
+    fi
+}
+
 # print_summary reads the script's exit status from $?, so hand it the
 # status saved on entry. set +e: under errexit `(exit rc)` would end the
 # trap before print_summary runs.
@@ -473,52 +495,88 @@ exit 1
 FAKE
 chmod +x "${FAKE_ROS2_DIR}/ros2"
 
+UNREACHABLE_LOG=/tmp/moveit_smoke_unreachable_ros2.log
 stop_pick_place_loop
-if MOVE_ARM_OUTPUT=$(PATH="${FAKE_ROS2_DIR}:${PATH}" CONTAINER_NAME="${DEMO_CONTAINER}" \
-    "${DEMO_DIR}/move-arm.sh" extended < /dev/null 2>&1); then
-    MOVE_ARM_RC=0
-else
-    MOVE_ARM_RC=$?
-fi
+PATH="${FAKE_ROS2_DIR}:${PATH}" run_move_arm "${UNREACHABLE_LOG}" extended
 resume_pick_place_loop
 rm -rf "${FAKE_ROS2_DIR}"
 
-if [ "${MOVE_ARM_RC}" -eq 0 ] && printf '%s\n' "${MOVE_ARM_OUTPUT}" | grep -q 'Goal finished with status: SUCCEEDED'; then
+if [ "${MOVE_ARM_RC}" -eq 0 ] && [ "$(real_status "${UNREACHABLE_LOG}")" = "SUCCEEDED" ]; then
     pass "move-arm.sh moves the container's arm despite a local unreachable ros2"
 else
     fail "move-arm.sh moves the container's arm despite a local unreachable ros2" \
-        "rc=${MOVE_ARM_RC}; tail: $(printf '%s\n' "${MOVE_ARM_OUTPUT}" | tail -5)"
+        "rc=${MOVE_ARM_RC}; tail: $(tail -n 5 "${UNREACHABLE_LOG}")"
 fi
 
-if printf '%s\n' "${MOVE_ARM_OUTPUT}" | grep -q 'cannot attach stdin'; then
+if grep -q 'cannot attach stdin' "${UNREACHABLE_LOG}"; then
     fail "move-arm.sh works without a TTY" "docker exec still requires a TTY"
 else
     pass "move-arm.sh works without a TTY"
 fi
 
-section "move-arm.sh: reports the goal's real final status"
+section "move-arm.sh: a goal the controller never answered is sent again"
 
-# check_goal_report <log> <rc> <label>: a real SUCCEEDED exits 0 with the
-# success line; any other real status exits non-zero with a failure line.
-check_goal_report() {
-    local log="$1" rc="$2" label="$3" status
-    status=$(real_status "${log}")
-    if [ "${status}" = "SUCCEEDED" ]; then
-        if [ "${rc}" -eq 0 ] && reports_status "${log}" "${label}" "${status}"; then
-            pass "move-arm.sh ${label}: real SUCCEEDED exits 0 with a success line"
-        else
-            fail "move-arm.sh ${label}: real SUCCEEDED exits 0 with a success line" \
-                "rc=${rc}; result lines: $(grep -E '^(✅ Done|Failed):' "${log}" | tr '\n' ';')"
-        fi
-    else
-        if [ "${rc}" -ne 0 ] && reports_status "${log}" "${label}" "${status}"; then
-            pass "move-arm.sh ${label}: real ${status:-no result} exits non-zero with a failure line"
-        else
-            fail "move-arm.sh ${label}: real ${status:-no result} exits non-zero with a failure line" \
-                "rc=${rc}; result lines: $(grep -E '^(✅ Done|Failed):' "${log}" | tr '\n' ';')"
-        fi
-    fi
-}
+# The controller can fail to deliver a goal response to a new ros2 CLI whose
+# endpoints are not yet discovered ("Failed to send goal response"). It then
+# never runs the goal, and the CLI waits forever. This fake ros2 loses the
+# first goal that way and hands the next one to the real CLI in the container.
+FAKE_ROS2_DIR=$(mktemp -d)
+cat > "${FAKE_ROS2_DIR}/ros2" <<'FAKE'
+#!/bin/sh
+if [ "$1 $2" = "action list" ]; then
+    echo /panda_arm_controller/follow_joint_trajectory
+    exit 0
+fi
+[ "$1 $2" = "action send_goal" ] || exit 1
+shift 2
+calls=$(($(cat "${FAKE_ROS2_DIR}/calls" 2> /dev/null || echo 0) + 1))
+echo "${calls}" > "${FAKE_ROS2_DIR}/calls"
+if [ "${calls}" -eq 1 ]; then
+    echo "Waiting for an action server to become available..."
+    echo "Sending goal:"
+    echo "$$" > "${FAKE_ROS2_DIR}/hung.pid"
+    exec sleep 3600
+fi
+exec docker exec -i "${CONTAINER_NAME}" bash -s -- "$@" <<'REMOTE'
+set +u
+source /opt/ros/jazzy/setup.bash
+source /root/demo_ws/install/setup.bash
+exec ros2 action send_goal "$@"
+REMOTE
+FAKE
+chmod +x "${FAKE_ROS2_DIR}/ros2"
+
+LOST_LOG=/tmp/moveit_smoke_goal_lost.log
+stop_pick_place_loop
+export FAKE_ROS2_DIR
+if PATH="${FAKE_ROS2_DIR}:${PATH}" CONTAINER_NAME="${DEMO_CONTAINER}" \
+    timeout 120 "${DEMO_DIR}/move-arm.sh" wave < /dev/null > "${LOST_LOG}" 2>&1; then
+    LOST_RC=0
+else
+    LOST_RC=$?
+fi
+resume_pick_place_loop
+if [ -f "${FAKE_ROS2_DIR}/hung.pid" ]; then
+    kill "$(cat "${FAKE_ROS2_DIR}/hung.pid")" 2> /dev/null || true
+fi
+LOST_CALLS=$(cat "${FAKE_ROS2_DIR}/calls" 2> /dev/null || echo 0)
+rm -rf "${FAKE_ROS2_DIR}"
+unset FAKE_ROS2_DIR
+
+if [ "${LOST_RC}" -ne 124 ] && [ "${LOST_CALLS}" -eq 2 ]; then
+    pass "move-arm.sh sends the goal again when no goal response arrives"
+else
+    fail "move-arm.sh sends the goal again when no goal response arrives" \
+        "rc=${LOST_RC} (124: still waiting after 120 s), goals sent: ${LOST_CALLS}"
+fi
+if [ "$(real_status "${LOST_LOG}")" = "SUCCEEDED" ]; then
+    pass "setup: the goal sent again really succeeded"
+else
+    fail "setup: the goal sent again really succeeded" "real status: $(real_status "${LOST_LOG}")"
+fi
+check_goal_report "${LOST_LOG}" "${LOST_RC}" "wave"
+
+section "move-arm.sh: reports the goal's real final status"
 
 PREEMPTOR_LOG=/tmp/moveit_smoke_preemptor.log
 PREEMPTED_LOG=/tmp/moveit_smoke_goal_preempted.log

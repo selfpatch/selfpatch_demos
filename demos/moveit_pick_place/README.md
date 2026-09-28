@@ -82,6 +82,12 @@ new incoming action`), the script prints `Failed: <pose> (status: ABORTED)` and 
 non-zero instead of claiming success. `./move-arm.sh demo` runs all three steps regardless
 of earlier failures and reports each one; the command exits non-zero if any step failed.
 
+Each `ros2 action send_goal` run is limited to 30 seconds. The controller can fail to
+deliver the goal response to a freshly started CLI (the container log shows `Failed to send
+goal response`); it then never runs that goal. When no goal response arrives, the script
+sends the goal again, up to three times. A goal that was accepted is never sent twice: if
+its result does not arrive in time, the script prints `Failed: <pose> (status: UNKNOWN)`.
+
 ### 4. Viewing Logs
 
 ```bash

@@ -19,6 +19,13 @@ JOINT_NAMES='["panda_joint1","panda_joint2","panda_joint3","panda_joint4","panda
 # Duration in seconds for trajectory execution
 DURATION_SEC=3
 
+# Time limit for one `ros2 action send_goal` run, and how many runs per goal.
+# The controller can fail to deliver the goal response to a new CLI
+# ("Failed to send goal response"). It then never runs the goal and the CLI
+# waits forever, so a goal with no response is sent again.
+SEND_TIMEOUT_SEC=30
+SEND_ATTEMPTS=3
+
 # --- Preset joint positions (radians) ---
 # Ready: default MoveIt pose (from SRDF)
 READY="[0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]"
@@ -76,25 +83,43 @@ send_trajectory() {
     # `ros2 action send_goal` always exits 0, whatever the goal's outcome -
     # the real result is in its own printed "Goal finished with status:"
     # line, so capture output and parse that instead of the exit code.
-    local output
+    # PYTHONUNBUFFERED keeps the lines printed before a timeout kills the CLI.
+    local local_ros2=false attempt output
     if can_reach_action_locally; then
-        output=$(ros2 action send_goal "${ACTION}" \
-            control_msgs/action/FollowJointTrajectory \
-            "${goal_msg}" \
-            --feedback 2>&1) || true
-    else
-        # Outside — exec into container. No -it: this must also work
-        # without a TTY (CI, a pipe), and the command needs no stdin.
-        output=$(docker exec "${CONTAINER}" bash -c "
-            source /opt/ros/jazzy/setup.bash && \
-            source /root/demo_ws/install/setup.bash && \
-            ros2 action send_goal ${ACTION} \
-                control_msgs/action/FollowJointTrajectory \
-                \"${goal_msg}\" \
-                --feedback
-        " 2>&1) || true
+        local_ros2=true
     fi
-    printf '%s\n' "${output}"
+    for ((attempt = 1; attempt <= SEND_ATTEMPTS; attempt++)); do
+        if [[ "${local_ros2}" == true ]]; then
+            output=$(PYTHONUNBUFFERED=1 timeout "${SEND_TIMEOUT_SEC}" \
+                ros2 action send_goal "${ACTION}" \
+                control_msgs/action/FollowJointTrajectory \
+                "${goal_msg}" \
+                --feedback 2>&1) || true
+        else
+            # Outside the container: exec into it. No -it: this must also
+            # work without a TTY (CI, a pipe), and the command needs no stdin.
+            # timeout runs in the container: killing `docker exec` would
+            # leave the CLI running there.
+            output=$(docker exec "${CONTAINER}" bash -c "
+                source /opt/ros/jazzy/setup.bash && \
+                source /root/demo_ws/install/setup.bash && \
+                PYTHONUNBUFFERED=1 timeout ${SEND_TIMEOUT_SEC} \
+                ros2 action send_goal ${ACTION} \
+                    control_msgs/action/FollowJointTrajectory \
+                    \"${goal_msg}\" \
+                    --feedback
+            " 2>&1) || true
+        fi
+        printf '%s\n' "${output}"
+        # An accepted or rejected goal has its answer. Only a goal that got
+        # no response at all never ran, so only that one is sent again.
+        if grep -qE '^(Goal accepted with ID|Goal was rejected)' <<< "${output}"; then
+            break
+        fi
+        if ((attempt < SEND_ATTEMPTS)); then
+            echo "No goal response within ${SEND_TIMEOUT_SEC} s, sending the goal again"
+        fi
+    done
 
     local status
     status=$(printf '%s\n' "${output}" | grep -F 'Goal finished with status:' | tail -n1 | sed -E 's/.*status: *//')
