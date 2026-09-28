@@ -20,9 +20,13 @@
 #      pose that does not match the spawn point is caught by the goals above,
 #      which stop completing. Measured with the pose deliberately put back to
 #      (0, 0), the goals fail while this check still passes.
+#   4. The inject command setup-triggers.sh hints delivers its fault to the
+#      event stream watch-triggers.sh reads.
+#   5. After that inject the demo is restored: localization is not reported
+#      again and goals complete, so the script can run again on the same stack.
 #
 # The existing turtlebot3 smoke test deliberately does not navigate, which is
-# why all three could ship together unnoticed.
+# why the first three could ship together unnoticed.
 
 GATEWAY_URL="${1:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"
@@ -54,10 +58,12 @@ FAULT_SETTLE=5
 # because a single goal leaves the robot standing on it: the goal checker's
 # xy_goal_tolerance is 0.25 m, so a second run against the same container would
 # report success without the robot moving at all.
+SPAWN_X=-2.0
+SPAWN_Y=-0.5
 GOAL_A_X=-1.5
 GOAL_A_Y=-0.5
-GOAL_B_X=-2.0
-GOAL_B_Y=-0.5
+GOAL_B_X="$SPAWN_X"
+GOAL_B_Y="$SPAWN_Y"
 
 # The detector that reports localization quality, and the node name it must
 # register under for its reports to mean anything.
@@ -174,9 +180,9 @@ assert_localization_certain() {
 }
 
 # Drive to a pose and require the goal to be accepted and to finish.
-# Usage: drive_to X Y
+# Usage: drive_to X Y [WHEN]
 drive_to() {
-    local goal_x="$1" goal_y="$2" body http_code payload execution_id status elapsed poll_body
+    local goal_x="$1" goal_y="$2" when="${3:+ $3}" body http_code payload execution_id status elapsed poll_body
     payload=$(jq -nc --argjson x "$goal_x" --argjson y "$goal_y" \
         '{parameters: {pose: {header: {frame_id: "map"},
           pose: {position: {x: $x, y: $y, z: 0.0},
@@ -189,16 +195,16 @@ drive_to() {
     body=$(sed '$d' <<< "$body")
 
     if [ "$http_code" = "202" ]; then
-        pass "goal (${goal_x}, ${goal_y}) is accepted"
+        pass "goal (${goal_x}, ${goal_y}) is accepted${when}"
     else
-        fail "goal (${goal_x}, ${goal_y}) is accepted" \
+        fail "goal (${goal_x}, ${goal_y}) is accepted${when}" \
              "HTTP ${http_code}: $(head -c 200 <<< "$body")"
         return
     fi
 
     execution_id=$(jq -r '.id // empty' <<< "$body" 2>/dev/null) || true
     if [ -z "$execution_id" ]; then
-        fail "goal (${goal_x}, ${goal_y}) completes" "no execution id in the accept response"
+        fail "goal (${goal_x}, ${goal_y}) completes${when}" "no execution id in the accept response"
         return
     fi
 
@@ -221,8 +227,8 @@ drive_to() {
     done
 
     case "$status" in
-        completed|succeeded) pass "goal (${goal_x}, ${goal_y}) completes" ;;
-        *) fail "goal (${goal_x}, ${goal_y}) completes" "status is '${status}' after ${elapsed}s" ;;
+        completed|succeeded) pass "goal (${goal_x}, ${goal_y}) completes${when}" ;;
+        *) fail "goal (${goal_x}, ${goal_y}) completes${when}" "status is '${status}' after ${elapsed}s" ;;
     esac
 }
 
@@ -276,16 +282,15 @@ assert_localization_certain "after the drive"
 
 section "Trigger delivers fault events"
 
-# Drive setup-triggers.sh / watch-triggers.sh / inject-localization-failure.sh
-# exactly as a user would: the trigger watches apps/${DETECTOR_APP}, which is
-# what reports both navigation and localization faults directly.
-# inject-nav-failure's goal is rejected by the planner before a fault confirms,
-# which never reaches the confirmed state the trigger fires on;
-# inject-localization-failure reliably confirms LOCALIZATION_UNCERTAINTY.
+# Drive setup-triggers.sh and watch-triggers.sh exactly as a user would, and run
+# the inject command setup-triggers.sh prints, so a hint that stops producing a
+# delivered event fails here.
 TB3_DIR="${SCRIPT_DIR}/../demos/turtlebot3_integration"
+INJECTED_CODE="LOCALIZATION_UNCERTAINTY"
 
 SETUP_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./setup-triggers.sh 2>&1) || true
 TRIGGER_ID=$(sed -n 's/^  ID:[[:space:]]*//p' <<< "$SETUP_OUTPUT" | head -1)
+INJECT_CMD=$(sed -n '/^Then inject a fault in another terminal:$/{n;s/^  //p;}' <<< "$SETUP_OUTPUT")
 
 if [ -n "$TRIGGER_ID" ]; then
     pass "setup-triggers.sh creates a trigger on apps/${DETECTOR_APP}"
@@ -293,30 +298,134 @@ else
     fail "setup-triggers.sh creates a trigger on apps/${DETECTOR_APP}" "$(tail -5 <<< "$SETUP_OUTPUT")"
 fi
 
-if [ -n "$TRIGGER_ID" ]; then
+# Prints the fault code of every complete event watch-triggers.sh has logged.
+# Usage: event_fault_codes LOG
+event_fault_codes() {
+    awk '/Event received:$/ { on = 1; buf = ""; next }
+         on && /^---$/ { printf "%s", buf; on = 0; next }
+         on { buf = buf $0 "\n" }' "$1" \
+        | jq -rs '.[].payload.fault_code // empty' 2>/dev/null || true
+}
+
+if [ -n "$TRIGGER_ID" ] && [ -z "$INJECT_CMD" ]; then
+    fail "the hinted inject delivers a ${INJECTED_CODE} event to watch-triggers.sh" \
+         "setup-triggers.sh printed no inject hint"
+elif [ -n "$TRIGGER_ID" ]; then
     WATCH_LOG=$(mktemp)
-    (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" timeout 20 bash ./watch-triggers.sh "$TRIGGER_ID") \
+    # exec makes the PID timeout's own; timeout passes a kill on to the whole stream.
+    (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" exec timeout 60 bash ./watch-triggers.sh "$TRIGGER_ID") \
         > "$WATCH_LOG" 2>&1 &
     WATCH_PID=$!
     sleep 2
 
-    (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./inject-localization-failure.sh) > /dev/null 2>&1 || true
+    (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash -c "$INJECT_CMD") > /dev/null 2>&1 || true
 
+    elapsed=0
+    while [ "$elapsed" -lt 20 ] && ! grep -qx "$INJECTED_CODE" <<< "$(event_fault_codes "$WATCH_LOG")"; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    kill "$WATCH_PID" 2>/dev/null || true
     wait "$WATCH_PID" 2>/dev/null || true
 
-    if grep -q "Event received" "$WATCH_LOG"; then
-        pass "watch-triggers.sh receives at least one event after inject-localization-failure.sh"
+    EVENT_CODES=$(event_fault_codes "$WATCH_LOG" | sort -u | paste -sd, -)
+    if grep -qx "$INJECTED_CODE" <<< "$(event_fault_codes "$WATCH_LOG")"; then
+        pass "the hinted inject delivers a ${INJECTED_CODE} event to watch-triggers.sh"
     else
-        fail "watch-triggers.sh receives at least one event after inject-localization-failure.sh" \
-             "$(tail -5 "$WATCH_LOG")"
+        fail "the hinted inject delivers a ${INJECTED_CODE} event to watch-triggers.sh" \
+             "ran '${INJECT_CMD}', events carried: ${EVENT_CODES:-none}"
     fi
     rm -f "$WATCH_LOG"
 
     curl -s -o /dev/null -X DELETE "${API_BASE}/apps/${DETECTOR_APP}/triggers/${TRIGGER_ID}" || true
 fi
 
-# Cleanup: clear the injected fault and any incidental localization latch so
-# a re-run of this script on the same container starts clean.
+section "Demo restored after the injected fault"
+
+# Sets the AMCL pose to the spawn point plus the odometry: /odom starts at the
+# spawn point, facing +x. The odometry stamp lets AMCL add later motion.
+# Echoes the HTTP status of the set_initial_pose call.
+relocalize_from_odometry() {
+    local odom request
+    odom=$(curl -s -m 10 "${API_BASE}/apps/${DETECTOR_APP}/data/odom" | jq -c '.data' 2>/dev/null) || true
+    request=$(jq -c --argjson sx "$SPAWN_X" --argjson sy "$SPAWN_Y" '
+        {parameters: {pose: {header: {frame_id: "map", stamp: .header.stamp},
+          pose: {pose: {position: {x: ($sx + .pose.pose.position.x),
+                                   y: ($sy + .pose.pose.position.y), z: 0.0},
+                        orientation: .pose.pose.orientation},
+                 covariance: [range(36) | if . == 0 or . == 7 or . == 35 then 0.01 else 0.0 end]}}}}' \
+        <<< "${odom:-null}" 2>/dev/null) || true
+    if [ -z "$request" ]; then
+        echo "no odometry"
+        return
+    fi
+    curl -s -m 20 -o /dev/null -w "%{http_code}" -X POST \
+        "${API_BASE}/apps/amcl/operations/set_initial_pose/executions" \
+        -H 'Content-Type: application/json' -d "$request" 2>/dev/null || true
+}
+
+# Echoes "yes" when LOCALIZATION_UNCERTAINTY is reported as failing at any
+# severity, "no" when it is not, and "error" when the list cannot be read.
+localization_reported() {
+    if ! api_get "/faults?status=all" || ! jq -e '.items' <<< "$RESPONSE" > /dev/null 2>&1; then
+        echo error
+        return
+    fi
+    if jq -e '.items[] | select(.fault_code == "LOCALIZATION_UNCERTAINTY"
+                                and (.status == "CONFIRMED" or .status == "PREFAILED"))' \
+            <<< "$RESPONSE" > /dev/null 2>&1; then
+        echo yes
+    else
+        echo no
+    fi
+}
+
+# The inject leaves AMCL with a uniform particle cloud, and no demo script sets
+# a pose again. Re-localize before restore-normal.sh clears the records, so no
+# pose AMCL publishes after the clear comes from the scattered cloud.
+RELOCALIZE_STATUS=$(relocalize_from_odometry)
+if [ "$RELOCALIZE_STATUS" = "200" ]; then
+    pass "AMCL takes the odometry pose through set_initial_pose"
+else
+    fail "AMCL takes the odometry pose through set_initial_pose" "got '${RELOCALIZE_STATUS}'"
+fi
+
+RESTORE_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./restore-normal.sh 2>&1) || true
+if grep -q "^Done\.$" <<< "$RESTORE_OUTPUT"; then
+    pass "restore-normal.sh completes"
+else
+    fail "restore-normal.sh completes" "$(tail -5 <<< "$RESTORE_OUTPUT")"
+fi
+
+# AMCL publishes a pose only when it updates, and the detector judges a
+# published pose at most once every 5 s. An update forced every second for two
+# such intervals makes the detector judge the restored localization.
+DETECTOR_INTERVAL=5
+restored_state="no"
+for _ in $(seq 1 $((2 * DETECTOR_INTERVAL))); do
+    curl -s -m 10 -o /dev/null -X POST \
+        "${API_BASE}/apps/amcl/operations/request_nomotion_update/executions" \
+        -H 'Content-Type: application/json' -d '{"parameters":{}}' 2>/dev/null || true
+    sleep 1
+    restored_state=$(localization_reported)
+    [ "$restored_state" = "no" ] || break
+done
+case "$restored_state" in
+    no)  pass "LOCALIZATION_UNCERTAINTY stays absent for $((2 * DETECTOR_INTERVAL))s of forced AMCL updates" ;;
+    yes) fail "LOCALIZATION_UNCERTAINTY stays absent for $((2 * DETECTOR_INTERVAL))s of forced AMCL updates" \
+              "the detector reported it again" ;;
+    *)   fail "LOCALIZATION_UNCERTAINTY stays absent for $((2 * DETECTOR_INTERVAL))s of forced AMCL updates" \
+              "could not read the fault list" ;;
+esac
+
+# The second goal returns the robot to the spawn point, where the next run
+# of this script expects it.
+drive_to "$GOAL_A_X" "$GOAL_A_Y" "after the restore"
+drive_to "$GOAL_B_X" "$GOAL_B_Y" "after the restore"
+sleep "$FAULT_SETTLE"
+assert_localization_certain "after the restored drive"
+
+# Clear what the goals above reported, so the next run starts from an empty list.
 curl -s -X DELETE "${API_BASE}/faults" > /dev/null || true
 
 # --- Summary ---

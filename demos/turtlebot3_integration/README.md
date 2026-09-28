@@ -497,6 +497,10 @@ curl http://localhost:8080/api/v1/faults | jq
 ./restore-normal.sh
 ```
 
+`restore-normal.sh` does not re-localize AMCL. After `inject-localization-failure.sh`
+the particle cloud stays spread until a pose is set again, for example with
+`POST /api/v1/apps/amcl/operations/set_initial_pose/executions` or RViz's 2D Pose Estimate.
+
 ### Fault Monitoring via API
 
 ```bash
