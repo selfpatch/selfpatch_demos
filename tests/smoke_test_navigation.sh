@@ -22,9 +22,10 @@
 #      (0, 0), the goals fail while this check still passes.
 #   4. The inject command setup-triggers.sh hints delivers its fault to the
 #      event stream watch-triggers.sh reads.
-#   5. After that inject restore-normal.sh alone restores the demo: AMCL agrees
-#      with the simulated pose, localization is not reported again and goals
-#      complete, so the script can run again on the same stack.
+#   5. After that inject, started with the robot parked away from spawn,
+#      restore-normal.sh alone restores the demo: AMCL agrees with the
+#      simulated pose, localization is not reported again under forced AMCL
+#      updates and goals complete, so the script can run again on the same stack.
 #
 # The existing turtlebot3 smoke test deliberately does not navigate, which is
 # why the first three could ship together unnoticed.
@@ -228,6 +229,42 @@ drive_to() {
     esac
 }
 
+# Echoes {x, y, yaw} of a pose object with position and orientation. Protobuf
+# JSON from Gazebo leaves zero fields out, hence the defaults.
+POSE_TO_XY_YAW=$(cat <<'JQ'
+{x: (.position.x // 0), y: (.position.y // 0),
+ yaw: (.orientation | [(.w // 0), (.x // 0), (.y // 0), (.z // 0)] as [$w, $x, $y, $z]
+       | atan2(2 * ($w * $z + $x * $y); 1 - 2 * ($y * $y + $z * $z)))}
+JQ
+)
+
+# Echoes the robot's pose in the simulation as {x, y, yaw}, or nothing. The map
+# frame of this demo is the Gazebo world frame. A single read has returned the
+# model twice, so only the first match is used.
+sim_pose() {
+    docker exec "$DEMO_CONTAINER" bash -c \
+        'source /opt/ros/jazzy/setup.bash > /dev/null 2>&1
+         timeout 10 gz topic -e -n 1 -t /world/default/dynamic_pose/info --json-output 2> /dev/null \
+             | jq -c -n --arg m "$TURTLEBOT3_MODEL" "first(inputs | .pose[] | select(.name == \$m))"' 2> /dev/null \
+        | jq -c "$POSE_TO_XY_YAW" 2> /dev/null || true
+}
+
+# Echoes AMCL's last published pose as {x, y, yaw}, or nothing.
+amcl_pose() {
+    curl -s -m 20 "${API_BASE}/apps/amcl/data/amcl_pose" \
+        | jq -c ".data.pose.pose | $POSE_TO_XY_YAW" 2> /dev/null || true
+}
+
+# Echoes the header stamp of AMCL's last published pose in nanoseconds, or nothing.
+amcl_stamp() {
+    curl -s -m 20 "${API_BASE}/apps/amcl/data/amcl_pose" \
+        | jq -e '.data.header.stamp | .sec * 1000000000 + .nanosec' 2> /dev/null || true
+}
+
+# How far AMCL may sit from the simulated pose after restore-normal.sh.
+POSE_TOLERANCE_M=0.2
+POSE_TOLERANCE_RAD=0.2
+
 # --- Preconditions ---
 
 wait_for_gateway 240
@@ -275,6 +312,25 @@ section "Localization held while driving"
 
 sleep "$FAULT_SETTLE"
 assert_localization_certain "after the drive"
+
+section "Robot parked away from spawn"
+
+# restore-normal.sh must take the robot's pose from the simulation, not assume
+# the spawn point. The inject starts from a parked pose farther from spawn than
+# the agreement tolerance, so a restore that set the spawn pose fails below.
+PARK_X=-0.5
+PARK_Y=-0.5
+drive_to "$PARK_X" "$PARK_Y" "to park away from spawn"
+PARKED_POSE=$(sim_pose)
+if jq -e -n --argjson p "${PARKED_POSE:-null}" --argjson sx "$SPAWN_X" --argjson sy "$SPAWN_Y" \
+        --argjson tm "$POSE_TOLERANCE_M" \
+        '$p != null and (($p.x - $sx) * ($p.x - $sx) + ($p.y - $sy) * ($p.y - $sy) | sqrt) > $tm' \
+        > /dev/null 2>&1; then
+    pass "parked pose in the simulation is farther than ${POSE_TOLERANCE_M} m from spawn"
+else
+    fail "parked pose in the simulation is farther than ${POSE_TOLERANCE_M} m from spawn" \
+         "simulation '${PARKED_POSE}', spawn (${SPAWN_X}, ${SPAWN_Y})"
+fi
 
 section "Trigger delivers fault events"
 
@@ -338,32 +394,6 @@ fi
 
 section "Demo restored after the injected fault"
 
-# Echoes {x, y, yaw} of a pose object with position and orientation. Protobuf
-# JSON from Gazebo leaves zero fields out, hence the defaults.
-POSE_TO_XY_YAW=$(cat <<'JQ'
-{x: (.position.x // 0), y: (.position.y // 0),
- yaw: (.orientation | [(.w // 0), (.x // 0), (.y // 0), (.z // 0)] as [$w, $x, $y, $z]
-       | atan2(2 * ($w * $z + $x * $y); 1 - 2 * ($y * $y + $z * $z)))}
-JQ
-)
-
-# Echoes the robot's pose in the simulation as {x, y, yaw}, or nothing. The map
-# frame of this demo is the Gazebo world frame. A single read has returned the
-# model twice, so only the first match is used.
-sim_pose() {
-    docker exec "$DEMO_CONTAINER" bash -c \
-        'source /opt/ros/jazzy/setup.bash > /dev/null 2>&1
-         timeout 10 gz topic -e -n 1 -t /world/default/dynamic_pose/info --json-output 2> /dev/null \
-             | jq -c -n --arg m "$TURTLEBOT3_MODEL" "first(inputs | .pose[] | select(.name == \$m))"' 2> /dev/null \
-        | jq -c "$POSE_TO_XY_YAW" 2> /dev/null || true
-}
-
-# Echoes AMCL's last published pose as {x, y, yaw}, or nothing.
-amcl_pose() {
-    curl -s -m 20 "${API_BASE}/apps/amcl/data/amcl_pose" \
-        | jq -c ".data.pose.pose | $POSE_TO_XY_YAW" 2> /dev/null || true
-}
-
 # Echoes "yes" when LOCALIZATION_UNCERTAINTY is reported as failing at any
 # severity, "no" when it is not, and "error" when the list cannot be read.
 localization_reported() {
@@ -391,29 +421,44 @@ fi
 
 # AMCL publishes a pose only when it updates, and the detector judges a
 # published pose at most once every 5 s. An update forced every second for two
-# such intervals makes the detector judge the restored localization.
+# such intervals makes the detector judge the restored localization. Each
+# update must succeed and publish a pose with a newer stamp, or the window
+# measured nothing.
 DETECTOR_INTERVAL=5
+FORCED_UPDATES=$((2 * DETECTOR_INTERVAL))
 restored_state="no"
-for _ in $(seq 1 $((2 * DETECTOR_INTERVAL))); do
-    curl -s -m 10 -o /dev/null -X POST \
+failed_updates=0
+new_poses=0
+last_stamp=$(amcl_stamp)
+for _ in $(seq 1 "$FORCED_UPDATES"); do
+    update_status=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST \
         "${API_BASE}/apps/amcl/operations/request_nomotion_update/executions" \
-        -H 'Content-Type: application/json' -d '{"parameters":{}}' 2>/dev/null || true
+        -H 'Content-Type: application/json' -d '{"parameters":{}}' 2>/dev/null) || update_status="none"
+    [ "$update_status" = "200" ] || failed_updates=$((failed_updates + 1))
     sleep 1
+    stamp=$(amcl_stamp)
+    if [ -n "$stamp" ] && [ -n "$last_stamp" ] && [ "$stamp" -gt "$last_stamp" ]; then
+        new_poses=$((new_poses + 1))
+    fi
+    [ -z "$stamp" ] || last_stamp="$stamp"
     restored_state=$(localization_reported)
     [ "$restored_state" = "no" ] || break
 done
-case "$restored_state" in
-    no)  pass "LOCALIZATION_UNCERTAINTY stays absent for $((2 * DETECTOR_INTERVAL))s of forced AMCL updates" ;;
-    yes) fail "LOCALIZATION_UNCERTAINTY stays absent for $((2 * DETECTOR_INTERVAL))s of forced AMCL updates" \
-              "the detector reported it again" ;;
-    *)   fail "LOCALIZATION_UNCERTAINTY stays absent for $((2 * DETECTOR_INTERVAL))s of forced AMCL updates" \
-              "could not read the fault list" ;;
-esac
+ABSENT_CHECK="LOCALIZATION_UNCERTAINTY stays absent for ${FORCED_UPDATES}s of forced AMCL updates"
+if [ "$restored_state" = "yes" ]; then
+    fail "$ABSENT_CHECK" "the detector reported it again"
+elif [ "$restored_state" != "no" ]; then
+    fail "$ABSENT_CHECK" "could not read the fault list"
+elif [ "$failed_updates" -ne 0 ]; then
+    fail "$ABSENT_CHECK" "${failed_updates} of ${FORCED_UPDATES} forced updates failed (last status ${update_status})"
+elif [ "$new_poses" -ne "$FORCED_UPDATES" ]; then
+    fail "$ABSENT_CHECK" "AMCL published a new pose after ${new_poses} of ${FORCED_UPDATES} forced updates"
+else
+    pass "$ABSENT_CHECK"
+fi
 
 # A cloud that converged on the wrong place also stops being reported, so compare
 # AMCL's estimate with the robot's pose in the simulation.
-POSE_TOLERANCE_M=0.2
-POSE_TOLERANCE_RAD=0.2
 SIM_POSE=$(sim_pose)
 AMCL_POSE=$(amcl_pose)
 if [ -z "$SIM_POSE" ] || [ -z "$AMCL_POSE" ]; then
