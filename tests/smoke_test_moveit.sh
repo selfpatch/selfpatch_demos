@@ -41,8 +41,14 @@ resume_pick_place_loop() {
     " > /dev/null 2>&1 || true
 }
 
+# print_summary reads the script's exit status from $?, so hand it the
+# status saved on entry. set +e: under errexit `(exit rc)` would end the
+# trap before print_summary runs.
 cleanup_on_exit() {
+    local rc=$?
+    set +e
     resume_pick_place_loop
+    (exit "${rc}")
     print_summary
 }
 trap cleanup_on_exit EXIT
