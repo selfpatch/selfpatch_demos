@@ -24,21 +24,26 @@ ACTION="/panda_arm_controller/follow_joint_trajectory"
 PICK_PLACE_PATTERN='^python3 /root/demo_ws/install/moveit_medkit_demo/lib/moveit_medkit_demo/pick_place_loop\.py'
 
 # container_python <args...>: run the Python script on stdin inside the demo
-# container, with the ROS 2 environment sourced.
+# container, with the ROS 2 environment sourced. The process is killed after
+# 240 s, which is longer than every wait inside CONTROLLER_PROBE_PY together.
 container_python() {
     docker exec -i "${DEMO_CONTAINER}" bash -c '
         set +u
         source /opt/ros/jazzy/setup.bash
         source /root/demo_ws/install/setup.bash
-        exec python3 - "$@"
+        exec timeout 240 python3 - "$@"
     ' container_python "$@"
 }
 
-# Arm controller probe, run with container_python.
-#   idle <action>:    exit 0 once neither the arm controller nor MoveGroup has
-#                     an active goal for 1 s.
-#   preempt <action>: wait for idle, print ARMED, then abort the next goal the
-#                     arm controller starts by sending a competing goal at once.
+# Arm controller probe, run with container_python. Every mode first waits up
+# to 30 s for the action server, then up to 60 s until neither the arm
+# controller nor MoveGroup has an active goal for 1 s. Exits non-zero when a
+# wait runs out.
+#   idle <action>:    only these waits.
+#   fault <action>:   send two goals back to back. The second preempts the
+#                     first, which manipulation_monitor reports as a fault.
+#   preempt <action>: print ARMED, then preempt the next goal the arm
+#                     controller starts, and print that goal's final status.
 CONTROLLER_PROBE_PY=$(cat <<'PY'
 import sys
 import time
@@ -54,8 +59,9 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 mode, arm_action = sys.argv[1], sys.argv[2]
 ACTIVE = (GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING, GoalStatus.STATUS_CANCELING)
-NAMES = {GoalStatus.STATUS_SUCCEEDED: "SUCCEEDED", GoalStatus.STATUS_CANCELED: "CANCELED",
-         GoalStatus.STATUS_ABORTED: "ABORTED"}
+TERMINAL = {GoalStatus.STATUS_SUCCEEDED: "SUCCEEDED", GoalStatus.STATUS_CANCELED: "CANCELED",
+            GoalStatus.STATUS_ABORTED: "ABORTED"}
+READY = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
 
 rclpy.init()
 node = Node("smoke_controller_probe")
@@ -68,8 +74,6 @@ for action in (arm_action, "/move_action"):
         lambda msg, action=action: goals.__setitem__(action, list(msg.status_list)),
         qos_profile_action_status_default))
 client = ActionClient(node, FollowJointTrajectory, arm_action)
-if not client.wait_for_server(timeout_sec=30):
-    sys.exit("arm controller action server not available")
 
 
 def spin_until(condition, timeout):
@@ -79,6 +83,26 @@ def spin_until(condition, timeout):
         if condition():
             return True
     return False
+
+
+def wait_future(future, timeout, what):
+    if not spin_until(future.done, timeout):
+        sys.exit(f"no {what} within {timeout} s")
+    return future.result()
+
+
+def send_ready_goal(sec):
+    goal = FollowJointTrajectory.Goal()
+    goal.trajectory.joint_names = [f"panda_joint{i}" for i in range(1, 8)]
+    goal.trajectory.points = [JointTrajectoryPoint(positions=READY, time_from_start=Duration(sec=sec))]
+    handle = wait_future(client.send_goal_async(goal), 10, "goal response")
+    if not handle.accepted:
+        sys.exit("arm controller rejected the goal")
+    return handle
+
+
+def final_status(handle):
+    return TERMINAL.get(wait_future(handle.get_result_async(), 10, "goal result").status, "UNKNOWN")
 
 
 quiet_since = None
@@ -95,36 +119,46 @@ def idle():
     return time.monotonic() - quiet_since >= 1.0
 
 
+if not client.wait_for_server(timeout_sec=30):
+    sys.exit("arm controller action server not available within 30 s")
 if not spin_until(idle, 60):
     sys.exit("arm controller or MoveGroup still busy after 60 s")
-if mode == "idle":
-    sys.exit(0)
 
-seen = {bytes(s.goal_info.goal_id.uuid) for s in goals[arm_action]}
-print("ARMED", flush=True)
+if mode == "fault":
+    first = send_ready_goal(3)
+    second = send_ready_goal(1)
+    first_status, second_status = final_status(first), final_status(second)
+    print(f"first goal {first_status}, second goal {second_status}", flush=True)
+    if first_status == "SUCCEEDED":
+        sys.exit("the second goal did not preempt the first")
 
+if mode == "preempt":
+    seen = {bytes(s.goal_info.goal_id.uuid) for s in goals[arm_action]}
+    print("ARMED", flush=True)
+    target = []
 
-def new_goal_executing():
-    return any(s.status == GoalStatus.STATUS_EXECUTING
-               and bytes(s.goal_info.goal_id.uuid) not in seen
-               for s in goals[arm_action])
+    def new_goal_executing():
+        target[:] = [bytes(s.goal_info.goal_id.uuid) for s in goals[arm_action]
+                     if s.status == GoalStatus.STATUS_EXECUTING
+                     and bytes(s.goal_info.goal_id.uuid) not in seen][:1]
+        return bool(target)
 
+    if not spin_until(new_goal_executing, 90):
+        sys.exit("no new arm goal started within 90 s")
+    competing = send_ready_goal(1)
+    target_status = []
 
-if not spin_until(new_goal_executing, 90):
-    sys.exit("no new arm goal started within 90 s")
+    def target_finished():
+        target_status[:] = [TERMINAL[s.status] for s in goals[arm_action]
+                            if bytes(s.goal_info.goal_id.uuid) == target[0] and s.status in TERMINAL]
+        return bool(target_status)
 
-goal = FollowJointTrajectory.Goal()
-goal.trajectory.joint_names = [f"panda_joint{i}" for i in range(1, 8)]
-goal.trajectory.points = [JointTrajectoryPoint(
-    positions=[0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785],
-    time_from_start=Duration(sec=1))]
-sent = client.send_goal_async(goal)
-rclpy.spin_until_future_complete(node, sent)
-if not sent.result().accepted:
-    sys.exit("competing goal rejected")
-result = sent.result().get_result_async()
-rclpy.spin_until_future_complete(node, result)
-print("PREEMPTED, competing goal " + NAMES.get(result.result().status, "UNKNOWN"), flush=True)
+    if not spin_until(target_finished, 10):
+        sys.exit("the goal to preempt did not finish within 10 s")
+    print(f"PREEMPTED goal {target_status[0]}, competing goal {final_status(competing)}", flush=True)
+    if target_status[0] == "SUCCEEDED":
+        sys.exit("the competing goal did not preempt the running goal")
+
 node.destroy_node()
 rclpy.shutdown()
 PY
@@ -168,14 +202,36 @@ start_preemptor() {
     done
 }
 
+# finish_preemptor <log>: wait for the preempt probe. It must have preempted a
+# running goal. Sets PREEMPTED_GOAL_STATUS to that goal's final status.
+finish_preemptor() {
+    local log="$1" rc=0
+    wait "${PREEMPTOR_PID}" || rc=$?
+    PREEMPTED_GOAL_STATUS=$(sed -nE 's/^PREEMPTED goal ([A-Z]+),.*/\1/p' "${log}")
+    if [ "${rc}" -eq 0 ] && [ -n "${PREEMPTED_GOAL_STATUS}" ] && [ "${PREEMPTED_GOAL_STATUS}" != "SUCCEEDED" ]; then
+        pass "setup: the competing goal preempted a running goal (${PREEMPTED_GOAL_STATUS})"
+    else
+        fail "setup: the competing goal preempted a running goal" \
+            "probe rc=${rc}: $(tail -n 2 "${log}" | tr '\n' ';')"
+    fi
+}
+
+# Upper bound for one move-arm.sh run. The script itself allows 3 x 30 s per
+# goal, and the demo cycle runs three goals.
+MOVE_ARM_LIMIT_SEC=400
+
 # run_move_arm <log> <args...>: move-arm.sh without a TTY. Sets MOVE_ARM_RC.
 run_move_arm() {
     local log="$1"
     shift
-    if CONTAINER_NAME="${DEMO_CONTAINER}" "${DEMO_DIR}/move-arm.sh" "$@" < /dev/null > "${log}" 2>&1; then
+    if CONTAINER_NAME="${DEMO_CONTAINER}" timeout "${MOVE_ARM_LIMIT_SEC}" \
+        "${DEMO_DIR}/move-arm.sh" "$@" < /dev/null > "${log}" 2>&1; then
         MOVE_ARM_RC=0
     else
         MOVE_ARM_RC=$?
+    fi
+    if [ "${MOVE_ARM_RC}" -eq 124 ]; then
+        fail "move-arm.sh $* finishes within ${MOVE_ARM_LIMIT_SEC} s" "killed by timeout"
     fi
 }
 
@@ -187,26 +243,30 @@ real_status() {
 
 # reports_status <file> <label> <status>: the file holds exactly one result
 # line. It is the success line for <label> when <status> is SUCCEEDED, else a
-# failure line for <label> that names <status>.
+# failure line for <label> that names <status>. An empty <status> never
+# matches: every goal the tests send must reach a final status.
 reports_status() {
     local file="$1" label="$2" status="$3" results
+    [ -n "${status}" ] || return 1
     results=$(grep -cE '^(✅ Done|Failed):' "${file}" || true)
     [ "${results}" -eq 1 ] || return 1
     if [ "${status}" = "SUCCEEDED" ]; then
         grep -qFx "✅ Done: ${label}" "${file}"
-    elif [ -n "${status}" ]; then
-        grep -qFx "Failed: ${label} (status: ${status})" "${file}"
     else
-        grep -qF "Failed: ${label} (" "${file}"
+        grep -qFx "Failed: ${label} (status: ${status})" "${file}"
     fi
 }
 
-# check_goal_report <log> <rc> <label>: a real SUCCEEDED exits 0 with the
-# success line; any other real status exits non-zero with a failure line.
+# check_goal_report <log> <rc> <label>: the goal reached a final status. A real
+# SUCCEEDED exits 0 with the success line; any other real status exits
+# non-zero with a failure line.
 check_goal_report() {
     local log="$1" rc="$2" label="$3" status
     status=$(real_status "${log}")
-    if [ "${status}" = "SUCCEEDED" ]; then
+    if [ -z "${status}" ]; then
+        fail "move-arm.sh ${label}: the action reports a final status" \
+            "no 'Goal finished with status' line; rc=${rc}; tail: $(tail -n 3 "${log}" | tr '\n' ';')"
+    elif [ "${status}" = "SUCCEEDED" ]; then
         if [ "${rc}" -eq 0 ] && reports_status "${log}" "${label}" "${status}"; then
             pass "move-arm.sh ${label}: real SUCCEEDED exits 0 with a success line"
         else
@@ -215,9 +275,9 @@ check_goal_report() {
         fi
     else
         if [ "${rc}" -ne 0 ] && reports_status "${log}" "${label}" "${status}"; then
-            pass "move-arm.sh ${label}: real ${status:-no result} exits non-zero with a failure line"
+            pass "move-arm.sh ${label}: real ${status} exits non-zero with a failure line"
         else
-            fail "move-arm.sh ${label}: real ${status:-no result} exits non-zero with a failure line" \
+            fail "move-arm.sh ${label}: real ${status} exits non-zero with a failure line" \
                 "rc=${rc}; result lines: $(grep -E '^(✅ Done|Failed):' "${log}" | tr '\n' ';')"
         fi
     fi
@@ -314,74 +374,23 @@ assert_triggers_crud "apps" "diagnostic-bridge-app" "/api/v1/apps/diagnostic-bri
 
 section "check-entities.sh: real values, including under an active fault"
 
-# Force a real fault: send two goals to the same controller back to back so
-# the second preempts the first, a real ABORTED goal that
-# manipulation_monitor turns into TRAJECTORY_EXECUTION_FAILED /
-# CONTROLLER_TIMEOUT. One rclpy action client (not two `ros2` CLI
-# invocations) removes per-invocation DDS discovery jitter, so which goal
-# gets preempted is deterministic.
+# Force a real fault: two goals back to back on the arm controller. The second
+# preempts the first, a real ABORTED goal that manipulation_monitor reports as
+# TRAJECTORY_EXECUTION_FAILED / CONTROLLER_TIMEOUT.
 echo "  Forcing a real active fault via controller goal preemption..."
 stop_pick_place_loop
-docker exec -i "${DEMO_CONTAINER}" bash -s > /tmp/moveit_smoke_fault_setup.log 2>&1 <<'REMOTE' || true
-set -eu
-set +u
-source /opt/ros/jazzy/setup.bash
-source /root/demo_ws/install/setup.bash
-set -u
-python3 - <<'PYEOF'
-import rclpy
-from rclpy.node import Node
-from rclpy.action import ActionClient
-from control_msgs.action import FollowJointTrajectory
-from trajectory_msgs.msg import JointTrajectoryPoint
-from builtin_interfaces.msg import Duration
-
-JOINTS = [
-    "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
-    "panda_joint5", "panda_joint6", "panda_joint7",
-]
-
-
-def make_goal(positions, sec):
-    goal = FollowJointTrajectory.Goal()
-    goal.trajectory.joint_names = JOINTS
-    point = JointTrajectoryPoint()
-    point.positions = positions
-    point.time_from_start = Duration(sec=sec, nanosec=0)
-    goal.trajectory.points = [point]
-    return goal
-
-
-rclpy.init()
-node = Node("smoke_fault_probe")
-client = ActionClient(
-    node, FollowJointTrajectory, "/panda_arm_controller/follow_joint_trajectory"
-)
-client.wait_for_server()
-
-ready = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
-future_a = client.send_goal_async(make_goal(ready, 3))
-rclpy.spin_until_future_complete(node, future_a)
-handle_a = future_a.result()
-
-future_b = client.send_goal_async(make_goal(ready, 1))
-rclpy.spin_until_future_complete(node, future_b)
-handle_b = future_b.result()
-
-rclpy.spin_until_future_complete(node, handle_a.get_result_async())
-rclpy.spin_until_future_complete(node, handle_b.get_result_async())
-
-node.destroy_node()
-rclpy.shutdown()
-PYEOF
-REMOTE
+if container_python fault "${ACTION}" <<< "${CONTROLLER_PROBE_PY}" > /tmp/moveit_smoke_fault_setup.log 2>&1; then
+    pass "setup: a second goal preempted the first ($(tail -n 1 /tmp/moveit_smoke_fault_setup.log))"
+else
+    fail "setup: a second goal preempted the first" "$(tail -n 2 /tmp/moveit_smoke_fault_setup.log | tr '\n' ';')"
+fi
 resume_pick_place_loop
 
 echo "  Waiting for the fault to appear (max 20s)..."
-if poll_until "/faults" '.items | length > 0' 20; then
-    pass "setup: a real active fault exists"
+if poll_until "/faults" '[.items[] | select(.reporting_sources | index("/bridge/manipulation_monitor"))] | length > 0' 20; then
+    pass "setup: manipulation_monitor reports a real active fault"
 else
-    fail "setup: a real active fault exists" "no fault after forced controller preemption"
+    fail "setup: manipulation_monitor reports a real active fault" "no such fault after forced controller preemption"
 fi
 
 ENTITIES_LOG=/tmp/moveit_smoke_entities.log
@@ -391,7 +400,7 @@ FAULT_FIELDS='[.items[] | {fault_code, severity_label, status, reporting_sources
 # the run and retry until both reads agree.
 for attempt in 1 2 3; do
     API_FAULTS=$(curl -s -m 30 "${API_BASE}/faults")
-    GATEWAY_URL="${GATEWAY_URL}" "${DEMO_DIR}/check-entities.sh" < /dev/null 2>&1 \
+    GATEWAY_URL="${GATEWAY_URL}" timeout 120 "${DEMO_DIR}/check-entities.sh" < /dev/null 2>&1 \
         | sed 's/\x1b\[[0-9;]*m//g' > "${ENTITIES_LOG}" || true
     API_FAULTS_AFTER=$(curl -s -m 30 "${API_BASE}/faults")
     if [ "$(jq -c "${FAULT_FIELDS}" <<< "${API_FAULTS}")" = "$(jq -c "${FAULT_FIELDS}" <<< "${API_FAULTS_AFTER}")" ]; then
@@ -541,7 +550,7 @@ exec docker exec -i "${CONTAINER_NAME}" bash -s -- "$@" <<'REMOTE'
 set +u
 source /opt/ros/jazzy/setup.bash
 source /root/demo_ws/install/setup.bash
-exec ros2 action send_goal "$@"
+exec timeout 60 ros2 action send_goal "$@"
 REMOTE
 FAKE
 chmod +x "${FAKE_ROS2_DIR}/ros2"
@@ -588,17 +597,17 @@ stop_pick_place_loop
 start_preemptor "${PREEMPTOR_LOG}" || fail "setup: competing goal ready" "$(tail -n 3 "${PREEMPTOR_LOG}")"
 run_move_arm "${PREEMPTED_LOG}" ready
 PREEMPTED_RC=${MOVE_ARM_RC}
-wait "${PREEMPTOR_PID}" || true
+finish_preemptor "${PREEMPTOR_LOG}"
 run_move_arm "${FREE_LOG}" place
 FREE_RC=${MOVE_ARM_RC}
 resume_pick_place_loop
 
 PREEMPTED_STATUS=$(real_status "${PREEMPTED_LOG}")
-if [ -n "${PREEMPTED_STATUS}" ] && [ "${PREEMPTED_STATUS}" != "SUCCEEDED" ]; then
-    pass "setup: a competing goal really ended the first goal (${PREEMPTED_STATUS})"
+if [ -n "${PREEMPTED_STATUS}" ] && [ "${PREEMPTED_STATUS}" = "${PREEMPTED_GOAL_STATUS}" ]; then
+    pass "setup: move-arm.sh's goal is the one the probe preempted (${PREEMPTED_STATUS})"
 else
-    fail "setup: a competing goal really ended the first goal" \
-        "real status: ${PREEMPTED_STATUS:-none}; probe: $(tail -n 2 "${PREEMPTOR_LOG}" | tr '\n' ';')"
+    fail "setup: move-arm.sh's goal is the one the probe preempted" \
+        "move-arm.sh real status: ${PREEMPTED_STATUS:-none}; preempted goal: ${PREEMPTED_GOAL_STATUS:-none}"
 fi
 if [ "$(real_status "${FREE_LOG}")" = "SUCCEEDED" ]; then
     pass "setup: a goal on an idle arm really succeeded"
@@ -619,7 +628,7 @@ stop_pick_place_loop
 start_preemptor "${PREEMPTOR_LOG}" || fail "setup: competing goal ready" "$(tail -n 3 "${PREEMPTOR_LOG}")"
 run_move_arm "${DEMO_LOG}" demo
 DEMO_RC=${MOVE_ARM_RC}
-wait "${PREEMPTOR_PID}" || true
+finish_preemptor "${PREEMPTOR_LOG}"
 resume_pick_place_loop
 
 DEMO_STEPS=$(grep -c '^🤖 Moving to:' "${DEMO_LOG}" || true)
@@ -629,16 +638,23 @@ else
     fail "move-arm.sh demo runs three steps" "steps started: ${DEMO_STEPS}"
 fi
 
-# Each step block runs from its "Moving to" line to the next one. Its result
-# line must match the status its own action client printed, and each label
-# must have exactly one result line in the whole output.
+# Each step block runs from its "Moving to" line to the next one. Its action
+# must reach a final status, its result line must match that status, and each
+# label must have exactly one result line in the whole output.
 DEMO_FAILED_STEPS=0
+DEMO_FIRST_STATUS=""
 step=0
 for label in "pick" "place" "ready (home)"; do
     step=$((step + 1))
     step_log="/tmp/moveit_smoke_demo_step${step}.log"
     awk -v n="${step}" 'index($0, "🤖 Moving to:") == 1 { count++ } count == n' "${DEMO_LOG}" > "${step_log}"
     status=$(real_status "${step_log}")
+    [ "${step}" -eq 1 ] && DEMO_FIRST_STATUS="${status}"
+    if [ -z "${status}" ]; then
+        fail "move-arm.sh demo step ${step} (${label}): the action reports a final status" \
+            "no 'Goal finished with status' line; step tail: $(tail -n 3 "${step_log}" | tr '\n' ';')"
+        continue
+    fi
     if [ "${status}" != "SUCCEEDED" ]; then
         DEMO_FAILED_STEPS=$((DEMO_FAILED_STEPS + 1))
     fi
@@ -647,23 +663,27 @@ for label in "pick" "place" "ready (home)"; do
         + $(grep -cF "Failed: ${label} (" "${DEMO_LOG}" || true) ))
     if [ "${first_line}" = "🤖 Moving to: ${label}" ] && [ "${label_results}" -eq 1 ] \
         && reports_status "${step_log}" "${label}" "${status}"; then
-        pass "move-arm.sh demo step ${step} (${label}): one result line, matching real ${status:-no result}"
+        pass "move-arm.sh demo step ${step} (${label}): one result line, matching real ${status}"
     else
-        fail "move-arm.sh demo step ${step} (${label}): one result line, matching real ${status:-no result}" \
+        fail "move-arm.sh demo step ${step} (${label}): one result line, matching real ${status}" \
             "first line: ${first_line}; results for label: ${label_results}; in step: $(grep -E '^(✅ Done|Failed):' "${step_log}" | tr '\n' ';')"
     fi
 done
 
+if [ -n "${DEMO_FIRST_STATUS}" ] && [ "${DEMO_FIRST_STATUS}" = "${PREEMPTED_GOAL_STATUS}" ]; then
+    pass "setup: the demo's pick step is the goal the probe preempted (${DEMO_FIRST_STATUS})"
+else
+    fail "setup: the demo's pick step is the goal the probe preempted" \
+        "pick real status: ${DEMO_FIRST_STATUS:-none}; preempted goal: ${PREEMPTED_GOAL_STATUS:-none}"
+fi
 if [ "${DEMO_FAILED_STEPS}" -gt 0 ]; then
-    pass "setup: a competing goal really ended a demo step"
     if [ "${DEMO_RC}" -ne 0 ]; then
         pass "move-arm.sh demo exits non-zero when a step really failed"
     else
         fail "move-arm.sh demo exits non-zero when a step really failed" "rc=0"
     fi
 else
-    fail "setup: a competing goal really ended a demo step" \
-        "every step succeeded; probe: $(tail -n 2 "${PREEMPTOR_LOG}" | tr '\n' ';')"
+    fail "setup: a demo step really failed" "no step reached a non-SUCCEEDED final status"
 fi
 
 # --- Summary ---
