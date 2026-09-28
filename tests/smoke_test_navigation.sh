@@ -26,6 +26,8 @@
 #      restore-normal.sh alone restores the demo: AMCL agrees with the
 #      simulated pose, localization is not reported again under forced AMCL
 #      updates and goals complete, so the script can run again on the same stack.
+#   6. restore-normal fails and names a velocity write another client's lock
+#      refuses, still re-localizes AMCL, and completes once the lock is released.
 #
 # The existing turtlebot3 smoke test deliberately does not navigate, which is
 # why the first three could ship together unnoticed.
@@ -265,6 +267,25 @@ amcl_stamp() {
 POSE_TOLERANCE_M=0.2
 POSE_TOLERANCE_RAD=0.2
 
+# Passes when AMCL's last published pose is within the tolerance of the robot's
+# pose in the simulation.
+# Usage: assert_amcl_matches_simulation DESCRIPTION
+assert_amcl_matches_simulation() {
+    local description="$1" sim amcl
+    sim=$(sim_pose)
+    amcl=$(amcl_pose)
+    if [ -z "$sim" ] || [ -z "$amcl" ]; then
+        fail "$description" "could not read a pose: simulation '${sim}', AMCL '${amcl}'"
+    elif jq -e -n --argjson s "$sim" --argjson a "$amcl" \
+            --argjson tm "$POSE_TOLERANCE_M" --argjson tr "$POSE_TOLERANCE_RAD" '
+            (($s.x - $a.x) * ($s.x - $a.x) + ($s.y - $a.y) * ($s.y - $a.y) | sqrt) <= $tm
+            and ((($s.yaw - $a.yaw) | atan2(sin; cos)) | fabs) <= $tr' > /dev/null 2>&1; then
+        pass "$description"
+    else
+        fail "$description" "simulation ${sim}, AMCL ${amcl}, tolerance ${POSE_TOLERANCE_M} m and ${POSE_TOLERANCE_RAD} rad"
+    fi
+}
+
 # --- Preconditions ---
 
 wait_for_gateway 240
@@ -459,20 +480,92 @@ fi
 
 # A cloud that converged on the wrong place also stops being reported, so compare
 # AMCL's estimate with the robot's pose in the simulation.
-SIM_POSE=$(sim_pose)
-AMCL_POSE=$(amcl_pose)
-if [ -z "$SIM_POSE" ] || [ -z "$AMCL_POSE" ]; then
-    fail "AMCL agrees with the simulated pose after restore-normal.sh" \
-         "could not read a pose: simulation '${SIM_POSE}', AMCL '${AMCL_POSE}'"
-elif jq -e -n --argjson s "$SIM_POSE" --argjson a "$AMCL_POSE" \
-        --argjson tm "$POSE_TOLERANCE_M" --argjson tr "$POSE_TOLERANCE_RAD" '
-        (($s.x - $a.x) * ($s.x - $a.x) + ($s.y - $a.y) * ($s.y - $a.y) | sqrt) <= $tm
-        and ((($s.yaw - $a.yaw) | atan2(sin; cos)) | fabs) <= $tr' > /dev/null 2>&1; then
-    pass "AMCL agrees with the simulated pose after restore-normal.sh"
+assert_amcl_matches_simulation "AMCL agrees with the simulated pose after restore-normal.sh"
+
+section "Restore-normal reports a refused write"
+
+# Another client's lock on velocity-smoother's configurations makes the gateway
+# refuse restore-normal's max_velocity write with 409. AMCL is scattered again
+# first, so an agreement with the simulation afterwards shows the script still
+# re-localized.
+RESTORE_ENDPOINT="/components/nav2-stack/scripts/restore-normal/executions"
+
+# Runs restore-normal through the Scripts API and prints the execution once it
+# has ended. Returns 1 when it does not end within MAX_WAIT seconds.
+# Usage: run_restore_normal MAX_WAIT
+run_restore_normal() {
+    local exec_id deadline
+    exec_id=$(curl -s -m 30 -X POST "${API_BASE}${RESTORE_ENDPOINT}" \
+        -H "Content-Type: application/json" -d '{"execution_type": "now"}' | jq -r '.id // empty') || exec_id=""
+    [ -n "$exec_id" ] || return 1
+    deadline=$((SECONDS + $1))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if api_get "${RESTORE_ENDPOINT}/${exec_id}" \
+            && jq -e '.status | IN("completed", "failed", "terminated")' <<< "$RESPONSE" > /dev/null 2>&1; then
+            echo "$RESPONSE"
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+curl -s -m 20 -o /dev/null -X POST \
+    "${API_BASE}/apps/amcl/operations/reinitialize_global_localization/executions" \
+    -H 'Content-Type: application/json' -d '{"parameters":{}}' || true
+
+LOCK_CLIENT="smoke-test-restore-refused"
+lock_id=$(curl -s -m 30 -X POST "${API_BASE}/apps/velocity-smoother/locks" \
+    -H "X-Client-Id: ${LOCK_CLIENT}" -H "Content-Type: application/json" \
+    -d '{"lock_expiration": 120, "scopes": ["configurations"]}' | jq -r '.id // empty') || lock_id=""
+if [ -n "$lock_id" ]; then
+    pass "another client locks velocity-smoother configurations"
 else
-    fail "AMCL agrees with the simulated pose after restore-normal.sh" \
-         "simulation ${SIM_POSE}, AMCL ${AMCL_POSE}, tolerance ${POSE_TOLERANCE_M} m and ${POSE_TOLERANCE_RAD} rad"
+    fail "another client locks velocity-smoother configurations" "no lock id returned"
 fi
+
+if exec_json=$(run_restore_normal 90); then
+    exec_status=$(jq -r '.status' <<< "$exec_json")
+    exec_message=$(jq -r '.error.message // ""' <<< "$exec_json")
+    if [ "$exec_status" = "failed" ]; then
+        pass "restore-normal fails while its max_velocity write is refused"
+    else
+        fail "restore-normal fails while its max_velocity write is refused" "status: ${exec_status}"
+    fi
+    if grep -qF "FAIL: velocity-smoother/max_velocity" <<< "$exec_message"; then
+        pass "failure message names the refused write velocity-smoother/max_velocity"
+    else
+        fail "failure message names the refused write velocity-smoother/max_velocity" "message: ${exec_message}"
+    fi
+    if grep -qF "controller-server/FollowPath.max_vel_x" <<< "$exec_message"; then
+        fail "failure message does not name controller-server/FollowPath.max_vel_x, which succeeded" \
+             "message: ${exec_message}"
+    else
+        pass "failure message does not name controller-server/FollowPath.max_vel_x, which succeeded"
+    fi
+else
+    fail "restore-normal ends while its max_velocity write is refused" "no end state within 90s"
+fi
+assert_amcl_matches_simulation "AMCL agrees with the simulated pose after a restore with a refused write"
+
+if [ -n "$lock_id" ]; then
+    unlock_status=$(curl -s -m 30 -o /dev/null -w "%{http_code}" -X DELETE \
+        "${API_BASE}/apps/velocity-smoother/locks/${lock_id}" -H "X-Client-Id: ${LOCK_CLIENT}") || true
+    if [ "$unlock_status" = "204" ]; then
+        pass "velocity-smoother lock is released"
+    else
+        fail "velocity-smoother lock is released" "got HTTP ${unlock_status}"
+    fi
+fi
+
+if exec_json=$(run_restore_normal 90) && [ "$(jq -r '.status' <<< "$exec_json")" = "completed" ]; then
+    pass "restore-normal completes once the lock is released"
+else
+    fail "restore-normal completes once the lock is released" \
+         "execution: $(jq -c '{status, error}' <<< "${exec_json:-null}" 2>/dev/null)"
+fi
+
+section "Driving after the restore"
 
 # The second goal returns the robot to the spawn point, where the next run
 # of this script expects it.

@@ -304,7 +304,7 @@ curl http://localhost:8080/api/v1/faults | jq
 |--------|-------------|
 | `run-demo.sh` | Start Docker services (daemon mode) |
 | `stop-demo.sh` | Stop Docker services |
-| `check-demo.sh` | Interactive API demonstration and exploration; waits up to 30 s for the sensor data after the demo starts |
+| `check-demo.sh` | Interactive API demonstration and exploration; waits up to 30 s for the sensor data after the demo starts, exits 1 when the fault list cannot be read |
 | `run-diagnostics.sh` | Check health of all sensors |
 | `inject-fault-scenario.sh` | Composite fault injection across all sensors |
 | `inject-noise.sh` | Inject high noise fault |

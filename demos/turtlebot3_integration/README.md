@@ -179,10 +179,10 @@ curl http://localhost:8080/api/v1/health
 curl http://localhost:8080/api/v1/areas | jq '.items[] | {id, name}'
 
 # List all components (hardware/logical units)
-curl http://localhost:8080/api/v1/components | jq '.items[] | {id, name, area}'
+curl http://localhost:8080/api/v1/components | jq '.items[] | {id, name, description}'
 
 # List all apps (ROS 2 nodes)
-curl http://localhost:8080/api/v1/apps | jq '.items[] | {id, name, namespace}'
+curl http://localhost:8080/api/v1/apps | jq '.items[] | {id, name, component: .["x-medkit"].component_id, online: .["x-medkit"].is_online}'
 
 # Get specific app details
 curl http://localhost:8080/api/v1/apps/amcl | jq
@@ -193,19 +193,19 @@ curl http://localhost:8080/api/v1/apps/amcl | jq
 ```bash
 # Get LiDAR scan data
 curl http://localhost:8080/api/v1/apps/turtlebot3-node/data/scan | jq '{
-  angle_min: .angle_min,
-  angle_max: .angle_max,
-  sample_ranges: .ranges[:5]
+  angle_min: .data.angle_min,
+  angle_max: .data.angle_max,
+  sample_ranges: .data.ranges[:5]
 }'
 
 # Get odometry data
 curl http://localhost:8080/api/v1/apps/turtlebot3-node/data/odom | jq '{
-  position: .pose.pose.position,
-  orientation: .pose.pose.orientation
+  position: .data.pose.pose.position,
+  orientation: .data.pose.pose.orientation
 }'
 
 # List all data topics for an app
-curl http://localhost:8080/api/v1/apps/turtlebot3-node/data | jq
+curl http://localhost:8080/api/v1/apps/anomaly-detector/data | jq
 ```
 
 ### Fault Management
@@ -218,10 +218,10 @@ curl http://localhost:8080/api/v1/faults | jq
 curl http://localhost:8080/api/v1/areas/robot/faults | jq
 
 # Get fault details with environment data (includes snapshots)
-curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED | jq
+curl http://localhost:8080/api/v1/apps/anomaly-detector/faults/NAVIGATION_GOAL_ABORTED | jq
 
 # Clear a specific fault
-curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic-bridge/faults/TURTLEBOT3_NODE
+curl -X DELETE http://localhost:8080/api/v1/apps/anomaly-detector/faults/NAVIGATION_GOAL_ABORTED
 ```
 
 ### Rosbag Snapshots (Bulk Data)
@@ -500,7 +500,9 @@ curl http://localhost:8080/api/v1/faults | jq
 `restore-normal.sh` also recovers from `inject-localization-failure.sh`: it reads the
 robot's pose from the running Gazebo simulation and sets it on AMCL through
 `POST /api/v1/apps/amcl/operations/set_initial_pose/executions`, so the robot need not be
-at its spawn point.
+at its spawn point. When the gateway refuses one of its writes, for example with 409 while
+another client holds a lock on the app, the script still runs its other steps, then fails
+and names the refused write.
 
 ### Fault Monitoring via API
 
@@ -597,7 +599,7 @@ demos/turtlebot3_integration/
 | `stop-demo.sh` | Stop containers and cleanup |
 | `send-nav-goal.sh [x] [y] [yaw]` | Send navigation goal via SOVD API |
 | `check-entities.sh` | Explore SOVD entity hierarchy |
-| `check-faults.sh` | View active faults from gateway |
+| `check-faults.sh` | View active faults from gateway; exits 1 when the fault list cannot be read |
 | `nav-health-check.sh` | Check Nav2 stack health |
 | `reset-navigation.sh` | Cancel goals and reset AMCL |
 | `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |

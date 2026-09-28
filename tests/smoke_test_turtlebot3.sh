@@ -6,7 +6,7 @@
 #   discovery relationships, Linux introspection, data access, operations,
 #   configurations, scripts (list + execution), bulk data, faults, logs,
 #   trigger CRUD lifecycle, check-entities.sh and check-faults.sh with one
-#   injected navigation failure
+#   injected navigation failure, check-faults.sh while /faults answers 503
 #
 # Usage: ./tests/smoke_test_turtlebot3.sh [GATEWAY_URL]
 # Default GATEWAY_URL: http://localhost:8080
@@ -18,7 +18,37 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tests/smoke_lib.sh
 source "${SCRIPT_DIR}/smoke_lib.sh"
 
-trap print_summary EXIT
+DEMO_CONTAINER="${DEMO_CONTAINER:-turtlebot3_medkit_demo_ci}"
+# Anchored so it does not match the bash -c wrapper that runs pgrep.
+FAULT_MANAGER_PATTERN='^/root/demo_ws/install/ros2_medkit_fault_manager/lib/ros2_medkit_fault_manager/fault_manager_node '
+
+# SIGSTOP on the fault manager makes the gateway's ListFaults call time out,
+# so GET /faults answers 503 as it does before the fault manager is up.
+stop_fault_manager() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        pid=\$(pgrep -f '${FAULT_MANAGER_PATTERN}') || exit 1
+        kill -STOP \"\${pid}\"
+    " > /dev/null 2>&1
+}
+
+resume_fault_manager() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        pid=\$(pgrep -f '${FAULT_MANAGER_PATTERN}') || exit 0
+        kill -CONT \"\${pid}\"
+    " > /dev/null 2>&1 || true
+}
+
+# print_summary reads the script's exit status from $?, so hand it the status
+# saved on entry. set +e: under errexit `(exit rc)` would end the trap before
+# print_summary runs.
+cleanup_on_exit() {
+    local rc=$?
+    set +e
+    resume_fault_manager
+    (exit "${rc}")
+    print_summary
+}
+trap cleanup_on_exit EXIT
 
 # --- Wait for gateway startup ---
 
@@ -248,6 +278,39 @@ curl -s -X DELETE "${API_BASE}/faults" > /dev/null || true
 section "Triggers"
 
 assert_triggers_crud "apps" "diagnostic-bridge" "/api/v1/apps/diagnostic-bridge/faults"
+
+section "check-faults.sh: a failed fault read is not reported as no faults"
+
+FAILED_READ_LOG=$(mktemp)
+if stop_fault_manager; then
+    if api_get "/faults" 503; then
+        pass "setup: GET /faults answers 503 while the fault manager is stopped"
+    else
+        fail "setup: GET /faults answers 503 while the fault manager is stopped" "got: $(head -c 200 <<< "${RESPONSE}")"
+    fi
+    if (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" timeout 120 bash ./check-faults.sh) < /dev/null \
+            > "$FAILED_READ_LOG" 2>&1; then
+        FAILED_READ_RC=0
+    else
+        FAILED_READ_RC=$?
+    fi
+    resume_fault_manager
+    if [ "$FAILED_READ_RC" -ne 0 ] && grep -q 'Could not read faults .*(HTTP 503)' "$FAILED_READ_LOG" \
+        && ! grep -qE 'No active faults|Total active faults' "$FAILED_READ_LOG"; then
+        pass "check-faults.sh exits non-zero on HTTP 503 and does not claim a fault count"
+    else
+        fail "check-faults.sh exits non-zero on HTTP 503 and does not claim a fault count" \
+            "rc=${FAILED_READ_RC}; output: $(grep -vE '^ *$' "$FAILED_READ_LOG" | tail -n 6 | tr '\n' ';')"
+    fi
+    if poll_until "/faults" '.items | arrays' 30; then
+        pass "setup: GET /faults answers again after the fault manager resumes"
+    else
+        fail "setup: GET /faults answers again after the fault manager resumes" "still failing after 30 s"
+    fi
+else
+    fail "setup: fault manager stopped" "no fault_manager_node process in ${DEMO_CONTAINER}"
+fi
+rm -f "$FAILED_READ_LOG"
 
 # --- Summary ---
 
