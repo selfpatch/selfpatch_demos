@@ -131,8 +131,9 @@ refute_in_container_log() {
     fi
 }
 
-# Report whether localization is badly wrong: a confirmed LOCALIZATION_UNCERTAINTY
-# at ERROR severity, which the detector raises above a covariance of 1.0.
+# Report whether localization is badly wrong: AMCL's position spread above the
+# detector's ERROR threshold, the level at which it raises LOCALIZATION_UNCERTAINTY
+# at ERROR severity.
 #
 # The WARN level is deliberately not enough. AMCL's particle spread widens while
 # the robot drives and settles again afterwards, and on a healthy run of this
@@ -141,41 +142,35 @@ refute_in_container_log() {
 # while a real pose error, the kind this test exists to catch, is metres wide and
 # clears the error threshold by a wide margin.
 #
+# The spread is read from AMCL, not from the fault list: a fault keeps the
+# highest severity it ever had, even across a clear, so after one ERROR every
+# later WARN reads ERROR.
+#
 # Echoes "yes", "no", or "error". The error case matters: a failed or malformed
 # read must not read as "no fault", or this passes whenever the gateway is
 # unreachable.
-localization_confirmed() {
-    if ! api_get "/faults?status=all"; then
+localization_badly_wrong() {
+    local threshold spread
+    threshold=$(curl -s -m 20 \
+        "${API_BASE}/apps/${DETECTOR_APP}/configurations/covariance_error_threshold" \
+        | jq -e '.data | numbers' 2>/dev/null) || threshold=""
+    spread=$(curl -s -m 20 "${API_BASE}/apps/amcl/data/amcl_pose" \
+        | jq -e '.data.pose.covariance | (.[0] + .[7]) | sqrt' 2>/dev/null) || spread=""
+    if [ -z "$threshold" ] || [ -z "$spread" ]; then
         echo error
         return
     fi
-    if ! jq -e '.items' <<< "$RESPONSE" > /dev/null 2>&1; then
-        echo error
-        return
-    fi
-    # jq -e exits 0 when the select produced an item, 1 or 4 when it produced
-    # nothing, and 5 when the list could not be read at all. Only the last one
-    # is an error; an unreadable list must not pass as a clean one.
-    local rc=0
-    jq -e '.items[] | select(.fault_code == "LOCALIZATION_UNCERTAINTY"
-                              and .status == "CONFIRMED"
-                              and .severity_label == "ERROR")' \
-        <<< "$RESPONSE" > /dev/null 2>&1 || rc=$?
-    case "$rc" in
-        0)   echo yes ;;
-        1|4) echo no ;;
-        *)   echo error ;;
-    esac
+    jq -nr --argjson s "$spread" --argjson t "$threshold" 'if $s > $t then "yes" else "no" end'
 }
 
 # Usage: assert_localization_certain WHEN
 assert_localization_certain() {
     local when="$1" state
-    state=$(localization_confirmed)
+    state=$(localization_badly_wrong)
     case "$state" in
         no)  pass "localization is not badly wrong ${when}" ;;
-        yes) fail "localization is not badly wrong ${when}" "LOCALIZATION_UNCERTAINTY is CONFIRMED at ERROR severity" ;;
-        *)   fail "localization is not badly wrong ${when}" "could not read the fault list" ;;
+        yes) fail "localization is not badly wrong ${when}" "AMCL position spread is above the detector's ERROR threshold" ;;
+        *)   fail "localization is not badly wrong ${when}" "could not read the AMCL pose or the threshold" ;;
     esac
 }
 
@@ -239,8 +234,8 @@ wait_for_gateway 240
 section "Fault reporting is alive"
 
 # Without this, an empty fault list below would be indistinguishable from a
-# detector that never started, and the localization checks would pass by saying
-# nothing.
+# detector that never started, and the check that LOCALIZATION_UNCERTAINTY
+# stays absent would pass by saying nothing.
 if poll_until "/apps/${DETECTOR_APP}" \
     ".[\"x-medkit\"].ros2.node == \"${DETECTOR_NODE}\"" 120; then
     pass "detector app reports ROS node ${DETECTOR_NODE}"
