@@ -146,17 +146,133 @@ fi
 
 # check-demo.sh is the interactive tour a user runs by hand. Run it live
 # against the gateway while the LIDAR_SIM fault above is still active, and
-# check that every field it labels carries a real value, not a stale/wrong
-# resource path resolving to null.
+# compare what it prints with direct reads of the same resources.
 CHECK_DEMO_SCRIPT="${SCRIPT_DIR}/../demos/sensor_diagnostics/check-demo.sh"
-CHECK_DEMO_OUTPUT=$(GATEWAY_URL="$GATEWAY_URL" bash "$CHECK_DEMO_SCRIPT" 2>&1) || true
-# shellcheck disable=SC2001
-CHECK_DEMO_PLAIN=$(sed 's/\x1b\[[0-9;]*m//g' <<< "$CHECK_DEMO_OUTPUT")
+
+# Runs check-demo.sh and prints its output without ANSI colours.
+run_check_demo() {
+    GATEWAY_URL="$GATEWAY_URL" bash "$CHECK_DEMO_SCRIPT" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+# Prints the JSON values printed in section N of a check-demo.sh output as
+# one array: [] when the section is missing, nothing when it is not JSON.
+# Usage: check_demo_section OUTPUT N
+check_demo_section() {
+    awk -v hdr="^=== $2\\\\. " '
+        $0 ~ hdr { on = 1; next }
+        on && /^=== [0-9]+\. / { exit }
+        on' <<< "$1" | sed -n '/^[[{]/,$p' | jq -s '.' 2>/dev/null || true
+}
+
+# Prints the value of a configuration, or nothing when it cannot be read.
+# Usage: config_value APP PARAM
+config_value() {
+    curl -s -m 10 "${API_BASE}/apps/$1/configurations/$2" | jq -c '.data' 2>/dev/null || true
+}
+
+# Checks section N of the first run against a direct read of ENDPOINT, and
+# that the second run printed a different sample. FILTER sees the printed
+# values as input, the direct read's .data as $g and SIGMA as $sigma.
+# Usage: assert_section_live N DESCRIPTION ENDPOINT SIGMA FILTER
+assert_section_live() {
+    local n="$1" description="$2" endpoint="$3" sigma="$4" filter="$5"
+    local printed printed_again direct
+    printed=$(check_demo_section "$CHECK_DEMO_PLAIN" "$n")
+    printed_again=$(check_demo_section "$CHECK_DEMO_PLAIN_2" "$n")
+    if ! api_get "$endpoint"; then
+        fail "$description" "direct read of ${endpoint} failed"
+        return
+    fi
+    direct=$(jq -c '.data' <<< "$RESPONSE" 2>/dev/null) || true
+    if ! jq -e --argjson g "${direct:-null}" --argjson sigma "${sigma:-null}" "$filter" \
+            <<< "$printed" > /dev/null 2>&1; then
+        fail "$description" "printed $(jq -c '.' <<< "$printed" 2>/dev/null || echo "no JSON"); direct read ${direct}"
+    elif [ "$printed" = "$printed_again" ]; then
+        fail "$description" "two runs printed the same values: $(jq -c '.' <<< "$printed")"
+    else
+        pass "$description"
+    fi
+}
+
+CHECK_DEMO_PLAIN=$(run_check_demo) || true
+# Every sensor publishes at 1 Hz or faster, so a run a second later reads new samples.
+sleep 1
+CHECK_DEMO_PLAIN_2=$(run_check_demo) || true
 
 if grep -q ': null' <<< "$CHECK_DEMO_PLAIN"; then
     fail "check-demo.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_DEMO_PLAIN" | head -10)"
 else
     pass "check-demo.sh prints no null fields"
+fi
+
+# Tolerances are 8 sigma of the live noise configuration: two independent
+# samples differ by more than that with a probability below 1e-7.
+LIDAR_FILTER=$(cat <<'JQ'
+length == 1 and (.[0] as $p
+  | $p.angle_min == $g.angle_min and $p.angle_max == $g.angle_max
+    and $p.range_min == $g.range_min and $p.range_max == $g.range_max
+    and ($p.sample_ranges | type == "array" and length == 5)
+    and ([range(5)] | all(. as $i | $p.sample_ranges[$i] as $r
+          | ($r | type) == "number"
+            and $r >= $g.range_min and $r <= $g.range_max
+            and (($r - $g.ranges[$i]) | fabs) <= 8 * $sigma)))
+JQ
+)
+IMU_FILTER=$(cat <<'JQ'
+length == 1 and (.[0] as $p
+  | [["linear_acceleration", $sigma.accel], ["angular_velocity", $sigma.gyro]]
+  | all(.[0] as $k | .[1] as $s | ["x", "y", "z"]
+        | all(. as $a | ($p[$k][$a] | type) == "number"
+              and (($p[$k][$a] - $g[$k][$a]) | fabs) <= 8 * $s)))
+JQ
+)
+# 111 km per degree of latitude; a degree of longitude shrinks with cos(latitude).
+GPS_FILTER=$(cat <<'JQ'
+length == 1 and (.[0] as $p
+  | ([$p.latitude, $p.longitude, $p.altitude] | all(type == "number"))
+    and (($p.latitude - $g.latitude) | fabs) <= 8 * $sigma.pos / 111000
+    and (($p.longitude - $g.longitude) | fabs)
+        <= 8 * $sigma.pos / (111000 * (($g.latitude * 3.141592653589793 / 180) | cos))
+    and (($p.altitude - $g.altitude) | fabs) <= 8 * $sigma.alt
+    and $p.status == $g.status)
+JQ
+)
+
+assert_section_live 5 "check-demo.sh section 5 shows live LiDAR values matching a direct read" \
+    "/apps/lidar-sim/data/sensors%2Fscan" "$(config_value lidar-sim noise_stddev)" "$LIDAR_FILTER"
+assert_section_live 6 "check-demo.sh section 6 shows live IMU values matching a direct read" \
+    "/apps/imu-sim/data/sensors%2Fimu" \
+    "{\"accel\": $(config_value imu-sim accel_noise_stddev), \"gyro\": $(config_value imu-sim gyro_noise_stddev)}" \
+    "$IMU_FILTER"
+assert_section_live 7 "check-demo.sh section 7 shows live GPS values matching a direct read" \
+    "/apps/gps-sim/data/sensors%2Ffix" \
+    "{\"pos\": $(config_value gps-sim position_noise_stddev), \"alt\": $(config_value gps-sim altitude_noise_stddev)}" \
+    "$GPS_FILTER"
+
+# Section 8: exactly the parameters the list endpoint lists, each with the
+# value and ROS type its own detail endpoint returns.
+CONFIG_EXPECTED=""
+if api_get "/apps/lidar-sim/configurations"; then
+    CONFIG_EXPECTED="[]"
+    while IFS= read -r cfg_id; do
+        if ! api_get "/apps/lidar-sim/configurations/${cfg_id//\//%2F}"; then
+            CONFIG_EXPECTED=""
+            break
+        fi
+        CONFIG_EXPECTED=$(jq -c --argjson d "$RESPONSE" \
+            '. + [{name: $d.id, value: $d.data, type: $d["x-medkit"].parameter.type}]' <<< "$CONFIG_EXPECTED")
+    done < <(jq -r '.items[].id' <<< "$RESPONSE")
+fi
+CONFIG_PRINTED=$(check_demo_section "$CHECK_DEMO_PLAIN" 8)
+if [ -z "$CONFIG_EXPECTED" ]; then
+    fail "check-demo.sh section 8 lists every LiDAR configuration with its value and type" \
+         "direct read of /apps/lidar-sim/configurations failed"
+elif [ "$(jq -cS 'sort_by(.name)' <<< "$CONFIG_PRINTED" 2>/dev/null)" = "$(jq -cS 'sort_by(.name)' <<< "$CONFIG_EXPECTED")" ]; then
+    pass "check-demo.sh section 8 lists every LiDAR configuration with its value and type"
+else
+    fail "check-demo.sh section 8 lists every LiDAR configuration with its value and type" \
+         "$(jq -nc --argjson p "${CONFIG_PRINTED:-[]}" --argjson e "$CONFIG_EXPECTED" \
+             '{missing: ($e - $p), unexpected: ($p - $e)}' 2>/dev/null || echo "section 8 is not JSON")"
 fi
 
 if grep -q "10\. Fault Detail with Environment Data" <<< "$CHECK_DEMO_PLAIN"; then

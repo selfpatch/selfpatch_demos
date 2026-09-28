@@ -85,11 +85,12 @@ curl -s "${API_BASE}/apps/gps-sim/data/sensors%2Ffix" | jq '{
 
 echo_step "8. Listing LiDAR Configurations"
 echo "These parameters can be modified at runtime to inject faults..."
-# The list endpoint carries id/name/type only; the value is on each parameter's
-# own detail endpoint.
+# The list endpoint carries id/name/type only; the value and the ROS type are
+# on each parameter's own detail endpoint.
 LIDAR_CONFIG_IDS=$(curl -s "${API_BASE}/apps/lidar-sim/configurations" | jq -r '.items[].id')
 while IFS= read -r cfg_id; do
-    curl -s "${API_BASE}/apps/lidar-sim/configurations/${cfg_id}" | jq '{name: .id, value: .data, type: "parameter"}'
+    curl -s "${API_BASE}/apps/lidar-sim/configurations/${cfg_id}" \
+        | jq '{name: .id, value: .data, type: .["x-medkit"].parameter.type}'
 done <<< "$LIDAR_CONFIG_IDS"
 
 echo_step "9. Checking Current Faults"
