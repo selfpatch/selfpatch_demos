@@ -45,6 +45,32 @@ if ! curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
 fi
 echo_success "Gateway is healthy!"
 
+# /health answers before the gateway links the sensor nodes, and until then the
+# data and configuration reads below come back empty.
+sensor_data_ready() {
+    local path
+    for path in lidar-sim/data/sensors%2Fscan imu-sim/data/sensors%2Fimu gps-sim/data/sensors%2Ffix; do
+        curl -sf "${API_BASE}/apps/${path}" \
+            | jq -e '.data | type == "object" and length > 0' > /dev/null 2>&1 || return 1
+    done
+    curl -sf "${API_BASE}/apps/lidar-sim/configurations" | jq -e '.items | length > 0' > /dev/null 2>&1
+}
+
+DATA_WAIT_SEC=30
+waited=0
+until sensor_data_ready; do
+    if [ "$waited" -ge "$DATA_WAIT_SEC" ]; then
+        echo_error "Sensor data not available at ${GATEWAY_URL} after ${DATA_WAIT_SEC}s."
+        echo "   Check that the sensor nodes are running, then retry."
+        exit 1
+    fi
+    if [ "$waited" -eq 0 ]; then
+        echo "Waiting for the gateway to link the sensor nodes (max ${DATA_WAIT_SEC}s)..."
+    fi
+    sleep 1
+    waited=$((waited + 1))
+done
+
 echo_step "1. Checking Gateway Health"
 curl -s "${API_BASE}/health" | jq '.'
 
