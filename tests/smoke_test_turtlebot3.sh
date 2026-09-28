@@ -150,8 +150,46 @@ else
     fail "NAVIGATION_GOAL_ABORTED fault appeared in /faults" "fault not found after 15s"
 fi
 
+# Prints the JSON values printed in section N of a script output as one array:
+# [] when the section is missing, nothing when it is not JSON. Text after the
+# section's last closing bracket, such as a script's closing lines, is dropped.
+# Usage: script_section OUTPUT N
+script_section() {
+    awk -v hdr="^=== $2\\\\. " '
+        $0 ~ hdr { on = 1; next }
+        on && /^=== [0-9]+\. / { exit }
+        on { lines[++n] = $0; if ($0 ~ /^[]}]/) last = n }
+        END { for (i = 1; i <= last; i++) print lines[i] }' <<< "$1" \
+        | sed -n '/^[[{]/,$p' | jq -s '.' 2>/dev/null || true
+}
+
+# Prints the fault list as the scripts show it, normalised by FILTER.
+# Usage: api_faults FILTER
+api_faults() {
+    curl -s -m 20 "${API_BASE}/faults" | jq -c "[.items[] | $1] | sort_by(.code)" 2>/dev/null || true
+}
+
+# Passes when PRINTED is non-empty and equals EXPECTED or ALTERNATIVE.
+# Usage: assert_printed_matches DESCRIPTION PRINTED EXPECTED [ALTERNATIVE]
+assert_printed_matches() {
+    local description="$1" printed="$2" expected="$3" alternative="${4:-}"
+    if [ -n "$printed" ] && { [ "$printed" = "$expected" ] || [ "$printed" = "$alternative" ]; }; then
+        pass "$description"
+    else
+        fail "$description" "printed ${printed:-nothing}; API ${expected:-unreadable}"
+    fi
+}
+
+# The fault list can change while a script runs, so it is read before and
+# after; the printed faults must equal one of the two reads.
+ENTITY_FAULT_FIELDS='{code: .fault_code, severity: .severity_label, sources: .reporting_sources}'
+FAULT_FIELDS='{code: .fault_code, severity: .severity_label, status: .status,
+    sources: .reporting_sources, occurrences: .occurrence_count}'
+
+ENTITY_FAULTS_BEFORE=$(api_faults "$ENTITY_FAULT_FIELDS")
 CHECK_ENTITIES_PLAIN=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./check-entities.sh 2>&1 \
     | sed 's/\x1b\[[0-9;]*m//g') || true
+ENTITY_FAULTS_AFTER=$(api_faults "$ENTITY_FAULT_FIELDS")
 
 if grep -q ': null' <<< "$CHECK_ENTITIES_PLAIN"; then
     fail "check-entities.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_ENTITIES_PLAIN" | head -10)"
@@ -165,8 +203,23 @@ else
     fail "check-entities.sh faults section shows the active fault code" "NAVIGATION_GOAL_ABORTED not in output"
 fi
 
+assert_printed_matches "check-entities.sh lists every component id" \
+    "$(script_section "$CHECK_ENTITIES_PLAIN" 2 | jq -c '[.[].id] | sort' 2>/dev/null)" \
+    "$(curl -s -m 20 "${API_BASE}/components" | jq -c '[.items[].id] | sort' 2>/dev/null)"
+
+assert_printed_matches "check-entities.sh shows each app with its component" \
+    "$(script_section "$CHECK_ENTITIES_PLAIN" 3 | jq -c 'map({id, component}) | sort_by(.id)' 2>/dev/null)" \
+    "$(curl -s -m 20 "${API_BASE}/apps" \
+        | jq -c '[.items[] | {id, component: .["x-medkit"].component_id}] | sort_by(.id)' 2>/dev/null)"
+
+assert_printed_matches "check-entities.sh shows every active fault with its severity and sources" \
+    "$(script_section "$CHECK_ENTITIES_PLAIN" 6 | jq -c 'map({code, severity, sources}) | sort_by(.code)' 2>/dev/null)" \
+    "$ENTITY_FAULTS_BEFORE" "$ENTITY_FAULTS_AFTER"
+
+FAULTS_BEFORE=$(api_faults "$FAULT_FIELDS")
 CHECK_FAULTS_PLAIN=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./check-faults.sh 2>&1 \
     | sed 's/\x1b\[[0-9;]*m//g') || true
+FAULTS_AFTER=$(api_faults "$FAULT_FIELDS")
 
 if grep -q ': null' <<< "$CHECK_FAULTS_PLAIN"; then
     fail "check-faults.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_FAULTS_PLAIN" | head -10)"
@@ -179,6 +232,13 @@ if grep -q "NAVIGATION_GOAL_ABORTED" <<< "$CHECK_FAULTS_PLAIN"; then
 else
     fail "check-faults.sh shows the active fault code" "NAVIGATION_GOAL_ABORTED not in output"
 fi
+
+# check-faults.sh prints the faults between its "Active Faults:" and
+# "Fault Summary:" lines.
+assert_printed_matches "check-faults.sh shows every active fault with its severity, status, sources and count" \
+    "$(awk '/Active Faults:$/ { on = 1; next } /Fault Summary:$/ { exit } on' <<< "$CHECK_FAULTS_PLAIN" \
+        | sed -n '/^[[{]/,$p' | jq -cs 'map({code, severity, status, sources, occurrences}) | sort_by(.code)' 2>/dev/null)" \
+    "$FAULTS_BEFORE" "$FAULTS_AFTER"
 
 # Cleanup: clear all faults so smoke_test_navigation.sh (run next on this
 # stack) does not inherit a latched fault confirmation.
