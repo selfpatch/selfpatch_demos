@@ -22,8 +22,9 @@
 #      (0, 0), the goals fail while this check still passes.
 #   4. The inject command setup-triggers.sh hints delivers its fault to the
 #      event stream watch-triggers.sh reads.
-#   5. After that inject the demo is restored: localization is not reported
-#      again and goals complete, so the script can run again on the same stack.
+#   5. After that inject restore-normal.sh alone restores the demo: AMCL agrees
+#      with the simulated pose, localization is not reported again and goals
+#      complete, so the script can run again on the same stack.
 #
 # The existing turtlebot3 smoke test deliberately does not navigate, which is
 # why the first three could ship together unnoticed.
@@ -337,26 +338,29 @@ fi
 
 section "Demo restored after the injected fault"
 
-# Sets the AMCL pose to the spawn point plus the odometry: /odom starts at the
-# spawn point, facing +x. The odometry stamp lets AMCL add later motion.
-# Echoes the HTTP status of the set_initial_pose call.
-relocalize_from_odometry() {
-    local odom request
-    odom=$(curl -s -m 10 "${API_BASE}/apps/${DETECTOR_APP}/data/odom" | jq -c '.data' 2>/dev/null) || true
-    request=$(jq -c --argjson sx "$SPAWN_X" --argjson sy "$SPAWN_Y" '
-        {parameters: {pose: {header: {frame_id: "map", stamp: .header.stamp},
-          pose: {pose: {position: {x: ($sx + .pose.pose.position.x),
-                                   y: ($sy + .pose.pose.position.y), z: 0.0},
-                        orientation: .pose.pose.orientation},
-                 covariance: [range(36) | if . == 0 or . == 7 or . == 35 then 0.01 else 0.0 end]}}}}' \
-        <<< "${odom:-null}" 2>/dev/null) || true
-    if [ -z "$request" ]; then
-        echo "no odometry"
-        return
-    fi
-    curl -s -m 20 -o /dev/null -w "%{http_code}" -X POST \
-        "${API_BASE}/apps/amcl/operations/set_initial_pose/executions" \
-        -H 'Content-Type: application/json' -d "$request" 2>/dev/null || true
+# Echoes {x, y, yaw} of a pose object with position and orientation. Protobuf
+# JSON from Gazebo leaves zero fields out, hence the defaults.
+POSE_TO_XY_YAW=$(cat <<'JQ'
+{x: (.position.x // 0), y: (.position.y // 0),
+ yaw: (.orientation | [(.w // 0), (.x // 0), (.y // 0), (.z // 0)] as [$w, $x, $y, $z]
+       | atan2(2 * ($w * $z + $x * $y); 1 - 2 * ($y * $y + $z * $z)))}
+JQ
+)
+
+# Echoes the robot's pose in the simulation as {x, y, yaw}, or nothing. The map
+# frame of this demo is the Gazebo world frame.
+sim_pose() {
+    docker exec "$DEMO_CONTAINER" bash -c \
+        'source /opt/ros/jazzy/setup.bash > /dev/null 2>&1
+         timeout 10 gz topic -e -n 1 -t /world/default/dynamic_pose/info --json-output 2> /dev/null \
+             | jq -c --arg m "$TURTLEBOT3_MODEL" ".pose[] | select(.name == \$m)"' 2> /dev/null \
+        | jq -c "$POSE_TO_XY_YAW" 2> /dev/null || true
+}
+
+# Echoes AMCL's last published pose as {x, y, yaw}, or nothing.
+amcl_pose() {
+    curl -s -m 20 "${API_BASE}/apps/amcl/data/amcl_pose" \
+        | jq -c ".data.pose.pose | $POSE_TO_XY_YAW" 2> /dev/null || true
 }
 
 # Echoes "yes" when LOCALIZATION_UNCERTAINTY is reported as failing at any
@@ -375,16 +379,8 @@ localization_reported() {
     fi
 }
 
-# The inject leaves AMCL with a uniform particle cloud, and no demo script sets
-# a pose again. Re-localize before restore-normal.sh clears the records, so no
-# pose AMCL publishes after the clear comes from the scattered cloud.
-RELOCALIZE_STATUS=$(relocalize_from_odometry)
-if [ "$RELOCALIZE_STATUS" = "200" ]; then
-    pass "AMCL takes the odometry pose through set_initial_pose"
-else
-    fail "AMCL takes the odometry pose through set_initial_pose" "got '${RELOCALIZE_STATUS}'"
-fi
-
+# The inject leaves AMCL with a uniform particle cloud. restore-normal.sh alone
+# must bring it back to the robot's real pose.
 RESTORE_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./restore-normal.sh 2>&1) || true
 if grep -q "^Done\.$" <<< "$RESTORE_OUTPUT"; then
     pass "restore-normal.sh completes"
@@ -412,6 +408,25 @@ case "$restored_state" in
     *)   fail "LOCALIZATION_UNCERTAINTY stays absent for $((2 * DETECTOR_INTERVAL))s of forced AMCL updates" \
               "could not read the fault list" ;;
 esac
+
+# A cloud that converged on the wrong place also stops being reported, so compare
+# AMCL's estimate with the robot's pose in the simulation.
+POSE_TOLERANCE_M=0.2
+POSE_TOLERANCE_RAD=0.2
+SIM_POSE=$(sim_pose)
+AMCL_POSE=$(amcl_pose)
+if [ -z "$SIM_POSE" ] || [ -z "$AMCL_POSE" ]; then
+    fail "AMCL agrees with the simulated pose after restore-normal.sh" \
+         "could not read a pose: simulation '${SIM_POSE}', AMCL '${AMCL_POSE}'"
+elif jq -e -n --argjson s "$SIM_POSE" --argjson a "$AMCL_POSE" \
+        --argjson tm "$POSE_TOLERANCE_M" --argjson tr "$POSE_TOLERANCE_RAD" '
+        (($s.x - $a.x) * ($s.x - $a.x) + ($s.y - $a.y) * ($s.y - $a.y) | sqrt) <= $tm
+        and ((($s.yaw - $a.yaw) | atan2(sin; cos)) | fabs) <= $tr' > /dev/null 2>&1; then
+    pass "AMCL agrees with the simulated pose after restore-normal.sh"
+else
+    fail "AMCL agrees with the simulated pose after restore-normal.sh" \
+         "simulation ${SIM_POSE}, AMCL ${AMCL_POSE}, tolerance ${POSE_TOLERANCE_M} m and ${POSE_TOLERANCE_RAD} rad"
+fi
 
 # The second goal returns the robot to the spawn point, where the next run
 # of this script expects it.
