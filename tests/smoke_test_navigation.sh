@@ -348,12 +348,13 @@ JQ
 )
 
 # Echoes the robot's pose in the simulation as {x, y, yaw}, or nothing. The map
-# frame of this demo is the Gazebo world frame.
+# frame of this demo is the Gazebo world frame. A single read has returned the
+# model twice, so only the first match is used.
 sim_pose() {
     docker exec "$DEMO_CONTAINER" bash -c \
         'source /opt/ros/jazzy/setup.bash > /dev/null 2>&1
          timeout 10 gz topic -e -n 1 -t /world/default/dynamic_pose/info --json-output 2> /dev/null \
-             | jq -c --arg m "$TURTLEBOT3_MODEL" ".pose[] | select(.name == \$m)"' 2> /dev/null \
+             | jq -c -n --arg m "$TURTLEBOT3_MODEL" "first(inputs | .pose[] | select(.name == \$m))"' 2> /dev/null \
         | jq -c "$POSE_TO_XY_YAW" 2> /dev/null || true
 }
 

@@ -39,9 +39,10 @@ MODEL="${TURTLEBOT3_MODEL:-burger}"
 WORLD=$(timeout 10 gz topic -l 2>/dev/null | sed -n 's|^/world/\([^/]*\)/dynamic_pose/info$|\1|p' | head -n 1) || WORLD=""
 POSE_REQUEST=""
 if [ -n "${WORLD}" ]; then
+    # A single read has returned the model twice, so only the first match is used.
     POSE_REQUEST=$(timeout 10 gz topic -e -n 1 -t "/world/${WORLD}/dynamic_pose/info" --json-output 2>/dev/null \
-        | jq -c --arg m "${MODEL}" '
-            .pose[] | select(.name == $m)
+        | jq -c -n --arg m "${MODEL}" '
+            first(inputs | .pose[] | select(.name == $m))
             | (.orientation | [(.w // 0), (.x // 0), (.y // 0), (.z // 0)] as [$w, $x, $y, $z]
                | atan2(2 * ($w * $z + $x * $y); 1 - 2 * ($y * $y + $z * $z))) as $yaw
             | {parameters: {pose: {header: {frame_id: "map"},
