@@ -49,10 +49,6 @@ COPY src/ ${COLCON_WS}/src/multi_ecu_demo/src/
 COPY config/ ${COLCON_WS}/src/multi_ecu_demo/config/
 COPY launch/ ${COLCON_WS}/src/multi_ecu_demo/launch/
 
-# Copy container scripts
-COPY container_scripts/ /var/lib/ros2_medkit/scripts/
-RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
-
 # Build all packages (skip test dependencies that aren't in ros-base)
 WORKDIR ${COLCON_WS}
 RUN bash -c "source /opt/ros/jazzy/setup.bash && \
@@ -60,6 +56,11 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep install --from-paths src --ignore-src -r -y \
       --skip-keys='ament_cmake_clang_format ament_cmake_clang_tidy test_msgs example_interfaces sqlite3' && \
     MAKEFLAGS='-j 2' colcon build --executor sequential --symlink-install --cmake-args -DBUILD_TESTING=OFF"
+
+# Copy container scripts. Not a build input: kept after colcon build so a
+# script-only change does not invalidate the compile cache.
+COPY container_scripts/ /var/lib/ros2_medkit/scripts/
+RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
 
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \

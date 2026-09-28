@@ -337,6 +337,27 @@ curl -X POST http://localhost:8080/api/v1/components/actuation-ecu/scripts/injec
   -d '{"execution_type":"now"}' | jq
 ```
 
+### How the Scripts Change Parameters
+
+Each script sets node parameters through its own ECU's gateway, with the
+configuration API. The same call works from the host through the perception
+gateway:
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/apps/path-planner/configurations/planning_delay_ms \
+  -H "Content-Type: application/json" -d '{"value": 5000}'
+```
+
+A script whose write is refused exits non-zero, and the execution's error
+message names each failed write, for example
+`FAIL: gripper-controller/inject_jam (HTTP 409)`. `restore-normal` clears the
+ECU's faults only after all its writes succeeded.
+
+`path-planner` runs its planning timer in its own callback group, so its
+parameters stay writable while `inject-planning-delay` is active, and a new
+`planning_delay_ms` also shortens the cycle already in progress.
+`restore-normal` right after `inject-planning-delay` takes a few seconds.
+
 ### Available Scripts per ECU
 
 | ECU | Script | Description |
