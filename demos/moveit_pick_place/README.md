@@ -73,7 +73,20 @@ Use the interactive arm controller to send joint trajectories:
 ```
 
 The script sends goals directly to the `panda_arm_controller/follow_joint_trajectory` action.
-It works both from outside (via `docker exec`) and from inside the container.
+It works both from outside (via `docker exec`, no TTY required) and from inside the container.
+
+`pick_place_loop.py` keeps sending its own goals to the same controller, so a manual move
+can be preempted mid-motion by the demo's own workload. `move-arm.sh` reports the goal's
+real final status: if the controller aborts it (`error_string: Current goal preempted by
+new incoming action`), the script prints `Failed: <pose> (status: ABORTED)` and exits
+non-zero instead of claiming success. `./move-arm.sh demo` runs all three steps regardless
+of earlier failures and reports each one; the command exits non-zero if any step failed.
+
+Each `ros2 action send_goal` run is limited to 30 seconds. The controller can fail to
+deliver the goal response to a freshly started CLI (the container log shows `Failed to send
+goal response`); it then never runs that goal. When no goal response arrives, the script
+sends the goal again, up to three times. A goal that was accepted is never sent twice: if
+its result does not arrive in time, the script prints `Failed: <pose> (status: UNKNOWN)`.
 
 ### 4. Viewing Logs
 
@@ -308,8 +321,8 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ### How It Works
 
-1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/manipulation_monitor/triggers`:
-   - **Resource:** `/api/v1/apps/manipulation_monitor/faults` (watches fault collection)
+1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/manipulation-monitor/triggers`:
+   - **Resource:** `/api/v1/apps/manipulation-monitor/faults` (watches fault collection)
    - **Condition:** `OnChange` (fires on any new or updated fault)
    - **Multishot:** `true` (fires repeatedly, not just once)
    - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
@@ -320,23 +333,23 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ```bash
 # Create a trigger
-curl -X POST http://localhost:8080/api/v1/apps/manipulation_monitor/triggers \
+curl -X POST http://localhost:8080/api/v1/apps/manipulation-monitor/triggers \
   -H "Content-Type: application/json" \
   -d '{
-    "resource": "/api/v1/apps/manipulation_monitor/faults",
+    "resource": "/api/v1/apps/manipulation-monitor/faults",
     "trigger_condition": {"condition_type": "OnChange"},
     "multishot": true,
     "lifetime": 3600
   }' | jq
 
 # List triggers
-curl http://localhost:8080/api/v1/apps/manipulation_monitor/triggers | jq
+curl http://localhost:8080/api/v1/apps/manipulation-monitor/triggers | jq
 
 # Watch events (replace TRIGGER_ID)
-curl -N http://localhost:8080/api/v1/apps/manipulation_monitor/triggers/TRIGGER_ID/events
+curl -N http://localhost:8080/api/v1/apps/manipulation-monitor/triggers/TRIGGER_ID/events
 
 # Delete a trigger
-curl -X DELETE http://localhost:8080/api/v1/apps/manipulation_monitor/triggers/TRIGGER_ID
+curl -X DELETE http://localhost:8080/api/v1/apps/manipulation-monitor/triggers/TRIGGER_ID
 ```
 
 ## Fault Injection Scenarios

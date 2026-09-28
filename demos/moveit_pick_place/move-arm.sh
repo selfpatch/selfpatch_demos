@@ -19,6 +19,13 @@ JOINT_NAMES='["panda_joint1","panda_joint2","panda_joint3","panda_joint4","panda
 # Duration in seconds for trajectory execution
 DURATION_SEC=3
 
+# Time limit for one `ros2 action send_goal` run, and how many runs per goal.
+# The controller can fail to deliver the goal response to a new CLI
+# ("Failed to send goal response"). It then never runs the goal and the CLI
+# waits forever, so a goal with no response is sent again.
+SEND_TIMEOUT_SEC=30
+SEND_ATTEMPTS=3
+
 # --- Preset joint positions (radians) ---
 # Ready: default MoveIt pose (from SRDF)
 READY="[0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]"
@@ -45,6 +52,15 @@ RIGHT="[1.5, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]"
 WAVE="[0.0, -1.0, 0.0, -0.5, 0.0, 2.5, 0.785]"
 
 
+# True only if a LOCAL ros2 can actually reach the target action server.
+# `ros2 node list` exits 0 even on an empty graph (wrong ROS_DOMAIN_ID, no
+# multicast route), so a host with ROS 2 sourced but not connected to the
+# demo looks identical to being inside the container. Checking that the
+# action itself is listed avoids that false positive.
+can_reach_action_locally() {
+    command -v ros2 &> /dev/null && ros2 action list 2> /dev/null | grep -qFx "${ACTION}"
+}
+
 send_trajectory() {
     local positions="$1"
     local label="$2"
@@ -64,27 +80,57 @@ send_trajectory() {
         }
     }"
 
-    # Check if we're inside the container or outside
-    if command -v ros2 &> /dev/null && ros2 node list &> /dev/null 2>&1; then
-        # Inside the container (or ROS 2 env is set up)
-        ros2 action send_goal "${ACTION}" \
-            control_msgs/action/FollowJointTrajectory \
-            "${goal_msg}" \
-            --feedback
-    else
-        # Outside — exec into container
-        docker exec -it "${CONTAINER}" bash -c "
-            source /opt/ros/jazzy/setup.bash && \
-            source /root/demo_ws/install/setup.bash && \
-            ros2 action send_goal ${ACTION} \
-                control_msgs/action/FollowJointTrajectory \
-                \"${goal_msg}\" \
-                --feedback
-        "
+    # `ros2 action send_goal` always exits 0, whatever the goal's outcome -
+    # the real result is in its own printed "Goal finished with status:"
+    # line, so capture output and parse that instead of the exit code.
+    # PYTHONUNBUFFERED keeps the lines printed before a timeout kills the CLI.
+    local local_ros2=false attempt output
+    if can_reach_action_locally; then
+        local_ros2=true
     fi
+    for ((attempt = 1; attempt <= SEND_ATTEMPTS; attempt++)); do
+        if [[ "${local_ros2}" == true ]]; then
+            output=$(PYTHONUNBUFFERED=1 timeout "${SEND_TIMEOUT_SEC}" \
+                ros2 action send_goal "${ACTION}" \
+                control_msgs/action/FollowJointTrajectory \
+                "${goal_msg}" \
+                --feedback 2>&1) || true
+        else
+            # Outside the container: exec into it. No -it: this must also
+            # work without a TTY (CI, a pipe), and the command needs no stdin.
+            # timeout runs in the container: killing `docker exec` would
+            # leave the CLI running there.
+            output=$(docker exec "${CONTAINER}" bash -c "
+                source /opt/ros/jazzy/setup.bash && \
+                source /root/demo_ws/install/setup.bash && \
+                PYTHONUNBUFFERED=1 timeout ${SEND_TIMEOUT_SEC} \
+                ros2 action send_goal ${ACTION} \
+                    control_msgs/action/FollowJointTrajectory \
+                    \"${goal_msg}\" \
+                    --feedback
+            " 2>&1) || true
+        fi
+        printf '%s\n' "${output}"
+        # An accepted or rejected goal has its answer. Only a goal that got
+        # no response at all never ran, so only that one is sent again.
+        if grep -qE '^(Goal accepted with ID|Goal was rejected)' <<< "${output}"; then
+            break
+        fi
+        if ((attempt < SEND_ATTEMPTS)); then
+            echo "No goal response within ${SEND_TIMEOUT_SEC} s, sending the goal again"
+        fi
+    done
+
+    local status
+    status=$(printf '%s\n' "${output}" | grep -F 'Goal finished with status:' | tail -n1 | sed -E 's/.*status: *//')
 
     echo ""
-    echo "✅ Done: ${label}"
+    if [[ "${status}" == "SUCCEEDED" ]]; then
+        echo "✅ Done: ${label}"
+        return 0
+    fi
+    echo "Failed: ${label} (status: ${status:-UNKNOWN})" >&2
+    return 1
 }
 
 show_menu() {
@@ -110,13 +156,19 @@ show_menu() {
 run_demo_cycle() {
     echo "🔄 Running pick → place → home cycle..."
     echo ""
-    send_trajectory "${PICK}" "pick"
+    local failed=0
+    send_trajectory "${PICK}" "pick" || failed=1
     sleep 2
-    send_trajectory "${PLACE}" "place"
+    send_trajectory "${PLACE}" "place" || failed=1
     sleep 2
-    send_trajectory "${READY}" "ready (home)"
+    send_trajectory "${READY}" "ready (home)" || failed=1
     echo ""
-    echo "🔄 Cycle complete!"
+    if [[ "${failed}" -eq 0 ]]; then
+        echo "🔄 Cycle complete!"
+    else
+        echo "🔄 Cycle complete with failures" >&2
+    fi
+    return "${failed}"
 }
 
 handle_choice() {
@@ -138,15 +190,20 @@ handle_choice() {
 
 # --- Main ---
 
-# If argument provided, run directly
+# If argument provided, run directly. Reflect the goal's real result in the
+# exit code instead of always exiting 0.
 if [[ $# -gt 0 ]]; then
-    handle_choice "$1"
-    exit 0
+    if handle_choice "$1"; then
+        exit 0
+    else
+        exit 1
+    fi
 fi
 
-# Interactive mode
+# Interactive mode. A failed goal reports failure and the menu continues -
+# it must not kill the session (set -e would, without this guard).
 while true; do
     show_menu
     read -rp "Choose position (1-8, d, q): " choice
-    handle_choice "${choice}"
+    handle_choice "${choice}" || true
 done
