@@ -94,6 +94,73 @@ section "Logs"
 
 assert_non_empty_items "/apps/medkit-gateway/logs"
 
+section "Check-Entities and Check-Faults Scripts"
+
+TB3_DIR="${SCRIPT_DIR}/../demos/turtlebot3_integration"
+
+# Inject a real fault via the Scripts API so check-entities.sh (section 6)
+# and check-faults.sh exercise the fault-carrying fields, not just the
+# empty case.
+echo "  Injecting navigation failure via Scripts API..."
+INJECT_RESPONSE=$(curl -s -m 30 -X POST "${API_BASE}/components/nav2-stack/scripts/inject-nav-failure/executions" \
+    -H "Content-Type: application/json" -d '{"execution_type": "now"}') || true
+INJECT_EXEC_ID=$(echo "$INJECT_RESPONSE" | jq -r '.id // empty')
+if [ -n "$INJECT_EXEC_ID" ]; then
+    elapsed=0
+    while [ $elapsed -lt 30 ]; do
+        st=$(curl -s "${API_BASE}/components/nav2-stack/scripts/inject-nav-failure/executions/${INJECT_EXEC_ID}" | jq -r '.status')
+        if [ "$st" = "completed" ] || [ "$st" = "failed" ]; then
+            break
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+fi
+
+echo "  Waiting for NAVIGATION_GOAL_ABORTED fault to appear (max 15s)..."
+if poll_until "/faults" '.items[] | select(.fault_code == "NAVIGATION_GOAL_ABORTED")' 15; then
+    pass "NAVIGATION_GOAL_ABORTED fault appeared in /faults"
+else
+    fail "NAVIGATION_GOAL_ABORTED fault appeared in /faults" "fault not found after 15s"
+fi
+
+CHECK_ENTITIES_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./check-entities.sh 2>&1) || true
+# shellcheck disable=SC2001
+CHECK_ENTITIES_PLAIN=$(sed 's/\x1b\[[0-9;]*m//g' <<< "$CHECK_ENTITIES_OUTPUT")
+
+if grep -q ': null' <<< "$CHECK_ENTITIES_PLAIN"; then
+    fail "check-entities.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_ENTITIES_PLAIN" | head -10)"
+else
+    pass "check-entities.sh prints no null fields"
+fi
+
+if grep -q "NAVIGATION_GOAL_ABORTED" <<< "$CHECK_ENTITIES_PLAIN"; then
+    pass "check-entities.sh faults section shows the active fault code"
+else
+    fail "check-entities.sh faults section shows the active fault code" "NAVIGATION_GOAL_ABORTED not in output"
+fi
+
+CHECK_FAULTS_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./check-faults.sh 2>&1) || true
+# shellcheck disable=SC2001
+CHECK_FAULTS_PLAIN=$(sed 's/\x1b\[[0-9;]*m//g' <<< "$CHECK_FAULTS_OUTPUT")
+
+if grep -q ': null' <<< "$CHECK_FAULTS_PLAIN"; then
+    fail "check-faults.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_FAULTS_PLAIN" | head -10)"
+else
+    pass "check-faults.sh prints no null fields"
+fi
+
+if grep -q "NAVIGATION_GOAL_ABORTED" <<< "$CHECK_FAULTS_PLAIN"; then
+    pass "check-faults.sh shows the active fault code"
+else
+    fail "check-faults.sh shows the active fault code" "NAVIGATION_GOAL_ABORTED not in output"
+fi
+
+# Cleanup: clear all faults so smoke_test_navigation.sh (run next on this
+# stack) does not inherit a latched fault confirmation.
+echo "  Cleaning up: clearing faults..."
+curl -s -X DELETE "${API_BASE}/faults" > /dev/null || true
+
 section "Triggers"
 
 assert_triggers_crud "apps" "diagnostic-bridge" "/api/v1/apps/diagnostic-bridge/faults"

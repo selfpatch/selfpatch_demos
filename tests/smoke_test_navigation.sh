@@ -274,6 +274,51 @@ section "Localization held while driving"
 sleep "$FAULT_SETTLE"
 assert_localization_certain "after the drive"
 
+section "Trigger delivers fault events"
+
+# Drive setup-triggers.sh / watch-triggers.sh / inject-localization-failure.sh
+# exactly as a user would: the trigger watches apps/${DETECTOR_APP}, which is
+# what reports both navigation and localization faults directly.
+# inject-nav-failure's goal is rejected by the planner before a fault confirms,
+# which never reaches the confirmed state the trigger fires on;
+# inject-localization-failure reliably confirms LOCALIZATION_UNCERTAINTY.
+TB3_DIR="${SCRIPT_DIR}/../demos/turtlebot3_integration"
+
+SETUP_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./setup-triggers.sh 2>&1) || true
+TRIGGER_ID=$(sed -n 's/^  ID:[[:space:]]*//p' <<< "$SETUP_OUTPUT" | head -1)
+
+if [ -n "$TRIGGER_ID" ]; then
+    pass "setup-triggers.sh creates a trigger on apps/${DETECTOR_APP}"
+else
+    fail "setup-triggers.sh creates a trigger on apps/${DETECTOR_APP}" "$(tail -5 <<< "$SETUP_OUTPUT")"
+fi
+
+if [ -n "$TRIGGER_ID" ]; then
+    WATCH_LOG=$(mktemp)
+    (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" timeout 20 bash ./watch-triggers.sh "$TRIGGER_ID") \
+        > "$WATCH_LOG" 2>&1 &
+    WATCH_PID=$!
+    sleep 2
+
+    (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./inject-localization-failure.sh) > /dev/null 2>&1 || true
+
+    wait "$WATCH_PID" 2>/dev/null || true
+
+    if grep -q "Event received" "$WATCH_LOG"; then
+        pass "watch-triggers.sh receives at least one event after inject-localization-failure.sh"
+    else
+        fail "watch-triggers.sh receives at least one event after inject-localization-failure.sh" \
+             "$(tail -5 "$WATCH_LOG")"
+    fi
+    rm -f "$WATCH_LOG"
+
+    curl -s -o /dev/null -X DELETE "${API_BASE}/apps/${DETECTOR_APP}/triggers/${TRIGGER_ID}" || true
+fi
+
+# Cleanup: clear the injected fault and any incidental localization latch so
+# a re-run of this script on the same container starts clean.
+curl -s -X DELETE "${API_BASE}/faults" > /dev/null || true
+
 # --- Summary ---
 
 # print_summary runs via EXIT trap; exit code reflects test results
