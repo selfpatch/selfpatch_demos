@@ -23,15 +23,125 @@ DEMO_CONTAINER="${MOVEIT_DEMO_CONTAINER:-moveit_medkit_demo_ci}"
 ACTION="/panda_arm_controller/follow_joint_trajectory"
 PICK_PLACE_PATTERN='^python3 /root/demo_ws/install/moveit_medkit_demo/lib/moveit_medkit_demo/pick_place_loop\.py'
 
-# pick_place_loop sends goals to the same controller action move-arm.sh
-# drives directly, so a live loop makes goal outcomes below racy against the
-# demo's own workload. Pausing the OS process (no file or behavior change)
-# is how the tests below get a deterministic outcome to assert on.
+# container_python <args...>: run the Python script on stdin inside the demo
+# container, with the ROS 2 environment sourced.
+container_python() {
+    docker exec -i "${DEMO_CONTAINER}" bash -c '
+        set +u
+        source /opt/ros/jazzy/setup.bash
+        source /root/demo_ws/install/setup.bash
+        exec python3 - "$@"
+    ' container_python "$@"
+}
+
+# Arm controller probe, run with container_python.
+#   idle <action>:    exit 0 once neither the arm controller nor MoveGroup has
+#                     an active goal for 1 s.
+#   preempt <action>: wait for idle, print ARMED, then abort the next goal the
+#                     arm controller starts by sending a competing goal at once.
+CONTROLLER_PROBE_PY=$(cat <<'PY'
+import sys
+import time
+
+import rclpy
+from action_msgs.msg import GoalStatus, GoalStatusArray
+from builtin_interfaces.msg import Duration
+from control_msgs.action import FollowJointTrajectory
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from rclpy.qos import qos_profile_action_status_default
+from trajectory_msgs.msg import JointTrajectoryPoint
+
+mode, arm_action = sys.argv[1], sys.argv[2]
+ACTIVE = (GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING, GoalStatus.STATUS_CANCELING)
+NAMES = {GoalStatus.STATUS_SUCCEEDED: "SUCCEEDED", GoalStatus.STATUS_CANCELED: "CANCELED",
+         GoalStatus.STATUS_ABORTED: "ABORTED"}
+
+rclpy.init()
+node = Node("smoke_controller_probe")
+goals = {}
+subscriptions = []
+for action in (arm_action, "/move_action"):
+    goals[action] = []
+    subscriptions.append(node.create_subscription(
+        GoalStatusArray, action + "/_action/status",
+        lambda msg, action=action: goals.__setitem__(action, list(msg.status_list)),
+        qos_profile_action_status_default))
+client = ActionClient(node, FollowJointTrajectory, arm_action)
+if not client.wait_for_server(timeout_sec=30):
+    sys.exit("arm controller action server not available")
+
+
+def spin_until(condition, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+        if condition():
+            return True
+    return False
+
+
+quiet_since = None
+
+
+def idle():
+    global quiet_since
+    busy = any(s.status in ACTIVE for status_list in goals.values() for s in status_list)
+    matched = all(sub.get_publisher_count() > 0 for sub in subscriptions)
+    if busy or not matched:
+        quiet_since = None
+        return False
+    quiet_since = quiet_since or time.monotonic()
+    return time.monotonic() - quiet_since >= 1.0
+
+
+if not spin_until(idle, 60):
+    sys.exit("arm controller or MoveGroup still busy after 60 s")
+if mode == "idle":
+    sys.exit(0)
+
+seen = {bytes(s.goal_info.goal_id.uuid) for s in goals[arm_action]}
+print("ARMED", flush=True)
+
+
+def new_goal_executing():
+    return any(s.status == GoalStatus.STATUS_EXECUTING
+               and bytes(s.goal_info.goal_id.uuid) not in seen
+               for s in goals[arm_action])
+
+
+if not spin_until(new_goal_executing, 90):
+    sys.exit("no new arm goal started within 90 s")
+
+goal = FollowJointTrajectory.Goal()
+goal.trajectory.joint_names = [f"panda_joint{i}" for i in range(1, 8)]
+goal.trajectory.points = [JointTrajectoryPoint(
+    positions=[0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785],
+    time_from_start=Duration(sec=1))]
+sent = client.send_goal_async(goal)
+rclpy.spin_until_future_complete(node, sent)
+if not sent.result().accepted:
+    sys.exit("competing goal rejected")
+result = sent.result().get_result_async()
+rclpy.spin_until_future_complete(node, result)
+print("PREEMPTED, competing goal " + NAMES.get(result.result().status, "UNKNOWN"), flush=True)
+node.destroy_node()
+rclpy.shutdown()
+PY
+)
+
+# pick_place_loop sends MoveGroup goals to the arm controller that move-arm.sh
+# drives. SIGSTOP pauses it without changing the demo. A MoveGroup goal it
+# already sent still runs to its end, so wait until the arm is idle.
 stop_pick_place_loop() {
     docker exec "${DEMO_CONTAINER}" bash -c "
         pid=\$(pgrep -f '${PICK_PLACE_PATTERN}') || exit 0
         kill -STOP \"\${pid}\"
     " > /dev/null 2>&1 || true
+    if ! container_python idle "${ACTION}" <<< "${CONTROLLER_PROBE_PY}" \
+        > /tmp/moveit_smoke_idle.log 2>&1; then
+        fail "setup: arm idle after pausing pick_place_loop" "$(tail -n 3 /tmp/moveit_smoke_idle.log)"
+    fi
 }
 
 resume_pick_place_loop() {
@@ -39,6 +149,56 @@ resume_pick_place_loop() {
         pid=\$(pgrep -f '${PICK_PLACE_PATTERN}') || exit 0
         kill -CONT \"\${pid}\"
     " > /dev/null 2>&1 || true
+}
+
+# start_preemptor <log>: start the preempt probe in the background and return
+# once it listens. Sets PREEMPTOR_PID.
+start_preemptor() {
+    local log="$1" waited=0
+    # Empty the log first: an ARMED line left by an earlier run must not count.
+    : > "${log}"
+    container_python preempt "${ACTION}" <<< "${CONTROLLER_PROBE_PY}" >> "${log}" 2>&1 &
+    PREEMPTOR_PID=$!
+    until grep -q '^ARMED' "${log}"; do
+        if ! kill -0 "${PREEMPTOR_PID}" 2> /dev/null || [ "${waited}" -ge 900 ]; then
+            return 1
+        fi
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+}
+
+# run_move_arm <log> <args...>: move-arm.sh without a TTY. Sets MOVE_ARM_RC.
+run_move_arm() {
+    local log="$1"
+    shift
+    if CONTAINER_NAME="${DEMO_CONTAINER}" "${DEMO_DIR}/move-arm.sh" "$@" < /dev/null > "${log}" 2>&1; then
+        MOVE_ARM_RC=0
+    else
+        MOVE_ARM_RC=$?
+    fi
+}
+
+# real_status <log>: the final status the action client printed itself, read
+# without move-arm.sh's own verdict. Empty when no goal finished.
+real_status() {
+    { grep -F 'Goal finished with status:' "$1" || true; } | tail -n 1 | sed -E 's/.*status: *//'
+}
+
+# reports_status <file> <label> <status>: the file holds exactly one result
+# line. It is the success line for <label> when <status> is SUCCEEDED, else a
+# failure line for <label> that names <status>.
+reports_status() {
+    local file="$1" label="$2" status="$3" results
+    results=$(grep -cE '^(✅ Done|Failed):' "${file}" || true)
+    [ "${results}" -eq 1 ] || return 1
+    if [ "${status}" = "SUCCEEDED" ]; then
+        grep -qFx "✅ Done: ${label}" "${file}"
+    elif [ -n "${status}" ]; then
+        grep -qFx "Failed: ${label} (status: ${status})" "${file}"
+    else
+        grep -qF "Failed: ${label} (" "${file}"
+    fi
 }
 
 # print_summary reads the script's exit status from $?, so hand it the
@@ -130,7 +290,7 @@ section "Triggers"
 
 assert_triggers_crud "apps" "diagnostic-bridge-app" "/api/v1/apps/diagnostic-bridge-app/faults"
 
-section "check-entities.sh: no null fields, including under an active fault"
+section "check-entities.sh: real values, including under an active fault"
 
 # Force a real fault: send two goals to the same controller back to back so
 # the second preempts the first, a real ABORTED goal that
@@ -202,16 +362,100 @@ else
     fail "setup: a real active fault exists" "no fault after forced controller preemption"
 fi
 
-ENTITIES_OUTPUT=$(GATEWAY_URL="${GATEWAY_URL}" "${DEMO_DIR}/check-entities.sh" 2>&1) || true
-if ! printf '%s\n' "${ENTITIES_OUTPUT}" | grep -q 'exploration complete'; then
-    fail "check-entities.sh runs to completion" \
-        "$(printf '%s\n' "${ENTITIES_OUTPUT}" | tail -5)"
-elif printf '%s\n' "${ENTITIES_OUTPUT}" | grep -q '": null'; then
+ENTITIES_LOG=/tmp/moveit_smoke_entities.log
+FAULT_FIELDS='[.items[] | {fault_code, severity_label, status, reporting_sources}] | sort_by(.fault_code)'
+
+# Faults can change state while the script runs. Read them on both sides of
+# the run and retry until both reads agree.
+for attempt in 1 2 3; do
+    API_FAULTS=$(curl -s -m 30 "${API_BASE}/faults")
+    GATEWAY_URL="${GATEWAY_URL}" "${DEMO_DIR}/check-entities.sh" < /dev/null 2>&1 \
+        | sed 's/\x1b\[[0-9;]*m//g' > "${ENTITIES_LOG}" || true
+    API_FAULTS_AFTER=$(curl -s -m 30 "${API_BASE}/faults")
+    if [ "$(jq -c "${FAULT_FIELDS}" <<< "${API_FAULTS}")" = "$(jq -c "${FAULT_FIELDS}" <<< "${API_FAULTS_AFTER}")" ]; then
+        break
+    fi
+    echo "  Faults changed during attempt ${attempt}/3, running again..."
+done
+
+if ! grep -q 'exploration complete' "${ENTITIES_LOG}"; then
+    fail "check-entities.sh runs to completion" "$(tail -n 5 "${ENTITIES_LOG}")"
+elif grep -q '": null' "${ENTITIES_LOG}"; then
     fail "check-entities.sh prints no null fields" \
-        "$(printf '%s\n' "${ENTITIES_OUTPUT}" | grep '": null' | sort -u | tr '\n' ';')"
+        "$(grep '": null' "${ENTITIES_LOG}" | sort -u | tr '\n' ';')"
 else
     pass "check-entities.sh prints no null fields"
 fi
+
+# shown_items <n>: the JSON objects check-entities.sh printed under its
+# "=== <n>. ..." heading, as one array.
+shown_items() {
+    awk -v heading="=== $1. " '
+        index($0, "=== ") == 1 { on = (index($0, heading) == 1); next }
+        index($0, "Entity hierarchy exploration complete") { on = 0 }
+        on
+    ' "${ENTITIES_LOG}" | jq -s -c '.'
+}
+
+SHOWN_COMPONENTS=$(shown_items 2) || SHOWN_COMPONENTS='[]'
+SHOWN_APPS=$(shown_items 3) || SHOWN_APPS='[]'
+SHOWN_FAULTS=$(shown_items 6) || SHOWN_FAULTS='[]'
+
+API_COMPONENTS=$(curl -s -m 30 "${API_BASE}/components")
+for id in panda-arm panda-gripper moveit-planning pick-place-loop gateway fault-manager diagnostic-bridge; do
+    expected=$(jq -c --arg id "${id}" '.items[] | select(.id == $id) | {id, name, description}' \
+        <<< "${API_COMPONENTS}") || expected=""
+    shown=$(jq -c --arg id "${id}" '.[] | select(.id == $id) | {id, name, description}' \
+        <<< "${SHOWN_COMPONENTS}") || shown=""
+    if [ -n "${expected}" ] && [ "${shown}" = "${expected}" ]; then
+        pass "check-entities.sh shows component ${id} as the API does"
+    else
+        fail "check-entities.sh shows component ${id} as the API does" \
+            "api=${expected:-none} shown=${shown:-none}"
+    fi
+done
+
+API_APPS=$(curl -s -m 30 "${API_BASE}/apps")
+API_APP_IDS=$(jq -c '[.items[].id] | sort' <<< "${API_APPS}") || API_APP_IDS=""
+SHOWN_APP_IDS=$(jq -c '[.[].id] | sort' <<< "${SHOWN_APPS}") || SHOWN_APP_IDS=""
+if [ -n "${API_APP_IDS}" ] && [ "${API_APP_IDS}" != "[]" ] && [ "${SHOWN_APP_IDS}" = "${API_APP_IDS}" ]; then
+    pass "check-entities.sh lists every app the API lists"
+else
+    fail "check-entities.sh lists every app the API lists" "api=${API_APP_IDS:-none} shown=${SHOWN_APP_IDS:-none}"
+fi
+for id in joint-state-broadcaster panda-arm-controller panda-hand-controller robot-state-publisher move-group \
+    pick-place-node medkit-gateway medkit-fault-manager diagnostic-bridge-app manipulation-monitor; do
+    expected=$(jq -r --arg id "${id}" '.items[] | select(.id == $id) | .["x-medkit"].component_id // empty' \
+        <<< "${API_APPS}") || expected=""
+    shown=$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .component' <<< "${SHOWN_APPS}") || shown=""
+    if [ -n "${expected}" ] && [ "${shown}" = "${expected}" ]; then
+        pass "check-entities.sh shows app ${id} on component ${expected}"
+    else
+        fail "check-entities.sh shows app ${id} on component ${expected:-none}" "shown=${shown:-none}"
+    fi
+done
+
+FAULT_CODES=$(jq -r '.items[].fault_code' <<< "${API_FAULTS_AFTER}") || FAULT_CODES=""
+API_FAULT_COUNT=$(jq '.items | length' <<< "${API_FAULTS_AFTER}") || API_FAULT_COUNT=0
+SHOWN_FAULT_COUNT=$(jq 'length' <<< "${SHOWN_FAULTS}") || SHOWN_FAULT_COUNT=0
+if [ "${API_FAULT_COUNT:-0}" -gt 0 ] && [ "${SHOWN_FAULT_COUNT:-0}" -eq "${API_FAULT_COUNT}" ]; then
+    pass "check-entities.sh lists all ${API_FAULT_COUNT} active faults"
+else
+    fail "check-entities.sh lists all active faults" "api=${API_FAULT_COUNT} shown=${SHOWN_FAULT_COUNT}"
+fi
+while IFS= read -r code; do
+    [ -n "${code}" ] || continue
+    expected=$(jq -c --arg code "${code}" '.items[] | select(.fault_code == $code)
+        | [.fault_code, .severity_label, .status, .reporting_sources]' <<< "${API_FAULTS_AFTER}") || expected=""
+    shown=$(jq -c --arg code "${code}" '.[] | select(.code == $code) | [.code, .severity, .status, .sources]' \
+        <<< "${SHOWN_FAULTS}") || shown=""
+    if [ -n "${expected}" ] && [ "${shown}" = "${expected}" ]; then
+        pass "check-entities.sh shows fault ${code} with the API's code, severity, status and sources"
+    else
+        fail "check-entities.sh shows fault ${code} with the API's code, severity, status and sources" \
+            "api=${expected:-none} shown=${shown:-none}"
+    fi
+done <<< "${FAULT_CODES}"
 
 section "move-arm.sh: a local ros2 that cannot reach the demo still moves the arm"
 
@@ -254,127 +498,114 @@ fi
 
 section "move-arm.sh: reports the goal's real final status"
 
-# Launch two goals for the same joints at (as close as the shell gets to)
-# the same instant. The controller always aborts whichever one it already
-# had in flight when the second arrives, so exactly one of the two
-# invocations below is guaranteed to see a real ABORTED result and the
-# other a real SUCCEEDED one - which one is not predictable, so both are
-# checked post hoc.
-stop_pick_place_loop
-# set +e inside each subshell: it inherits the outer `set -e`, and without
-# this a non-zero move-arm.sh exit (exactly what these subshells expect to
-# sometimes see) would abort the subshell before it writes its .rc file.
-(
-    set +e
-    CONTAINER_NAME="${DEMO_CONTAINER}" "${DEMO_DIR}/move-arm.sh" ready < /dev/null \
-        > /tmp/moveit_smoke_goal_a.log 2>&1
-    echo "$?" > /tmp/moveit_smoke_goal_a.rc
-) &
-GOAL_A_PID=$!
-(
-    set +e
-    CONTAINER_NAME="${DEMO_CONTAINER}" "${DEMO_DIR}/move-arm.sh" place < /dev/null \
-        > /tmp/moveit_smoke_goal_b.log 2>&1
-    echo "$?" > /tmp/moveit_smoke_goal_b.rc
-) &
-GOAL_B_PID=$!
-wait "${GOAL_A_PID}" "${GOAL_B_PID}"
-resume_pick_place_loop
-
-GOAL_A_RC=$(cat /tmp/moveit_smoke_goal_a.rc)
-GOAL_B_RC=$(cat /tmp/moveit_smoke_goal_b.rc)
-GOAL_A_OUT=$(cat /tmp/moveit_smoke_goal_a.log)
-GOAL_B_OUT=$(cat /tmp/moveit_smoke_goal_b.log)
-
-if { [ "${GOAL_A_RC}" -eq 0 ] && [ "${GOAL_B_RC}" -ne 0 ]; } || \
-   { [ "${GOAL_A_RC}" -ne 0 ] && [ "${GOAL_B_RC}" -eq 0 ]; }; then
-    pass "concurrent goals: one real ABORTED and one real SUCCEEDED occurred"
-else
-    fail "concurrent goals: one real ABORTED and one real SUCCEEDED occurred" \
-        "goal A rc=${GOAL_A_RC}, goal B rc=${GOAL_B_RC}"
-fi
-
-# check_goal_report <rc> <output> <label>: a SUCCEEDED goal must exit 0 with
-# a success line and no failure line; anything else must exit non-zero with
-# a failure line and no success line.
+# check_goal_report <log> <rc> <label>: a real SUCCEEDED exits 0 with the
+# success line; any other real status exits non-zero with a failure line.
 check_goal_report() {
-    local rc="$1" out="$2" label="$3"
-    local done_lines failed_lines
-    done_lines=$(printf '%s\n' "${out}" | grep -c '✅ Done:' || true)
-    failed_lines=$(printf '%s\n' "${out}" | grep -c '^Failed:' || true)
-
-    if [ "${rc}" -eq 0 ]; then
-        if [ "${done_lines}" -ge 1 ] && [ "${failed_lines}" -eq 0 ]; then
-            pass "${label}: SUCCEEDED goal exits 0 with a success line"
+    local log="$1" rc="$2" label="$3" status
+    status=$(real_status "${log}")
+    if [ "${status}" = "SUCCEEDED" ]; then
+        if [ "${rc}" -eq 0 ] && reports_status "${log}" "${label}" "${status}"; then
+            pass "move-arm.sh ${label}: real SUCCEEDED exits 0 with a success line"
         else
-            fail "${label}: SUCCEEDED goal exits 0 with a success line" \
-                "rc=0 done_lines=${done_lines} failed_lines=${failed_lines}"
+            fail "move-arm.sh ${label}: real SUCCEEDED exits 0 with a success line" \
+                "rc=${rc}; result lines: $(grep -E '^(✅ Done|Failed):' "${log}" | tr '\n' ';')"
         fi
     else
-        if [ "${failed_lines}" -ge 1 ] && [ "${done_lines}" -eq 0 ]; then
-            pass "${label}: non-SUCCEEDED goal exits non-zero with no success line"
+        if [ "${rc}" -ne 0 ] && reports_status "${log}" "${label}" "${status}"; then
+            pass "move-arm.sh ${label}: real ${status:-no result} exits non-zero with a failure line"
         else
-            fail "${label}: non-SUCCEEDED goal exits non-zero with no success line" \
-                "rc=${rc} done_lines=${done_lines} failed_lines=${failed_lines}"
+            fail "move-arm.sh ${label}: real ${status:-no result} exits non-zero with a failure line" \
+                "rc=${rc}; result lines: $(grep -E '^(✅ Done|Failed):' "${log}" | tr '\n' ';')"
         fi
     fi
 }
 
-check_goal_report "${GOAL_A_RC}" "${GOAL_A_OUT}" "goal A (ready)"
-check_goal_report "${GOAL_B_RC}" "${GOAL_B_OUT}" "goal B (place)"
+PREEMPTOR_LOG=/tmp/moveit_smoke_preemptor.log
+PREEMPTED_LOG=/tmp/moveit_smoke_goal_preempted.log
+FREE_LOG=/tmp/moveit_smoke_goal_free.log
+
+# The preempt probe aborts the first goal move-arm.sh starts. The second goal
+# runs on an idle arm.
+stop_pick_place_loop
+start_preemptor "${PREEMPTOR_LOG}" || fail "setup: competing goal ready" "$(tail -n 3 "${PREEMPTOR_LOG}")"
+run_move_arm "${PREEMPTED_LOG}" ready
+PREEMPTED_RC=${MOVE_ARM_RC}
+wait "${PREEMPTOR_PID}" || true
+run_move_arm "${FREE_LOG}" place
+FREE_RC=${MOVE_ARM_RC}
+resume_pick_place_loop
+
+PREEMPTED_STATUS=$(real_status "${PREEMPTED_LOG}")
+if [ -n "${PREEMPTED_STATUS}" ] && [ "${PREEMPTED_STATUS}" != "SUCCEEDED" ]; then
+    pass "setup: a competing goal really ended the first goal (${PREEMPTED_STATUS})"
+else
+    fail "setup: a competing goal really ended the first goal" \
+        "real status: ${PREEMPTED_STATUS:-none}; probe: $(tail -n 2 "${PREEMPTOR_LOG}" | tr '\n' ';')"
+fi
+if [ "$(real_status "${FREE_LOG}")" = "SUCCEEDED" ]; then
+    pass "setup: a goal on an idle arm really succeeded"
+else
+    fail "setup: a goal on an idle arm really succeeded" "real status: $(real_status "${FREE_LOG}")"
+fi
+
+check_goal_report "${PREEMPTED_LOG}" "${PREEMPTED_RC}" "ready"
+check_goal_report "${FREE_LOG}" "${FREE_RC}" "place"
 
 section "move-arm.sh demo: per-step reporting and overall exit code"
 
-# A single competing goal, fired shortly after the cycle's first ("pick")
-# step starts, deterministically preempts that step (see check_goal_report
-# section above for why a fixed small delay - not synchronization on
-# output - is enough here). Bounded retries absorb the residual scheduling
-# jitter of two independent processes without masking a real failure: the
-# assertion below still requires an actual failed step every time it passes.
-DEMO_OK=0
-DEMO_RC=1
-DEMO_DONE=0
-DEMO_FAILED=0
-for attempt in 1 2 3; do
-    echo "  Attempt ${attempt}/3..."
-    stop_pick_place_loop
-    (
-        set +e
-        CONTAINER_NAME="${DEMO_CONTAINER}" "${DEMO_DIR}/move-arm.sh" demo < /dev/null \
-            > /tmp/moveit_smoke_demo.log 2>&1
-        echo "$?" > /tmp/moveit_smoke_demo.rc
-    ) &
-    DEMO_PID=$!
-    sleep 0.8
-    docker exec "${DEMO_CONTAINER}" bash -c "
-        set +u; source /opt/ros/jazzy/setup.bash; source /root/demo_ws/install/setup.bash; set -u
-        ros2 action send_goal ${ACTION} control_msgs/action/FollowJointTrajectory \
-            \"{trajectory: {joint_names: [panda_joint1,panda_joint2,panda_joint3,panda_joint4,panda_joint5,panda_joint6,panda_joint7], points: [{positions: [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785], time_from_start: {sec: 1, nanosec: 0}}]}}\" \
-            --feedback
-    " > /tmp/moveit_smoke_demo_competitor.log 2>&1 || true
-    wait "${DEMO_PID}"
-    resume_pick_place_loop
+DEMO_LOG=/tmp/moveit_smoke_demo.log
 
-    DEMO_RC=$(cat /tmp/moveit_smoke_demo.rc)
-    DEMO_OUT=$(cat /tmp/moveit_smoke_demo.log)
-    DEMO_DONE=$(printf '%s\n' "${DEMO_OUT}" | grep -c '✅ Done:' || true)
-    DEMO_FAILED=$(printf '%s\n' "${DEMO_OUT}" | grep -c '^Failed:' || true)
+# The preempt probe aborts the cycle's first step. The later steps run on an
+# idle arm.
+stop_pick_place_loop
+start_preemptor "${PREEMPTOR_LOG}" || fail "setup: competing goal ready" "$(tail -n 3 "${PREEMPTOR_LOG}")"
+run_move_arm "${DEMO_LOG}" demo
+DEMO_RC=${MOVE_ARM_RC}
+wait "${PREEMPTOR_PID}" || true
+resume_pick_place_loop
 
-    if [ "${DEMO_RC}" -ne 0 ] && [ "${DEMO_FAILED}" -ge 1 ] && [ "${DEMO_DONE}" -ge 1 ]; then
-        DEMO_OK=1
-        break
+DEMO_STEPS=$(grep -c '^🤖 Moving to:' "${DEMO_LOG}" || true)
+if [ "${DEMO_STEPS}" -eq 3 ]; then
+    pass "move-arm.sh demo runs three steps"
+else
+    fail "move-arm.sh demo runs three steps" "steps started: ${DEMO_STEPS}"
+fi
+
+# Each step block runs from its "Moving to" line to the next one. Its result
+# line must match the status its own action client printed, and each label
+# must have exactly one result line in the whole output.
+DEMO_FAILED_STEPS=0
+step=0
+for label in "pick" "place" "ready (home)"; do
+    step=$((step + 1))
+    step_log="/tmp/moveit_smoke_demo_step${step}.log"
+    awk -v n="${step}" 'index($0, "🤖 Moving to:") == 1 { count++ } count == n' "${DEMO_LOG}" > "${step_log}"
+    status=$(real_status "${step_log}")
+    if [ "${status}" != "SUCCEEDED" ]; then
+        DEMO_FAILED_STEPS=$((DEMO_FAILED_STEPS + 1))
     fi
-    sleep 2
+    first_line=$(head -n 1 "${step_log}")
+    label_results=$(( $(grep -cFx "✅ Done: ${label}" "${DEMO_LOG}" || true) \
+        + $(grep -cF "Failed: ${label} (" "${DEMO_LOG}" || true) ))
+    if [ "${first_line}" = "🤖 Moving to: ${label}" ] && [ "${label_results}" -eq 1 ] \
+        && reports_status "${step_log}" "${label}" "${status}"; then
+        pass "move-arm.sh demo step ${step} (${label}): one result line, matching real ${status:-no result}"
+    else
+        fail "move-arm.sh demo step ${step} (${label}): one result line, matching real ${status:-no result}" \
+            "first line: ${first_line}; results for label: ${label_results}; in step: $(grep -E '^(✅ Done|Failed):' "${step_log}" | tr '\n' ';')"
+    fi
 done
 
-if [ "${DEMO_OK}" -eq 1 ]; then
-    pass "move-arm.sh demo: exits non-zero when a step fails"
-    pass "move-arm.sh demo: later steps still run and report after an earlier step fails"
+if [ "${DEMO_FAILED_STEPS}" -gt 0 ]; then
+    pass "setup: a competing goal really ended a demo step"
+    if [ "${DEMO_RC}" -ne 0 ]; then
+        pass "move-arm.sh demo exits non-zero when a step really failed"
+    else
+        fail "move-arm.sh demo exits non-zero when a step really failed" "rc=0"
+    fi
 else
-    fail "move-arm.sh demo: exits non-zero when a step fails" \
-        "rc=${DEMO_RC} done_lines=${DEMO_DONE} failed_lines=${DEMO_FAILED} after 3 attempts"
-    fail "move-arm.sh demo: later steps still run and report after an earlier step fails" \
-        "no run in 3 attempts produced both a failed and a completed step"
+    fail "setup: a competing goal really ended a demo step" \
+        "every step succeeded; probe: $(tail -n 2 "${PREEMPTOR_LOG}" | tr '\n' ';')"
 fi
 
 # --- Summary ---
