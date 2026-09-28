@@ -407,6 +407,16 @@ The perception ECU aggregator starts immediately but peers may take a few second
 - Wait 20-30 seconds after `./run-demo.sh` before verifying
 - Check peer status: `curl http://localhost:8080/api/v1/health | jq '.peers'`
 
+### restore-normal Takes a While on the Planning ECU
+
+`path-planner` runs its planning loop on a single-threaded executor and blocks
+that thread for the full injected `planning_delay_ms` on every cycle, so its
+parameter service can be busy for a while after `inject-planning-delay`. The
+planning ECU's `restore-normal` script retries its writes to `path-planner`
+until they land, which can take up to a few minutes in the worst case. This
+is expected: the script always finishes, it can just be slow right after a
+delay injection.
+
 ### Port Conflicts
 
 The demo exposes port 8080 (gateway) and 3000 (web UI) on the host.

@@ -2,36 +2,42 @@
 # Reset all perception node parameters to defaults
 set -eu
 
-# ROS setup.bash dereferences AMENT_TRACE_SETUP_FILES; relax nounset around it.
-set +u
-# shellcheck source=/dev/null
-source /opt/ros/jazzy/setup.bash
-# shellcheck source=/dev/null
-source /root/demo_ws/install/setup.bash
-set -u
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+API_BASE="${GATEWAY_URL}/api/v1"
 
 ERRORS=0
 
+put_config() {
+    local app="$1" param="$2" value="$3"
+    if curl -sf -X PUT "${API_BASE}/apps/${app}/configurations/${param}" \
+        -H "Content-Type: application/json" -d "{\"value\": ${value}}" > /dev/null 2>&1; then
+        echo "${app}: ${param}=${value}"
+    else
+        echo "FAIL: ${app}/${param}"
+        ERRORS=$((ERRORS + 1))
+    fi
+}
+
 # LiDAR driver
-ros2 param set /perception/lidar_driver failure_probability 0.0 || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/lidar_driver inject_nan false || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/lidar_driver noise_stddev 0.01 || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/lidar_driver drift_rate 0.0 || ERRORS=$((ERRORS + 1))
+put_config lidar-driver failure_probability 0.0
+put_config lidar-driver inject_nan false
+put_config lidar-driver noise_stddev 0.01
+put_config lidar-driver drift_rate 0.0
 
 # Camera driver
-ros2 param set /perception/camera_driver failure_probability 0.0 || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/camera_driver noise_level 0.0 || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/camera_driver inject_black_frames false || ERRORS=$((ERRORS + 1))
+put_config camera-driver failure_probability 0.0
+put_config camera-driver noise_level 0.0
+put_config camera-driver inject_black_frames false
 
 # Point cloud filter
-ros2 param set /perception/point_cloud_filter failure_probability 0.0 || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/point_cloud_filter drop_rate 0.0 || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/point_cloud_filter delay_ms 0 || ERRORS=$((ERRORS + 1))
+put_config point-cloud-filter failure_probability 0.0
+put_config point-cloud-filter drop_rate 0.0
+put_config point-cloud-filter delay_ms 0
 
 # Object detector
-ros2 param set /perception/object_detector failure_probability 0.0 || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/object_detector false_positive_rate 0.0 || ERRORS=$((ERRORS + 1))
-ros2 param set /perception/object_detector miss_rate 0.0 || ERRORS=$((ERRORS + 1))
+put_config object-detector failure_probability 0.0
+put_config object-detector false_positive_rate 0.0
+put_config object-detector miss_rate 0.0
 
 if [ $ERRORS -gt 0 ]; then
     echo "{\"status\": \"partial\", \"errors\": $ERRORS}"
@@ -39,8 +45,6 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 # Clear faults
-GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
-API_BASE="${GATEWAY_URL}/api/v1"
 echo "Clearing faults..."
 curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
 sleep 2

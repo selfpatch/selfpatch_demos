@@ -2,14 +2,13 @@
 # Inject path planning delay - 5000ms processing time
 set -eu
 
-# ROS setup.bash dereferences AMENT_TRACE_SETUP_FILES; relax nounset around it.
-set +u
-# shellcheck source=/dev/null
-source /opt/ros/jazzy/setup.bash
-# shellcheck source=/dev/null
-source /root/demo_ws/install/setup.bash
-set -u
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+API_BASE="${GATEWAY_URL}/api/v1"
 
-ros2 param set /planning/path_planner planning_delay_ms 5000
+if ! curl -sf -X PUT "${API_BASE}/apps/path-planner/configurations/planning_delay_ms" \
+    -H "Content-Type: application/json" -d '{"value": 5000}' > /dev/null 2>&1; then
+    echo "FAIL: path-planner/planning_delay_ms"
+    exit 1
+fi
 
 echo '{"status": "injected", "parameter": "planning_delay_ms", "value": 5000}'

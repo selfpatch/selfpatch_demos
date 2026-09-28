@@ -2,28 +2,34 @@
 # Reset all actuation node parameters to defaults
 set -eu
 
-# ROS setup.bash dereferences AMENT_TRACE_SETUP_FILES; relax nounset around it.
-set +u
-# shellcheck source=/dev/null
-source /opt/ros/jazzy/setup.bash
-# shellcheck source=/dev/null
-source /root/demo_ws/install/setup.bash
-set -u
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+API_BASE="${GATEWAY_URL}/api/v1"
 
 ERRORS=0
 
+put_config() {
+    local app="$1" param="$2" value="$3"
+    if curl -sf -X PUT "${API_BASE}/apps/${app}/configurations/${param}" \
+        -H "Content-Type: application/json" -d "{\"value\": ${value}}" > /dev/null 2>&1; then
+        echo "${app}: ${param}=${value}"
+    else
+        echo "FAIL: ${app}/${param}"
+        ERRORS=$((ERRORS + 1))
+    fi
+}
+
 # Motor controller
-ros2 param set /actuation/motor_controller torque_noise 0.01 || ERRORS=$((ERRORS + 1))
-ros2 param set /actuation/motor_controller failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+put_config motor-controller torque_noise 0.01
+put_config motor-controller failure_probability 0.0
 
 # Joint driver
-ros2 param set /actuation/joint_driver inject_overheat false || ERRORS=$((ERRORS + 1))
-ros2 param set /actuation/joint_driver drift_rate 0.0 || ERRORS=$((ERRORS + 1))
-ros2 param set /actuation/joint_driver failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+put_config joint-driver inject_overheat false
+put_config joint-driver drift_rate 0.0
+put_config joint-driver failure_probability 0.0
 
 # Gripper controller
-ros2 param set /actuation/gripper_controller inject_jam false || ERRORS=$((ERRORS + 1))
-ros2 param set /actuation/gripper_controller failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+put_config gripper-controller inject_jam false
+put_config gripper-controller failure_probability 0.0
 
 if [ $ERRORS -gt 0 ]; then
     echo "{\"status\": \"partial\", \"errors\": $ERRORS}"
@@ -31,8 +37,6 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 # Clear faults
-GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
-API_BASE="${GATEWAY_URL}/api/v1"
 echo "Clearing faults..."
 curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
 sleep 2

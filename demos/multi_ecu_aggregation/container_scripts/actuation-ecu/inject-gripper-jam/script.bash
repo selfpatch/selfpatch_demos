@@ -2,14 +2,13 @@
 # Inject gripper jam - gripper controller stuck
 set -eu
 
-# ROS setup.bash dereferences AMENT_TRACE_SETUP_FILES; relax nounset around it.
-set +u
-# shellcheck source=/dev/null
-source /opt/ros/jazzy/setup.bash
-# shellcheck source=/dev/null
-source /root/demo_ws/install/setup.bash
-set -u
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+API_BASE="${GATEWAY_URL}/api/v1"
 
-ros2 param set /actuation/gripper_controller inject_jam true
+if ! curl -sf -X PUT "${API_BASE}/apps/gripper-controller/configurations/inject_jam" \
+    -H "Content-Type: application/json" -d '{"value": true}' > /dev/null 2>&1; then
+    echo "FAIL: gripper-controller/inject_jam"
+    exit 1
+fi
 
 echo '{"status": "injected", "parameter": "inject_jam", "value": true}'
