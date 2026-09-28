@@ -5,8 +5,8 @@
 # Tests: health, entity discovery (areas/components/apps/functions),
 #   discovery relationships, Linux introspection, data access, operations,
 #   configurations, scripts (list + execution), bulk data, faults, logs,
-#   trigger CRUD lifecycle
-# No fault injection - Gazebo-based demo is too complex for reliable CI fault testing
+#   trigger CRUD lifecycle, check-entities.sh and check-faults.sh with one
+#   injected navigation failure
 #
 # Usage: ./tests/smoke_test_turtlebot3.sh [GATEWAY_URL]
 # Default GATEWAY_URL: http://localhost:8080
@@ -97,6 +97,32 @@ assert_non_empty_items "/apps/medkit-gateway/logs"
 section "Check-Entities and Check-Faults Scripts"
 
 TB3_DIR="${SCRIPT_DIR}/../demos/turtlebot3_integration"
+
+# Echoes a Nav2 node's lifecycle state label, or "unavailable".
+# Usage: lifecycle_label APP
+lifecycle_label() {
+    curl -s -m 20 -X POST "${API_BASE}/apps/$1/operations/get_state/executions" \
+        -H 'Content-Type: application/json' -d '{"parameters":{}}' 2>/dev/null \
+        | jq -r '.parameters.current_state.label // "unavailable"' 2>/dev/null || echo unavailable
+}
+
+# The inject needs a goal that Nav2 accepts and then aborts. An inactive
+# navigator rejects the goal and no fault follows. Nav2 activates well after
+# the gateway answers, so wait for the navigator and the planner.
+echo "  Waiting for bt-navigator and planner-server to be active (max 180s)..."
+nav2_state=""
+elapsed=0
+while [ "$elapsed" -lt 180 ]; do
+    nav2_state="$(lifecycle_label bt-navigator)/$(lifecycle_label planner-server)"
+    [ "$nav2_state" = "active/active" ] && break
+    sleep 5
+    elapsed=$((elapsed + 5))
+done
+if [ "$nav2_state" = "active/active" ]; then
+    pass "bt-navigator and planner-server are active before the inject"
+else
+    fail "bt-navigator and planner-server are active before the inject" "states: ${nav2_state}"
+fi
 
 # Inject a real fault via the Scripts API so check-entities.sh (section 6)
 # and check-faults.sh exercise the fault-carrying fields, not just the
