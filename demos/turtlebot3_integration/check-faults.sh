@@ -26,9 +26,17 @@ fi
 echo "✓ Gateway is healthy"
 echo ""
 
-# Get all faults
+# Get all faults. A failed read leaves the fault list unknown, not empty.
+FAULTS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/faults")
+FAULTS_CODE=$(tail -n 1 <<< "$FAULTS_RESPONSE")
+FAULTS=$(sed '$d' <<< "$FAULTS_RESPONSE")
+if [ "$FAULTS_CODE" != "200" ] || ! echo "$FAULTS" | jq -e '.items | type == "array"' > /dev/null 2>&1; then
+    echo "❌ Could not read faults from ${GATEWAY_URL} (HTTP ${FAULTS_CODE}): $(echo "$FAULTS" | jq -r '.message // empty' 2>/dev/null)"
+    echo "   The fault list is unknown. Check that the fault manager is running, then retry."
+    exit 1
+fi
+
 echo "📋 Active Faults:"
-FAULTS=$(curl -s "${API_BASE}/faults")
 
 # Check if there are any faults
 FAULT_COUNT=$(echo "$FAULTS" | jq '.items | length')

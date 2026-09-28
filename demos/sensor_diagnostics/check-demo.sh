@@ -120,7 +120,15 @@ while IFS= read -r cfg_id; do
 done <<< "$LIDAR_CONFIG_IDS"
 
 echo_step "9. Checking Current Faults"
-FAULTS_JSON=$(curl -s "${API_BASE}/faults")
+# A failed read leaves the fault list unknown, not empty.
+FAULTS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/faults")
+FAULTS_CODE=$(tail -n 1 <<< "$FAULTS_RESPONSE")
+FAULTS_JSON=$(sed '$d' <<< "$FAULTS_RESPONSE")
+if [ "$FAULTS_CODE" != "200" ] || ! echo "$FAULTS_JSON" | jq -e '.items | type == "array"' > /dev/null 2>&1; then
+    echo_error "Could not read faults (HTTP ${FAULTS_CODE}): $(echo "$FAULTS_JSON" | jq -r '.message // empty' 2>/dev/null)"
+    echo "   The fault list is unknown. Check that the fault manager is running, then retry."
+    exit 1
+fi
 echo "$FAULTS_JSON" | jq '.'
 
 # If there are faults, demonstrate snapshot / bulk-data endpoints

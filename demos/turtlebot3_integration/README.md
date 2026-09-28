@@ -599,7 +599,7 @@ demos/turtlebot3_integration/
 | `stop-demo.sh` | Stop containers and cleanup |
 | `send-nav-goal.sh [x] [y] [yaw]` | Send navigation goal via SOVD API |
 | `check-entities.sh` | Explore SOVD entity hierarchy |
-| `check-faults.sh` | View active faults from gateway |
+| `check-faults.sh` | View active faults from gateway; exits 1 when the fault list cannot be read |
 | `nav-health-check.sh` | Check Nav2 stack health |
 | `reset-navigation.sh` | Cancel goals and reset AMCL |
 | `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |
