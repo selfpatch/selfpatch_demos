@@ -14,9 +14,83 @@ source "${SCRIPT_DIR}/smoke_lib.sh"
 
 trap print_summary EXIT
 
+CHECK_DEMO_SCRIPT="${SCRIPT_DIR}/../demos/sensor_diagnostics/check-demo.sh"
+
+# Runs check-demo.sh and prints its output without ANSI colours.
+run_check_demo() {
+    GATEWAY_URL="$GATEWAY_URL" bash "$CHECK_DEMO_SCRIPT" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+# Prints the JSON values printed in section N of a check-demo.sh output as
+# one array: [] when the section is missing, nothing when it is not JSON.
+# Usage: check_demo_section OUTPUT N
+check_demo_section() {
+    awk -v hdr="^=== $2\\\\. " '
+        $0 ~ hdr { on = 1; next }
+        on && /^=== [0-9]+\. / { exit }
+        on' <<< "$1" | sed -n '/^[[{]/,$p' | jq -s '.' 2>/dev/null || true
+}
+
+# Prints the value of a configuration, or nothing when it cannot be read.
+# Usage: config_value APP PARAM
+config_value() {
+    curl -s -m 10 "${API_BASE}/apps/$1/configurations/$2" | jq -c '.data' 2>/dev/null || true
+}
+
 # --- Wait for gateway startup ---
 
+# /health answers about a second before the gateway links the sensor nodes, and
+# wait_for_gateway polls only every 2 s. The tighter poll lets the first
+# check-demo.sh run below start inside that window on a demo that has just started.
+for _ in $(seq 1 450); do
+    curl -sf -m 2 "${API_BASE}/health" > /dev/null 2>&1 && break
+    sleep 0.2
+done
 wait_for_gateway 90
+
+section "Check-Demo Before Linking"
+
+# Until the sensor nodes are linked, their data reads come back empty.
+# check-demo.sh must then wait for real values, or stop with a message and a
+# non-zero exit, and never print null.
+EARLY_LIDAR_ITEMS=$(curl -s -m 5 "${API_BASE}/apps/lidar-sim/data" | jq '.items | length' 2>/dev/null) || true
+EARLY_RC=0
+EARLY_PLAIN=$(run_check_demo) || EARLY_RC=$?
+echo "  LiDAR data items when check-demo.sh started: ${EARLY_LIDAR_ITEMS:-unreadable}; exit code ${EARLY_RC}"
+
+if grep -q ': null' <<< "$EARLY_PLAIN"; then
+    fail "check-demo.sh started right after /health prints no null fields" \
+         "$(grep -B1 ': null' <<< "$EARLY_PLAIN" | head -10)"
+else
+    pass "check-demo.sh started right after /health prints no null fields"
+fi
+
+# True when sections 5-8 of the early run carry values of the right type.
+early_values_printed() {
+    check_demo_section "$EARLY_PLAIN" 5 | jq -e 'length == 1 and ([.[0]
+        | .angle_min, .angle_max, .range_min, .range_max, .sample_ranges[]]
+        | length == 9 and all(type == "number"))' > /dev/null 2>&1 &&
+    check_demo_section "$EARLY_PLAIN" 6 | jq -e 'length == 1 and ([.[0]
+        | .linear_acceleration[], .angular_velocity[]]
+        | length == 6 and all(type == "number"))' > /dev/null 2>&1 &&
+    check_demo_section "$EARLY_PLAIN" 7 | jq -e 'length == 1 and ([.[0]
+        | .latitude, .longitude, .altitude] | all(type == "number"))' > /dev/null 2>&1 &&
+    check_demo_section "$EARLY_PLAIN" 8 | jq -e 'length > 0' > /dev/null 2>&1
+}
+
+if [ "$EARLY_RC" -ne 0 ]; then
+    if grep -q "Sensor data not available" <<< "$EARLY_PLAIN"; then
+        pass "check-demo.sh started right after /health prints sensor values or stops with a message"
+    else
+        fail "check-demo.sh started right after /health prints sensor values or stops with a message" \
+             "exit code ${EARLY_RC} without the message: $(tail -3 <<< "$EARLY_PLAIN")"
+    fi
+elif early_values_printed; then
+    pass "check-demo.sh started right after /health prints sensor values or stops with a message"
+else
+    fail "check-demo.sh started right after /health prints sensor values or stops with a message" \
+         "exit code 0 but sections 5-8 lack values"
+fi
 
 # Wait for entity discovery + runtime linking (nodes need to be linked to manifest apps)
 # In hybrid mode, manifest entities appear instantly but data/configurations require
@@ -96,6 +170,93 @@ section "Logs"
 
 assert_non_empty_items "/apps/medkit-gateway/logs"
 
+section "Check-Demo Sensor Values"
+
+# Runs before the fault injection below, while the noise is at its default: at
+# the injected 0.5 m, 8 sigma spans the whole LiDAR range.
+
+# Checks section N of the first run against a direct read of ENDPOINT, and
+# that the second run printed a different sample. FILTER sees the printed
+# values as input, the direct read's .data as $g and SIGMA as $sigma.
+# Usage: assert_section_live N DESCRIPTION ENDPOINT SIGMA FILTER
+assert_section_live() {
+    local n="$1" description="$2" endpoint="$3" sigma="$4" filter="$5"
+    local printed printed_again direct
+    printed=$(check_demo_section "$SENSOR_RUN_1" "$n")
+    printed_again=$(check_demo_section "$SENSOR_RUN_2" "$n")
+    if ! api_get "$endpoint"; then
+        fail "$description" "direct read of ${endpoint} failed"
+        return
+    fi
+    direct=$(jq -c '.data' <<< "$RESPONSE" 2>/dev/null) || true
+    if ! jq -e --argjson g "${direct:-null}" --argjson sigma "${sigma:-null}" "$filter" \
+            <<< "$printed" > /dev/null 2>&1; then
+        fail "$description" "printed $(jq -c '.' <<< "$printed" 2>/dev/null || echo "no JSON"); sigma ${sigma}; direct read ${direct:0:300}"
+    elif [ "$printed" = "$printed_again" ]; then
+        fail "$description" "two runs printed the same values: $(jq -c '.' <<< "$printed")"
+    else
+        pass "$description"
+    fi
+}
+
+SENSOR_RUN_1=$(run_check_demo) || true
+# Every sensor publishes at 1 Hz or faster, so a run a second later reads new samples.
+sleep 1
+SENSOR_RUN_2=$(run_check_demo) || true
+
+if grep -q ': null' <<< "$SENSOR_RUN_1"; then
+    fail "check-demo.sh prints no null fields" "$(grep -B1 ': null' <<< "$SENSOR_RUN_1" | head -10)"
+else
+    pass "check-demo.sh prints no null fields"
+fi
+
+# Tolerances are 8 sigma of the live noise configuration: two independent
+# samples differ by more than that with a probability below 1e-7. The LiDAR
+# check also requires 8 sigma below a tenth of the scan's range span, or it
+# could not tell a real range from an invented one.
+LIDAR_FILTER=$(cat <<'JQ'
+8 * $sigma < ($g.range_max - $g.range_min) / 10
+and length == 1 and (.[0] as $p
+  | $p.angle_min == $g.angle_min and $p.angle_max == $g.angle_max
+    and $p.range_min == $g.range_min and $p.range_max == $g.range_max
+    and ($p.sample_ranges | type == "array" and length == 5)
+    and ([range(5)] | all(. as $i | $p.sample_ranges[$i] as $r
+          | ($r | type) == "number"
+            and $r >= $g.range_min and $r <= $g.range_max
+            and (($r - $g.ranges[$i]) | fabs) <= 8 * $sigma)))
+JQ
+)
+IMU_FILTER=$(cat <<'JQ'
+length == 1 and (.[0] as $p
+  | [["linear_acceleration", $sigma.accel], ["angular_velocity", $sigma.gyro]]
+  | all(.[0] as $k | .[1] as $s | ["x", "y", "z"]
+        | all(. as $a | ($p[$k][$a] | type) == "number"
+              and (($p[$k][$a] - $g[$k][$a]) | fabs) <= 8 * $s)))
+JQ
+)
+# 111 km per degree of latitude; a degree of longitude shrinks with cos(latitude).
+GPS_FILTER=$(cat <<'JQ'
+length == 1 and (.[0] as $p
+  | ([$p.latitude, $p.longitude, $p.altitude] | all(type == "number"))
+    and (($p.latitude - $g.latitude) | fabs) <= 8 * $sigma.pos / 111000
+    and (($p.longitude - $g.longitude) | fabs)
+        <= 8 * $sigma.pos / (111000 * (($g.latitude * 3.141592653589793 / 180) | cos))
+    and (($p.altitude - $g.altitude) | fabs) <= 8 * $sigma.alt
+    and $p.status == $g.status)
+JQ
+)
+
+assert_section_live 5 "check-demo.sh section 5 shows live LiDAR values matching a direct read" \
+    "/apps/lidar-sim/data/sensors%2Fscan" "$(config_value lidar-sim noise_stddev)" "$LIDAR_FILTER"
+assert_section_live 6 "check-demo.sh section 6 shows live IMU values matching a direct read" \
+    "/apps/imu-sim/data/sensors%2Fimu" \
+    "{\"accel\": $(config_value imu-sim accel_noise_stddev), \"gyro\": $(config_value imu-sim gyro_noise_stddev)}" \
+    "$IMU_FILTER"
+assert_section_live 7 "check-demo.sh section 7 shows live GPS values matching a direct read" \
+    "/apps/gps-sim/data/sensors%2Ffix" \
+    "{\"pos\": $(config_value gps-sim position_noise_stddev), \"alt\": $(config_value gps-sim altitude_noise_stddev)}" \
+    "$GPS_FILTER"
+
 section "Fault Injection"
 
 # Inject noise fault via configuration API
@@ -144,110 +305,16 @@ else
     fail "rosbag recording available before running check-demo.sh" "no rosbag after 15s"
 fi
 
-# check-demo.sh is the interactive tour a user runs by hand. Run it live
-# against the gateway while the LIDAR_SIM fault above is still active, and
-# compare what it prints with direct reads of the same resources.
-CHECK_DEMO_SCRIPT="${SCRIPT_DIR}/../demos/sensor_diagnostics/check-demo.sh"
-
-# Runs check-demo.sh and prints its output without ANSI colours.
-run_check_demo() {
-    GATEWAY_URL="$GATEWAY_URL" bash "$CHECK_DEMO_SCRIPT" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
-}
-
-# Prints the JSON values printed in section N of a check-demo.sh output as
-# one array: [] when the section is missing, nothing when it is not JSON.
-# Usage: check_demo_section OUTPUT N
-check_demo_section() {
-    awk -v hdr="^=== $2\\\\. " '
-        $0 ~ hdr { on = 1; next }
-        on && /^=== [0-9]+\. / { exit }
-        on' <<< "$1" | sed -n '/^[[{]/,$p' | jq -s '.' 2>/dev/null || true
-}
-
-# Prints the value of a configuration, or nothing when it cannot be read.
-# Usage: config_value APP PARAM
-config_value() {
-    curl -s -m 10 "${API_BASE}/apps/$1/configurations/$2" | jq -c '.data' 2>/dev/null || true
-}
-
-# Checks section N of the first run against a direct read of ENDPOINT, and
-# that the second run printed a different sample. FILTER sees the printed
-# values as input, the direct read's .data as $g and SIGMA as $sigma.
-# Usage: assert_section_live N DESCRIPTION ENDPOINT SIGMA FILTER
-assert_section_live() {
-    local n="$1" description="$2" endpoint="$3" sigma="$4" filter="$5"
-    local printed printed_again direct
-    printed=$(check_demo_section "$CHECK_DEMO_PLAIN" "$n")
-    printed_again=$(check_demo_section "$CHECK_DEMO_PLAIN_2" "$n")
-    if ! api_get "$endpoint"; then
-        fail "$description" "direct read of ${endpoint} failed"
-        return
-    fi
-    direct=$(jq -c '.data' <<< "$RESPONSE" 2>/dev/null) || true
-    if ! jq -e --argjson g "${direct:-null}" --argjson sigma "${sigma:-null}" "$filter" \
-            <<< "$printed" > /dev/null 2>&1; then
-        fail "$description" "printed $(jq -c '.' <<< "$printed" 2>/dev/null || echo "no JSON"); direct read ${direct:0:300}"
-    elif [ "$printed" = "$printed_again" ]; then
-        fail "$description" "two runs printed the same values: $(jq -c '.' <<< "$printed")"
-    else
-        pass "$description"
-    fi
-}
-
+# Run check-demo.sh again while the LIDAR_SIM fault above is active: section 8
+# must show the injected noise, and sections 10-12 need an active fault.
 CHECK_DEMO_PLAIN=$(run_check_demo) || true
-# Every sensor publishes at 1 Hz or faster, so a run a second later reads new samples.
-sleep 1
-CHECK_DEMO_PLAIN_2=$(run_check_demo) || true
 
 if grep -q ': null' <<< "$CHECK_DEMO_PLAIN"; then
-    fail "check-demo.sh prints no null fields" "$(grep -B1 ': null' <<< "$CHECK_DEMO_PLAIN" | head -10)"
+    fail "check-demo.sh prints no null fields with a fault active" \
+         "$(grep -B1 ': null' <<< "$CHECK_DEMO_PLAIN" | head -10)"
 else
-    pass "check-demo.sh prints no null fields"
+    pass "check-demo.sh prints no null fields with a fault active"
 fi
-
-# Tolerances are 8 sigma of the live noise configuration: two independent
-# samples differ by more than that with a probability below 1e-7.
-LIDAR_FILTER=$(cat <<'JQ'
-length == 1 and (.[0] as $p
-  | $p.angle_min == $g.angle_min and $p.angle_max == $g.angle_max
-    and $p.range_min == $g.range_min and $p.range_max == $g.range_max
-    and ($p.sample_ranges | type == "array" and length == 5)
-    and ([range(5)] | all(. as $i | $p.sample_ranges[$i] as $r
-          | ($r | type) == "number"
-            and $r >= $g.range_min and $r <= $g.range_max
-            and (($r - $g.ranges[$i]) | fabs) <= 8 * $sigma)))
-JQ
-)
-IMU_FILTER=$(cat <<'JQ'
-length == 1 and (.[0] as $p
-  | [["linear_acceleration", $sigma.accel], ["angular_velocity", $sigma.gyro]]
-  | all(.[0] as $k | .[1] as $s | ["x", "y", "z"]
-        | all(. as $a | ($p[$k][$a] | type) == "number"
-              and (($p[$k][$a] - $g[$k][$a]) | fabs) <= 8 * $s)))
-JQ
-)
-# 111 km per degree of latitude; a degree of longitude shrinks with cos(latitude).
-GPS_FILTER=$(cat <<'JQ'
-length == 1 and (.[0] as $p
-  | ([$p.latitude, $p.longitude, $p.altitude] | all(type == "number"))
-    and (($p.latitude - $g.latitude) | fabs) <= 8 * $sigma.pos / 111000
-    and (($p.longitude - $g.longitude) | fabs)
-        <= 8 * $sigma.pos / (111000 * (($g.latitude * 3.141592653589793 / 180) | cos))
-    and (($p.altitude - $g.altitude) | fabs) <= 8 * $sigma.alt
-    and $p.status == $g.status)
-JQ
-)
-
-assert_section_live 5 "check-demo.sh section 5 shows live LiDAR values matching a direct read" \
-    "/apps/lidar-sim/data/sensors%2Fscan" "$(config_value lidar-sim noise_stddev)" "$LIDAR_FILTER"
-assert_section_live 6 "check-demo.sh section 6 shows live IMU values matching a direct read" \
-    "/apps/imu-sim/data/sensors%2Fimu" \
-    "{\"accel\": $(config_value imu-sim accel_noise_stddev), \"gyro\": $(config_value imu-sim gyro_noise_stddev)}" \
-    "$IMU_FILTER"
-assert_section_live 7 "check-demo.sh section 7 shows live GPS values matching a direct read" \
-    "/apps/gps-sim/data/sensors%2Ffix" \
-    "{\"pos\": $(config_value gps-sim position_noise_stddev), \"alt\": $(config_value gps-sim altitude_noise_stddev)}" \
-    "$GPS_FILTER"
 
 # Section 8: exactly the parameters the list endpoint lists, each with the
 # value and ROS type its own detail endpoint returns.
