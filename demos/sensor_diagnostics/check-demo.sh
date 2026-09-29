@@ -47,8 +47,8 @@ echo_success "Gateway is healthy!"
 
 # /health answers before the gateway links the sensor nodes, and a node's
 # topic reads come back empty until then. A linked sensor that publishes
-# nothing (inject-failure.sh) never gets a message, so each linked sensor
-# gets SAMPLE_WAIT_SEC for its first message and the demo goes on without it.
+# nothing (inject-failure.sh) never gets a message, so it holds the wait for
+# SAMPLE_WAIT_SEC at most; it is still read while the wait goes on for others.
 # The whole wait ends within DATA_WAIT_SEC plus one request.
 DATA_WAIT_SEC="${DATA_WAIT_SEC:-30}"
 SAMPLE_WAIT_SEC=5
@@ -79,9 +79,10 @@ sensor_has_data() {
 
 wait_start=$(date +%s)
 deadline=$((wait_start + DATA_WAIT_SEC))
-# Per sensor: when the link was seen, whether a message was read, and which
-# waiting line was printed.
+# Per sensor: when the link was seen, when it was last read, whether a
+# message was read, and which waiting line was printed.
 linked_at=()
+polled_at=()
 has_data=()
 announced=()
 while :; do
@@ -91,9 +92,9 @@ while :; do
         app=${SENSOR_APPS[$i]}
         [ "$(date +%s)" -lt "$deadline" ] || break 2
         if [ -z "${linked_at[$i]:-}" ]; then
-            if sensor_linked "$app"; then
-                linked_at[i]=$(date +%s)
-            else
+            sensor_linked "$app" && linked_at[i]=$(date +%s)
+            polled_at[i]=$(date +%s)
+            if [ -z "${linked_at[$i]:-}" ]; then
                 if [ -z "${announced[$i]:-}" ]; then
                     echo "Waiting for the gateway to link ${app} (max ${DATA_WAIT_SEC}s)..."
                     announced[i]="link"
@@ -101,13 +102,15 @@ while :; do
                 pending=true
                 continue
             fi
+            [ "$(date +%s)" -lt "$deadline" ] || break 2
         fi
-        [ "$(date +%s)" -lt "$((linked_at[i] + SAMPLE_WAIT_SEC))" ] || continue
-        [ "$(date +%s)" -lt "$deadline" ] || break 2
         if sensor_has_data "$app" "${SENSOR_TOPICS[$i]}"; then
             has_data[i]=1
             continue
         fi
+        polled_at[i]=$(date +%s)
+        # Past its first-message window a sensor no longer holds the wait.
+        [ "$(date +%s)" -lt "$((linked_at[i] + SAMPLE_WAIT_SEC))" ] || continue
         if [ "${announced[$i]:-}" != sample ]; then
             echo "Waiting for a first message from ${app} on /${SENSOR_TOPICS[$i]} (max ${SAMPLE_WAIT_SEC}s)..."
             announced[i]="sample"
@@ -119,16 +122,24 @@ while :; do
     sleep 1
 done
 
+# The time reported is how long each sensor was read for. The data sections
+# below read every sensor again.
+missing=false
 for i in "${!SENSOR_APPS[@]}"; do
     [ -n "${has_data[$i]:-}" ] && continue
+    missing=true
     app=${SENSOR_APPS[$i]}
-    if [ -n "${linked_at[$i]:-}" ]; then
-        echo "   No message from ${app} on /${SENSOR_TOPICS[$i]} after $(( $(date +%s) - linked_at[i] ))s; the sensor may have failed."
+    if [ -z "${polled_at[$i]:-}" ]; then
+        echo "   ${app} was not waited for."
+    elif [ -n "${linked_at[$i]:-}" ]; then
+        echo "   No message from ${app} on /${SENSOR_TOPICS[$i]} in the $((polled_at[i] - wait_start))s it was waited for; the sensor may have failed."
     else
-        echo "   The gateway has not linked ${app} after $(( $(date +%s) - wait_start ))s."
+        echo "   The gateway did not link ${app} in the $((polled_at[i] - wait_start))s it was waited for."
     fi
-    echo "   Its data section below shows no values."
 done
+if "$missing"; then
+    echo "   Sections 5-7 read each sensor again."
+fi
 
 echo_step "1. Checking Gateway Health"
 curl -s "${API_BASE}/health" | jq '.'

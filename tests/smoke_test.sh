@@ -34,21 +34,39 @@ resume_fault_manager() {
     " > /dev/null 2>&1 || true
 }
 
-LIDAR_PATTERN='^/root/demo_ws/install/sensor_diagnostics_demo/lib/sensor_diagnostics_demo/lidar_sim_node '
+SENSOR_BIN_DIR=/root/demo_ws/install/sensor_diagnostics_demo/lib/sensor_diagnostics_demo
 
-# SIGSTOP on the LiDAR node keeps it in the ROS graph but stops its scans.
-stop_lidar() {
+# Sends SIGNAL to the demo's NODE executable; fails when it is not running.
+# SIGSTOP keeps a sensor node in the ROS graph but stops its messages.
+# Usage: signal_sensor NODE SIGNAL
+signal_sensor() {
     docker exec "${DEMO_CONTAINER}" bash -c "
-        pid=\$(pgrep -f '${LIDAR_PATTERN}') || exit 1
-        kill -STOP \"\${pid}\"
+        pid=\$(pgrep -f '^${SENSOR_BIN_DIR}/$1 ') || exit 1
+        kill -$2 \"\${pid}\"
     " > /dev/null 2>&1
 }
 
-resume_lidar() {
+# Takes lidar_sim off the ROS graph. Its command line, which carries the
+# launch's parameter files, is kept for restore_lidar.
+remove_lidar() {
     docker exec "${DEMO_CONTAINER}" bash -c "
-        pid=\$(pgrep -f '${LIDAR_PATTERN}') || exit 0
-        kill -CONT \"\${pid}\"
-    " > /dev/null 2>&1 || true
+        pid=\$(pgrep -f '^${SENSOR_BIN_DIR}/lidar_sim_node ') || exit 1
+        tr '\\0' '\\n' < /proc/\${pid}/cmdline > /tmp/lidar_sim.cmdline
+        kill -TERM \"\${pid}\"
+        for _ in \$(seq 1 50); do kill -0 \"\${pid}\" 2> /dev/null || exit 0; sleep 0.1; done
+        exit 1
+    " > /dev/null 2>&1
+}
+
+# Starts lidar_sim from the kept command line unless it is running.
+restore_lidar() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        ! pgrep -f '^${SENSOR_BIN_DIR}/lidar_sim_node ' && test -s /tmp/lidar_sim.cmdline
+    " > /dev/null 2>&1 || return 0
+    # shellcheck disable=SC2016  # expanded by the container's bash
+    docker exec -d "${DEMO_CONTAINER}" bash -c 'source /opt/ros/jazzy/setup.bash \
+        && source /root/demo_ws/install/setup.bash \
+        && mapfile -t args < /tmp/lidar_sim.cmdline && exec "${args[@]}"' > /dev/null 2>&1 || true
 }
 
 # print_summary reads the script's exit status from $?, so hand it the status
@@ -58,7 +76,9 @@ cleanup_on_exit() {
     local rc=$?
     set +e
     resume_fault_manager
-    resume_lidar
+    signal_sensor lidar_sim_node CONT
+    signal_sensor imu_sim_node CONT
+    restore_lidar
     (exit "${rc}")
     print_summary
 }
@@ -627,14 +647,14 @@ else
     fail "setup: ${DEMO_CONTAINER} restarted" "docker restart failed"
 fi
 wait_for_gateway 90
-if stop_lidar; then
+if signal_sensor lidar_sim_node STOP; then
     pass "setup: lidar_sim held right after /health"
-    ( sleep 2; resume_lidar ) &
+    ( sleep 2; signal_sensor lidar_sim_node CONT || true ) &
     HOLD_PID=$!
     HELD_RC=0
     HELD_TIMED=$(run_check_demo_timed "") || HELD_RC=$?
     wait "$HOLD_PID" 2>/dev/null || true
-    resume_lidar
+    signal_sensor lidar_sim_node CONT || true
     HELD_PLAIN=$(untimed "$HELD_TIMED")
     HELD_WAIT_TEXT=$(readiness_wait_output "$HELD_TIMED")
     echo "  readiness wait $(readiness_wait_ms "$HELD_TIMED") ms:" \
@@ -657,6 +677,73 @@ if stop_lidar; then
     fi
 else
     fail "setup: lidar_sim held right after /health" "no lidar_sim_node process in ${DEMO_CONTAINER}"
+fi
+
+section "check-demo.sh with a late link and a sensor that resumes while it waits"
+
+# lidar_sim leaves the ROS graph and comes back 9 s into the run, past the 5 s
+# first-message window, so only the link wait brings its values. The IMU is
+# linked but held until 7 s, past its own window while the wait goes on for
+# the LiDAR: the wait must still notice its messages and must not report it
+# silent.
+if docker restart "${DEMO_CONTAINER}" > /dev/null 2>&1; then
+    pass "setup: ${DEMO_CONTAINER} restarted"
+else
+    fail "setup: ${DEMO_CONTAINER} restarted" "docker restart failed"
+fi
+wait_for_gateway 90
+wait_for_runtime_linking "/apps/imu-sim/data" 60
+if signal_sensor imu_sim_node STOP && remove_lidar; then
+    pass "setup: imu_sim held and lidar_sim off the ROS graph"
+    if poll_until "/apps/lidar-sim/data" '.items | length == 0' 30; then
+        pass "setup: the gateway has unlinked lidar-sim before the run"
+    else
+        fail "setup: the gateway has unlinked lidar-sim before the run" "lidar-sim data still listed after 30 s"
+    fi
+    ( sleep 7; signal_sensor imu_sim_node CONT || true ) &
+    IMU_TIMER_PID=$!
+    ( sleep 9; restore_lidar ) &
+    LIDAR_TIMER_PID=$!
+    LATE_RC=0
+    LATE_TIMED=$(run_check_demo_timed "") || LATE_RC=$?
+    wait "$IMU_TIMER_PID" "$LIDAR_TIMER_PID" 2>/dev/null || true
+    signal_sensor imu_sim_node CONT || true
+    restore_lidar
+    LATE_PLAIN=$(untimed "$LATE_TIMED")
+    LATE_WAIT_TEXT=$(readiness_wait_output "$LATE_TIMED")
+    LATE_WAIT_MS=$(readiness_wait_ms "$LATE_TIMED")
+    echo "  readiness wait ${LATE_WAIT_MS} ms:" \
+        "$(grep -vE '^ *$' <<< "$LATE_WAIT_TEXT" | tr '\n' ';' | head -c 400)"
+
+    LATE_MISSING=""
+    for n in 5 6 7 8; do
+        section_values_printed "$LATE_PLAIN" "$n" || LATE_MISSING="${LATE_MISSING} ${n}"
+    done
+    if [ "$LATE_RC" -eq 0 ] && [ -z "$LATE_MISSING" ] && ! grep -q ': null' <<< "$LATE_PLAIN" \
+        && grep -q "^Waiting for the gateway to link lidar-sim" <<< "$LATE_WAIT_TEXT"; then
+        pass "check-demo.sh waits for a link that comes after the 5 s window, exits 0 and prints values in sections 5-8"
+    else
+        fail "check-demo.sh waits for a link that comes after the 5 s window, exits 0 and prints values in sections 5-8" \
+            "exit code ${LATE_RC}; sections without values:${LATE_MISSING:- none}; waited ${LATE_WAIT_MS} ms"
+    fi
+
+    if grep -q "^Waiting for a first message from imu-sim" <<< "$LATE_WAIT_TEXT" && [ "$LATE_WAIT_MS" -ge 8000 ]; then
+        pass "setup: the wait held the IMU past its 5 s window and went on past 8 s"
+    else
+        fail "setup: the wait held the IMU past its 5 s window and went on past 8 s" \
+            "waited ${LATE_WAIT_MS} ms"
+    fi
+    if section_values_printed "$LATE_PLAIN" 6 && ! grep -q "No message from imu-sim" <<< "$LATE_WAIT_TEXT"; then
+        pass "check-demo.sh does not report the IMU silent after it sent data during the wait"
+    else
+        fail "check-demo.sh does not report the IMU silent after it sent data during the wait" \
+            "wait printed: $(grep -vE '^ *$' <<< "$LATE_WAIT_TEXT" | grep -v '^Waiting' | tr '\n' ';' | head -c 300); section 6: $(check_demo_section "$LATE_PLAIN" 6 | jq -c . 2>/dev/null | head -c 120)"
+    fi
+    curl -s -m 20 -X DELETE "${API_BASE}/faults" > /dev/null || true
+else
+    fail "setup: imu_sim held and lidar_sim off the ROS graph" "sensor nodes not found in ${DEMO_CONTAINER}"
+    signal_sensor imu_sim_node CONT || true
+    restore_lidar
 fi
 
 section "check-demo.sh with a failed IMU on a fresh gateway"
@@ -737,6 +824,19 @@ if grep -q "imu-sim" <<< "$FAILED_IMU_WAIT_TEXT" && ! grep -qE "lidar-sim|gps-si
 else
     fail "check-demo.sh's wait names the sensor it waited for" \
         "wait printed: $(grep -vE '^ *$' <<< "$FAILED_IMU_WAIT_TEXT" | tr '\n' ';' | head -c 300)"
+fi
+
+# The IMU line reports how long the wait went on for it, which here is the
+# whole wait.
+FAILED_IMU_REPORTED_S=$(grep "imu-sim" <<< "$FAILED_IMU_WAIT_TEXT" | grep -v "^Waiting" \
+    | grep -oE '[0-9]+s' | head -n 1 | tr -d s)
+if [ -n "$FAILED_IMU_REPORTED_S" ] \
+    && [ "$(( FAILED_IMU_REPORTED_S * 1000 - FAILED_IMU_WAIT_MS ))" -le 2000 ] \
+    && [ "$(( FAILED_IMU_WAIT_MS - FAILED_IMU_REPORTED_S * 1000 ))" -le 2000 ]; then
+    pass "check-demo.sh reports the time it waited for the IMU"
+else
+    fail "check-demo.sh reports the time it waited for the IMU" \
+        "reported ${FAILED_IMU_REPORTED_S:-nothing} s; waited ${FAILED_IMU_WAIT_MS} ms"
 fi
 
 # The wait is bounded by wall-clock time: DATA_WAIT_SEC plus one request.
