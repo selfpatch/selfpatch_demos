@@ -50,11 +50,18 @@ curl -s "${API_BASE}/functions" | jq '.items[] | {id: .id, name: .name, descript
 
 echo_step "5. Sample Data (Joint States)"
 echo "Getting latest joint states from Panda arm..."
-curl -s "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" 2>/dev/null | jq '{
-    joint_names: .data.name,
-    positions: .data.position,
-    velocities: .data.velocity
-}' || echo "   (Joint state data not available — robot may still be starting)"
+# An error body or a reply without data (no /joint_states publisher) has no
+# joint names, and jq still exits 0 on it.
+JOINT_STATES=$(curl -s "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" 2>/dev/null) || JOINT_STATES=""
+if jq -e '.data.name | arrays | length > 0' <<< "${JOINT_STATES}" > /dev/null 2>&1; then
+    jq '{
+        joint_names: .data.name,
+        positions: .data.position,
+        velocities: .data.velocity
+    }' <<< "${JOINT_STATES}"
+else
+    echo "   (Joint state data not available - the robot may still be starting, or joint_state_broadcaster is not running)"
+fi
 
 echo_step "6. Faults"
 curl -s "${API_BASE}/faults" | jq '.items[] | {code: .fault_code, severity: .severity_label, status: .status, sources: .reporting_sources}'

@@ -74,6 +74,10 @@ Use the interactive arm controller to send joint trajectories:
 
 The script sends goals directly to the `panda_arm_controller/follow_joint_trajectory` action.
 It works both from outside (via `docker exec`, no TTY required) and from inside the container.
+Where there is no `docker` CLI (inside the container), it uses the local `ros2`. Where there
+is one, it uses a local `ros2` only if `ros2 action list` shows the arm action; it asks twice,
+because a first listing without a running `ros2` daemon can miss it. Otherwise it runs the
+goal through `docker exec` in the demo container.
 
 `pick_place_loop.py` keeps sending its own goals to the same controller, so a manual move
 can be preempted mid-motion by the demo's own workload. `move-arm.sh` reports the goal's
@@ -84,9 +88,12 @@ of earlier failures and reports each one; the command exits non-zero if any step
 
 Each `ros2 action send_goal` run is limited to 30 seconds. The controller can fail to
 deliver the goal response to a freshly started CLI (the container log shows `Failed to send
-goal response`); it then never runs that goal. When no goal response arrives, the script
-sends the goal again, up to three times. A goal that was accepted is never sent twice: if
-its result does not arrive in time, the script prints `Failed: <pose> (status: UNKNOWN)`.
+goal response`); it then never runs that goal. When the CLI printed `Sending goal:` and no
+goal response arrived, the script sends the goal again, up to three times. A goal that was
+accepted is never sent twice: if its result does not arrive in time, the script prints
+`Failed: <pose> (status: UNKNOWN)`. A goal that was never sent (no demo container, no action
+server within 30 seconds, a `ros2` error) is not sent again: the script prints the command's
+output and `Failed: <pose> (goal not sent: ...)`, and exits non-zero.
 
 ### 4. Viewing Logs
 
@@ -462,7 +469,7 @@ Container scripts are stored under `/var/lib/ros2_medkit/scripts/moveit-planning
 | Docker build fails | Apt package missing | Check if MoveIt 2 Jazzy packages are available |
 | "MoveGroup not available" | Slow startup | Wait 60-90 seconds after container starts |
 | Controller not loading | Missing config | Verify `moveit_controllers.yaml` is correct |
-| Joint states empty | Controllers not loaded | Check `ros2 control list_controllers` inside container |
+| Joint states empty (`check-entities.sh` prints "Joint state data not available") | Controllers not loaded | Check `ros2 control list_controllers` inside container |
 | `ros2` CLI hangs in `docker exec` | DDS discovery across container boundaries | Use gateway REST API instead of `ros2` CLI for parameter/service operations |
 
 ## Comparison with Other Demos

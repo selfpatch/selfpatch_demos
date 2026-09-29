@@ -252,6 +252,107 @@ run_move_arm() {
     fi
 }
 
+# Log of every run_move_arm_inside run, for checks across all of them.
+INSIDE_ALL_LOG=/tmp/moveit_smoke_inside_all.log
+: > "${INSIDE_ALL_LOG}"
+
+# Sources the ROS environment, as a shell in the container does.
+ROS_ENV='source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.bash'
+
+# run_move_arm_inside <log> <setup> <args...>: run the copy of move-arm.sh at
+# /tmp/move-arm.sh in the demo container. Bash code <setup> runs first; the
+# ROS environment is there only if <setup> sources it. move-arm.sh runs only
+# if <setup> succeeds, else MOVE_ARM_RC is 255 and the log is empty. Output
+# goes to a file in the container: docker exec can drop the end of a ros2
+# CLI's stdout. Sets MOVE_ARM_RC.
+run_move_arm_inside() {
+    local log="$1" setup="$2"
+    shift 2
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        rm -f /tmp/moveit_smoke_inside.log /tmp/moveit_smoke_inside.rc
+        { ${setup}; } || exit 0
+        timeout ${MOVE_ARM_LIMIT_SEC} bash /tmp/move-arm.sh $* < /dev/null > /tmp/moveit_smoke_inside.log 2>&1
+        echo \$? > /tmp/moveit_smoke_inside.rc
+    " > /dev/null 2>&1 || true
+    docker exec "${DEMO_CONTAINER}" cat /tmp/moveit_smoke_inside.log > "${log}" 2> /dev/null || : > "${log}"
+    MOVE_ARM_RC=$(docker exec "${DEMO_CONTAINER}" cat /tmp/moveit_smoke_inside.rc 2> /dev/null) || MOVE_ARM_RC=255
+    cat "${log}" >> "${INSIDE_ALL_LOG}"
+    if [ "${MOVE_ARM_RC}" = 124 ]; then
+        fail "move-arm.sh $* in the container finishes within ${MOVE_ARM_LIMIT_SEC} s" "killed by timeout"
+    fi
+}
+
+# write_fake_ros2 <dir>: a ros2 CLI at <dir>/ros2 that counts its calls in
+# <dir>/lists and <dir>/calls. `action list` shows the arm action from call
+# FAKE_LIST_MISSES + 1 on (default 0). `action send_goal` hands the goal to
+# the real CLI in CONTAINER_NAME, except the first goal when FAKE_LOST_GOAL is
+# set: it prints "Sending goal:" and then hangs ("hang") or exits 1 ("exit").
+write_fake_ros2() {
+    cat > "$1/ros2" <<'FAKE'
+#!/bin/sh
+count() {
+    n=$(($(cat "${FAKE_ROS2_DIR}/$1" 2> /dev/null || echo 0) + 1))
+    echo "${n}" > "${FAKE_ROS2_DIR}/$1"
+}
+if [ "$1 $2" = "action list" ]; then
+    count lists
+    if [ "${n}" -gt "${FAKE_LIST_MISSES:-0}" ]; then
+        echo /panda_arm_controller/follow_joint_trajectory
+    fi
+    exit 0
+fi
+[ "$1 $2" = "action send_goal" ] || exit 1
+shift 2
+count calls
+if [ "${n}" -eq 1 ] && [ -n "${FAKE_LOST_GOAL:-}" ]; then
+    echo "Waiting for an action server to become available..."
+    echo "Sending goal:"
+    [ "${FAKE_LOST_GOAL}" = hang ] || exit 1
+    echo "$$" > "${FAKE_ROS2_DIR}/hung.pid"
+    exec sleep 3600
+fi
+exec docker exec -i "${CONTAINER_NAME}" bash -s -- "$@" <<'REMOTE'
+set +u
+source /opt/ros/jazzy/setup.bash
+source /root/demo_ws/install/setup.bash
+exec timeout 60 ros2 action send_goal "$@"
+REMOTE
+FAKE
+    chmod +x "$1/ros2"
+}
+
+# check_not_sent <name> <log> <rc> <pattern>: a goal that was never sent. The
+# run exits non-zero on its own, prints a line matching <pattern> (the
+# failure's own output) exactly once, one failure line, and no resend line.
+check_not_sent() {
+    local name="$1" log="$2" rc="$3" pattern="$4" matches failures
+    matches=$(grep -cE -- "${pattern}" "${log}" || true)
+    failures=$(grep -c '^Failed: ' "${log}" || true)
+    if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 124 ] && [ "${matches}" -eq 1 ] && [ "${failures}" -eq 1 ] \
+        && ! grep -q 'sending the goal again' "${log}"; then
+        pass "move-arm.sh ${name}: reported once, exit ${rc}, not sent again"
+    else
+        fail "move-arm.sh ${name}: reported once, non-zero exit, not sent again" \
+            "rc=${rc}; lines matching '${pattern}': ${matches}; failure lines: ${failures}; tail: $(tail -n 4 "${log}" | tr '\n' ';')"
+    fi
+}
+
+# ros2_control <args...>: `ros2 control <args>` in the demo container. Output
+# goes to /tmp/moveit_smoke_ros2_control.log there.
+ros2_control() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        ${ROS_ENV} && timeout 60 ros2 control \"\$@\" > /tmp/moveit_smoke_ros2_control.log 2>&1
+    " ros2_control "$@"
+}
+
+# True while a test has joint_state_broadcaster inactive or unloaded.
+JSB_DOWN=false
+
+reload_joint_state_broadcaster() {
+    { ros2_control load_controller --set-state active joint_state_broadcaster \
+        || ros2_control set_controller_state joint_state_broadcaster active; } && JSB_DOWN=false
+}
+
 # real_status <log>: the final status the action client printed itself, read
 # without move-arm.sh's own verdict. Empty when no goal finished.
 real_status() {
@@ -306,6 +407,9 @@ check_goal_report() {
 cleanup_on_exit() {
     local rc=$?
     set +e
+    if [ "${JSB_DOWN}" = true ]; then
+        reload_joint_state_broadcaster
+    fi
     resume_pick_place_loop
     resume_fault_manager
     (exit "${rc}")
@@ -436,19 +540,41 @@ else
     pass "check-entities.sh prints no null fields"
 fi
 
-# shown_items <n>: the JSON objects check-entities.sh printed under its
-# "=== <n>. ..." heading, as one array.
-shown_items() {
+# section_text <n> [log]: the lines check-entities.sh printed under its
+# "=== <n>. ..." heading.
+section_text() {
     awk -v heading="=== $1. " '
         index($0, "=== ") == 1 { on = (index($0, heading) == 1); next }
         index($0, "Entity hierarchy exploration complete") { on = 0 }
         on
-    ' "${ENTITIES_LOG}" | jq -s -c '.'
+    ' "${2:-${ENTITIES_LOG}}"
+}
+
+# shown_items <n>: the JSON objects printed under heading <n>, as one array.
+shown_items() {
+    section_text "$1" | jq -s -c '.'
 }
 
 SHOWN_COMPONENTS=$(shown_items 2) || SHOWN_COMPONENTS='[]'
 SHOWN_APPS=$(shown_items 3) || SHOWN_APPS='[]'
 SHOWN_FAULTS=$(shown_items 6) || SHOWN_FAULTS='[]'
+
+# Section 5 holds one text line and then the joint state object. Values move
+# with the arm, so they are checked by type and count, not compared.
+SHOWN_JOINT_STATE=$(section_text 5 | sed -n '/^{/,/^}/p' | jq -c '.') || SHOWN_JOINT_STATE=""
+API_JOINTS=$(curl -s -m 30 "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" \
+    | jq -c '.data.name // empty') || API_JOINTS=""
+if [ -n "${API_JOINTS}" ] && [ "${API_JOINTS}" != "[]" ] \
+    && jq -e --argjson names "${API_JOINTS}" '
+        .joint_names == $names
+        and ([.positions, .velocities]
+            | all(type == "array" and length == ($names | length) and all(.[]; type == "number")))
+    ' <<< "${SHOWN_JOINT_STATE}" > /dev/null 2>&1; then
+    pass "check-entities.sh shows the API's joint names with one numeric position and velocity each"
+else
+    fail "check-entities.sh shows the API's joint names with one numeric position and velocity each" \
+        "api names=${API_JOINTS:-none} shown=${SHOWN_JOINT_STATE:-none}"
+fi
 
 API_COMPONENTS=$(curl -s -m 30 "${API_BASE}/components")
 for id in panda-arm panda-gripper moveit-planning pick-place-loop gateway fault-manager diagnostic-bridge; do
@@ -568,35 +694,12 @@ section "move-arm.sh: a goal the controller never answered is sent again"
 # never runs the goal, and the CLI waits forever. This fake ros2 loses the
 # first goal that way and hands the next one to the real CLI in the container.
 FAKE_ROS2_DIR=$(mktemp -d)
-cat > "${FAKE_ROS2_DIR}/ros2" <<'FAKE'
-#!/bin/sh
-if [ "$1 $2" = "action list" ]; then
-    echo /panda_arm_controller/follow_joint_trajectory
-    exit 0
-fi
-[ "$1 $2" = "action send_goal" ] || exit 1
-shift 2
-calls=$(($(cat "${FAKE_ROS2_DIR}/calls" 2> /dev/null || echo 0) + 1))
-echo "${calls}" > "${FAKE_ROS2_DIR}/calls"
-if [ "${calls}" -eq 1 ]; then
-    echo "Waiting for an action server to become available..."
-    echo "Sending goal:"
-    echo "$$" > "${FAKE_ROS2_DIR}/hung.pid"
-    exec sleep 3600
-fi
-exec docker exec -i "${CONTAINER_NAME}" bash -s -- "$@" <<'REMOTE'
-set +u
-source /opt/ros/jazzy/setup.bash
-source /root/demo_ws/install/setup.bash
-exec timeout 60 ros2 action send_goal "$@"
-REMOTE
-FAKE
-chmod +x "${FAKE_ROS2_DIR}/ros2"
+write_fake_ros2 "${FAKE_ROS2_DIR}"
 
 LOST_LOG=/tmp/moveit_smoke_goal_lost.log
 stop_pick_place_loop
 export FAKE_ROS2_DIR
-if PATH="${FAKE_ROS2_DIR}:${PATH}" CONTAINER_NAME="${DEMO_CONTAINER}" \
+if FAKE_LOST_GOAL=hang PATH="${FAKE_ROS2_DIR}:${PATH}" CONTAINER_NAME="${DEMO_CONTAINER}" \
     timeout 120 "${DEMO_DIR}/move-arm.sh" wave < /dev/null > "${LOST_LOG}" 2>&1; then
     LOST_RC=0
 else
@@ -622,6 +725,150 @@ else
     fail "setup: the goal sent again really succeeded" "real status: $(real_status "${LOST_LOG}")"
 fi
 check_goal_report "${LOST_LOG}" "${LOST_RC}" "wave"
+if grep -q "within 30 s.*sending the goal again" "${LOST_LOG}"; then
+    pass "move-arm.sh names the 30 s it waited before sending again"
+else
+    fail "move-arm.sh names the 30 s it waited before sending again" \
+        "resend lines: $(grep 'sending the goal again' "${LOST_LOG}" | tr '\n' ';')"
+fi
+
+section "move-arm.sh: a goal the CLI dropped at once is sent again, without a claimed wait"
+
+# The CLI printed "Sending goal:" and exited 1 at once, with no goal response.
+FAKE_ROS2_DIR=$(mktemp -d)
+write_fake_ros2 "${FAKE_ROS2_DIR}"
+DROPPED_LOG=/tmp/moveit_smoke_goal_dropped.log
+stop_pick_place_loop
+export FAKE_ROS2_DIR
+if FAKE_LOST_GOAL=exit PATH="${FAKE_ROS2_DIR}:${PATH}" CONTAINER_NAME="${DEMO_CONTAINER}" \
+    timeout 120 "${DEMO_DIR}/move-arm.sh" pick < /dev/null > "${DROPPED_LOG}" 2>&1; then
+    DROPPED_RC=0
+else
+    DROPPED_RC=$?
+fi
+resume_pick_place_loop
+DROPPED_CALLS=$(cat "${FAKE_ROS2_DIR}/calls" 2> /dev/null || echo 0)
+rm -rf "${FAKE_ROS2_DIR}"
+unset FAKE_ROS2_DIR
+
+DROPPED_RESEND=$(grep 'sending the goal again' "${DROPPED_LOG}" || true)
+if [ "${DROPPED_CALLS}" -eq 2 ] && [ -n "${DROPPED_RESEND}" ] && ! grep -qE '[0-9]+ s\b' <<< "${DROPPED_RESEND}"; then
+    pass "move-arm.sh sends a dropped goal again and claims no wait"
+else
+    fail "move-arm.sh sends a dropped goal again and claims no wait" \
+        "goals sent: ${DROPPED_CALLS}; resend lines: ${DROPPED_RESEND:-none}"
+fi
+check_goal_report "${DROPPED_LOG}" "${DROPPED_RC}" "pick"
+
+section "move-arm.sh: a goal that was never sent is reported once, not sent again"
+
+NOT_SENT_LOG=/tmp/moveit_smoke_not_sent.log
+
+# No such container, from the host.
+if CONTAINER_NAME=moveit_smoke_no_such_container timeout 120 "${DEMO_DIR}/move-arm.sh" ready \
+    < /dev/null > "${NOT_SENT_LOG}" 2>&1; then
+    NOT_SENT_RC=0
+else
+    NOT_SENT_RC=$?
+fi
+check_not_sent "with no such container" "${NOT_SENT_LOG}" "${NOT_SENT_RC}" 'No such container'
+
+# The remaining cases run in the container: no docker CLI there.
+if docker cp "${DEMO_DIR}/move-arm.sh" "${DEMO_CONTAINER}:/tmp/move-arm.sh" > /dev/null; then
+    pass "setup: move-arm.sh copied into the container"
+else
+    fail "setup: move-arm.sh copied into the container" "docker cp failed"
+fi
+
+stop_pick_place_loop
+
+# Neither docker nor ros2: ROS not sourced.
+run_move_arm_inside "${NOT_SENT_LOG}" ":" ready
+check_not_sent "without docker and ros2" "${NOT_SENT_LOG}" "${MOVE_ARM_RC}" 'docker.*ros2|ros2.*docker'
+
+# No action server: a ROS domain nobody uses.
+run_move_arm_inside "${NOT_SENT_LOG}" "${ROS_ENV} && export ROS_DOMAIN_ID=99" ready
+check_not_sent "with no action server" "${NOT_SENT_LOG}" "${MOVE_ARM_RC}" \
+    'Waiting for an action server to become available'
+
+# Invalid action type: a control_msgs without the action module shadows the real one.
+run_move_arm_inside "${NOT_SENT_LOG}" "${ROS_ENV} && mkdir -p /tmp/moveit_smoke_shadow/control_msgs \
+    && : > /tmp/moveit_smoke_shadow/control_msgs/__init__.py \
+    && export PYTHONPATH=/tmp/moveit_smoke_shadow:\${PYTHONPATH}" ready
+check_not_sent "with an invalid action type" "${NOT_SENT_LOG}" "${MOVE_ARM_RC}" \
+    'The passed action type is invalid'
+
+section "move-arm.sh inside the container: the local ros2 sends every goal"
+
+# A cold `ros2 action list` (no daemon) can miss the arm action, so every run
+# starts with the daemon stopped. `ros2 daemon status` goes to a file in the
+# container; move-arm.sh runs only if it says the daemon is not running, and
+# a run without that proof counts as a failure.
+DAEMON_STATUS_FILE=/tmp/moveit_smoke_daemon_status.log
+DAEMON_STOPPED='The daemon is not running'
+COLD_SETUP="rm -f ${DAEMON_STATUS_FILE}; ${ROS_ENV} && ros2 daemon stop > /dev/null 2>&1; \
+    ros2 daemon status > ${DAEMON_STATUS_FILE} 2>&1; grep -qFx '${DAEMON_STOPPED}' ${DAEMON_STATUS_FILE}"
+INSIDE_RUNS=8
+INSIDE_ACCEPTED=0
+INSIDE_MISSED=""
+INSIDE_LOG=/tmp/moveit_smoke_inside.log
+for run in $(seq 1 "${INSIDE_RUNS}"); do
+    pose=ready
+    [ $((run % 2)) -eq 0 ] && pose=extended
+    run_move_arm_inside "${INSIDE_LOG}" "${COLD_SETUP}" "${pose}"
+    daemon_status=$(docker exec "${DEMO_CONTAINER}" cat "${DAEMON_STATUS_FILE}" 2> /dev/null) || daemon_status=""
+    if [ "${daemon_status}" != "${DAEMON_STOPPED}" ]; then
+        INSIDE_MISSED="${INSIDE_MISSED} run ${run}: daemon not proven stopped (status: ${daemon_status:-none});"
+    elif grep -q '^Goal accepted with ID' "${INSIDE_LOG}"; then
+        INSIDE_ACCEPTED=$((INSIDE_ACCEPTED + 1))
+    else
+        INSIDE_MISSED="${INSIDE_MISSED} run ${run} (rc=${MOVE_ARM_RC}): $(tail -n 2 "${INSIDE_LOG}" | tr '\n' ';')"
+    fi
+done
+resume_pick_place_loop
+docker exec "${DEMO_CONTAINER}" rm -rf /tmp/move-arm.sh /tmp/moveit_smoke_shadow > /dev/null 2>&1 || true
+
+if [ "${INSIDE_ACCEPTED}" -eq "${INSIDE_RUNS}" ]; then
+    pass "move-arm.sh in the container: the controller accepted the goal in ${INSIDE_RUNS}/${INSIDE_RUNS} cold runs"
+else
+    fail "move-arm.sh in the container: the controller accepted the goal in every cold run" \
+        "accepted ${INSIDE_ACCEPTED}/${INSIDE_RUNS};${INSIDE_MISSED}"
+fi
+if grep -q 'command not found' "${INSIDE_ALL_LOG}"; then
+    fail "move-arm.sh in the container prints no 'command not found'" \
+        "$(grep 'command not found' "${INSIDE_ALL_LOG}" | sort | uniq -c | tr '\n' ';')"
+else
+    pass "move-arm.sh in the container prints no 'command not found'"
+fi
+
+section "move-arm.sh: a cold local ros2 is asked twice before docker exec"
+
+# The first `action list` misses the arm action, as a cold one can. The goal
+# must still go through the local ros2.
+FAKE_ROS2_DIR=$(mktemp -d)
+write_fake_ros2 "${FAKE_ROS2_DIR}"
+COLD_LOG=/tmp/moveit_smoke_cold_list.log
+stop_pick_place_loop
+export FAKE_ROS2_DIR
+if FAKE_LIST_MISSES=1 PATH="${FAKE_ROS2_DIR}:${PATH}" CONTAINER_NAME="${DEMO_CONTAINER}" \
+    timeout 120 "${DEMO_DIR}/move-arm.sh" ready < /dev/null > "${COLD_LOG}" 2>&1; then
+    COLD_RC=0
+else
+    COLD_RC=$?
+fi
+resume_pick_place_loop
+COLD_LISTS=$(cat "${FAKE_ROS2_DIR}/lists" 2> /dev/null || echo 0)
+COLD_CALLS=$(cat "${FAKE_ROS2_DIR}/calls" 2> /dev/null || echo 0)
+rm -rf "${FAKE_ROS2_DIR}"
+unset FAKE_ROS2_DIR
+
+if [ "${COLD_LISTS}" -eq 2 ] && [ "${COLD_CALLS}" -eq 1 ]; then
+    pass "move-arm.sh lists actions again after a miss and sends through the local ros2"
+else
+    fail "move-arm.sh lists actions again after a miss and sends through the local ros2" \
+        "action lists: ${COLD_LISTS}; goals through the local ros2: ${COLD_CALLS}"
+fi
+check_goal_report "${COLD_LOG}" "${COLD_RC}" "ready"
 
 section "move-arm.sh: reports the goal's real final status"
 
@@ -754,6 +1001,52 @@ if stop_fault_manager; then
 else
     fail "setup: fault manager stopped" "no fault_manager_node process in ${DEMO_CONTAINER}"
 fi
+
+section "check-entities.sh: joint states without data print a hint, not nulls"
+
+# joint_names_served: the gateway returns joint names for joint_states.
+joint_names_served() {
+    curl -s -m 30 "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" \
+        | jq -e '.data.name | arrays | length > 0' > /dev/null 2>&1
+}
+
+# Unloading joint_state_broadcaster removes the only /joint_states publisher.
+NO_JOINTS_LOG=/tmp/moveit_smoke_entities_no_joints.log
+stop_pick_place_loop
+if ros2_control set_controller_state joint_state_broadcaster inactive \
+    && JSB_DOWN=true && ros2_control unload_controller joint_state_broadcaster; then
+    waited=0
+    while joint_names_served && [ "${waited}" -lt 30 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+fi
+if [ "${JSB_DOWN}" = true ] && ! joint_names_served; then
+    pass "setup: joint_states has no data with joint_state_broadcaster unloaded"
+    GATEWAY_URL="${GATEWAY_URL}" timeout 120 "${DEMO_DIR}/check-entities.sh" < /dev/null 2>&1 \
+        | sed 's/\x1b\[[0-9;]*m//g' > "${NO_JOINTS_LOG}" || true
+    NO_JOINTS_SECTION=$(section_text 5 "${NO_JOINTS_LOG}")
+    if ! grep -q 'exploration complete' "${NO_JOINTS_LOG}"; then
+        fail "check-entities.sh without joint data runs to completion" "$(tail -n 5 "${NO_JOINTS_LOG}")"
+    elif grep -q 'Joint state data not available' <<< "${NO_JOINTS_SECTION}" \
+        && ! grep -q '^{' <<< "${NO_JOINTS_SECTION}" && ! grep -qw 'null' "${NO_JOINTS_LOG}"; then
+        pass "check-entities.sh without joint data prints the hint and no null"
+    else
+        fail "check-entities.sh without joint data prints the hint and no null" \
+            "section 5: $(tr '\n' ';' <<< "${NO_JOINTS_SECTION}"); null lines: $(grep -cw 'null' "${NO_JOINTS_LOG}" || true)"
+    fi
+else
+    fail "setup: joint_states has no data with joint_state_broadcaster unloaded" \
+        "$(docker exec "${DEMO_CONTAINER}" cat /tmp/moveit_smoke_ros2_control.log 2> /dev/null | tail -n 3 | tr '\n' ';')"
+fi
+if reload_joint_state_broadcaster && poll_until "/apps/joint-state-broadcaster/data/joint_states" \
+    '.data.name | arrays | length > 0' 30; then
+    pass "setup: joint states return after joint_state_broadcaster is loaded again"
+else
+    fail "setup: joint states return after joint_state_broadcaster is loaded again" \
+        "$(docker exec "${DEMO_CONTAINER}" cat /tmp/moveit_smoke_ros2_control.log 2> /dev/null | tail -n 3 | tr '\n' ';')"
+fi
+resume_pick_place_loop
 
 # --- Summary ---
 

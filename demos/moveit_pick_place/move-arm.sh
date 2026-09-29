@@ -12,7 +12,6 @@
 
 set -eu
 
-CONTAINER="${CONTAINER_NAME:-$(docker ps --format '{{.Names}}' | grep -E '^moveit_medkit_demo(_nvidia)?(_local)?$' | head -n1)}"
 ACTION="/panda_arm_controller/follow_joint_trajectory"
 JOINT_NAMES='["panda_joint1","panda_joint2","panda_joint3","panda_joint4","panda_joint5","panda_joint6","panda_joint7"]'
 
@@ -52,13 +51,49 @@ RIGHT="[1.5, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]"
 WAVE="[0.0, -1.0, 0.0, -0.5, 0.0, 2.5, 0.785]"
 
 
+have() {
+    command -v "$1" &> /dev/null
+}
+
 # True only if a LOCAL ros2 can actually reach the target action server.
 # `ros2 node list` exits 0 even on an empty graph (wrong ROS_DOMAIN_ID, no
 # multicast route), so a host with ROS 2 sourced but not connected to the
 # demo looks identical to being inside the container. Checking that the
-# action itself is listed avoids that false positive.
+# action itself is listed avoids that false positive. A cold listing (no
+# ros2 daemon yet) can miss a running server, so a miss is listed once more.
 can_reach_action_locally() {
-    command -v ros2 &> /dev/null && ros2 action list 2> /dev/null | grep -qFx "${ACTION}"
+    have ros2 || return 1
+    ros2 action list 2> /dev/null | grep -qFx "${ACTION}" \
+        || ros2 action list 2> /dev/null | grep -qFx "${ACTION}"
+}
+
+# Picks how goals are sent: USE_LOCAL=true for the local ros2, else
+# `docker exec` into CONTAINER. Without a docker CLI the script runs inside
+# the container or on a ROS host, so the local ros2 is the only way.
+# On failure sets NOT_SENT_REASON and returns 1.
+USE_LOCAL=""
+CONTAINER=""
+NOT_SENT_REASON=""
+choose_transport() {
+    [[ -z "${USE_LOCAL}" ]] || return 0
+    if ! have docker; then
+        if ! have ros2; then
+            NOT_SENT_REASON="needs the docker CLI or a sourced ROS 2 (ros2 CLI), found neither"
+            return 1
+        fi
+        USE_LOCAL=true
+        return 0
+    fi
+    if can_reach_action_locally; then
+        USE_LOCAL=true
+        return 0
+    fi
+    CONTAINER="${CONTAINER_NAME:-$(docker ps --format '{{.Names}}' | grep -E '^moveit_medkit_demo(_nvidia)?(_local)?$' | head -n1)}"
+    if [[ -z "${CONTAINER}" ]]; then
+        NOT_SENT_REASON="no running moveit_medkit_demo container, start it with ./run-demo.sh or set CONTAINER_NAME"
+        return 1
+    fi
+    USE_LOCAL=false
 }
 
 send_trajectory() {
@@ -80,21 +115,24 @@ send_trajectory() {
         }
     }"
 
+    if ! choose_transport; then
+        echo "Failed: ${label} (goal not sent: ${NOT_SENT_REASON})" >&2
+        return 1
+    fi
+
     # `ros2 action send_goal` always exits 0, whatever the goal's outcome -
     # the real result is in its own printed "Goal finished with status:"
     # line, so capture output and parse that instead of the exit code.
     # PYTHONUNBUFFERED keeps the lines printed before a timeout kills the CLI.
-    local local_ros2=false attempt output
-    if can_reach_action_locally; then
-        local_ros2=true
-    fi
+    local attempt output rc
     for ((attempt = 1; attempt <= SEND_ATTEMPTS; attempt++)); do
-        if [[ "${local_ros2}" == true ]]; then
+        rc=0
+        if [[ "${USE_LOCAL}" == true ]]; then
             output=$(PYTHONUNBUFFERED=1 timeout "${SEND_TIMEOUT_SEC}" \
                 ros2 action send_goal "${ACTION}" \
                 control_msgs/action/FollowJointTrajectory \
                 "${goal_msg}" \
-                --feedback 2>&1) || true
+                --feedback 2>&1) || rc=$?
         else
             # Outside the container: exec into it. No -it: this must also
             # work without a TTY (CI, a pipe), and the command needs no stdin.
@@ -108,16 +146,32 @@ send_trajectory() {
                     control_msgs/action/FollowJointTrajectory \
                     \"${goal_msg}\" \
                     --feedback
-            " 2>&1) || true
+            " 2>&1) || rc=$?
         fi
         printf '%s\n' "${output}"
-        # An accepted or rejected goal has its answer. Only a goal that got
-        # no response at all never ran, so only that one is sent again.
+        # An accepted or rejected goal has its answer.
         if grep -qE '^(Goal accepted with ID|Goal was rejected)' <<< "${output}"; then
             break
         fi
+        # Never sent (no container, no action server, a CLI error): sending
+        # again changes nothing. rc 124 is the timeout.
+        if ! grep -q '^Sending goal:' <<< "${output}"; then
+            if ((rc == 124)) && grep -q '^Waiting for an action server' <<< "${output}"; then
+                echo "Failed: ${label} (goal not sent: no action server ${ACTION} within ${SEND_TIMEOUT_SEC} s)" >&2
+            elif ((rc == 124)); then
+                echo "Failed: ${label} (goal not sent: timed out after ${SEND_TIMEOUT_SEC} s)" >&2
+            else
+                echo "Failed: ${label} (goal not sent: exit status ${rc})" >&2
+            fi
+            return 1
+        fi
+        # Sent with no response: the controller never runs it, so send again.
         if ((attempt < SEND_ATTEMPTS)); then
-            echo "No goal response within ${SEND_TIMEOUT_SEC} s, sending the goal again"
+            if ((rc == 124)); then
+                echo "No goal response within ${SEND_TIMEOUT_SEC} s, sending the goal again"
+            else
+                echo "No goal response (exit status ${rc}), sending the goal again"
+            fi
         fi
     done
 
