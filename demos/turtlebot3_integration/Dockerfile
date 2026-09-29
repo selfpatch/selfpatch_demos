@@ -72,16 +72,17 @@ COPY config/ ${COLCON_WS}/src/turtlebot3_medkit_demo/config/
 COPY launch/ ${COLCON_WS}/src/turtlebot3_medkit_demo/launch/
 COPY scripts/ ${COLCON_WS}/src/turtlebot3_medkit_demo/scripts/
 
-# TODO(#49): Move to manifest-defined scripts once ros2_medkit#303 lands
-COPY container_scripts/ /var/lib/ros2_medkit/scripts/
-RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
-
 # Build ros2_medkit and demo package
 WORKDIR ${COLCON_WS}
 RUN bash -c "source /opt/ros/jazzy/setup.bash && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y && \
     MAKEFLAGS='-j 2' colcon build --executor sequential --symlink-install --cmake-args -DBUILD_TESTING=OFF"
+
+# Scripts are not build inputs, so a script change does not rebuild the workspace.
+# TODO(#49): Move to manifest-defined scripts once ros2_medkit#303 lands
+COPY container_scripts/ /var/lib/ros2_medkit/scripts/
+RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
 
 # Setup environment
 RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \

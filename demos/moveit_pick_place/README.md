@@ -73,7 +73,27 @@ Use the interactive arm controller to send joint trajectories:
 ```
 
 The script sends goals directly to the `panda_arm_controller/follow_joint_trajectory` action.
-It works both from outside (via `docker exec`) and from inside the container.
+It works both from outside (via `docker exec`, no TTY required) and from inside the container.
+Where there is no `docker` CLI (inside the container), it uses the local `ros2`. Where there
+is one, it uses a local `ros2` only if `ros2 action list` shows the arm action; it asks twice,
+because a first listing without a running `ros2` daemon can miss it. Otherwise it runs the
+goal through `docker exec` in the demo container.
+
+`pick_place_loop.py` keeps sending its own goals to the same controller, so a manual move
+can be preempted mid-motion by the demo's own workload. `move-arm.sh` reports the goal's
+real final status: if the controller aborts it (`error_string: Current goal preempted by
+new incoming action`), the script prints `Failed: <pose> (status: ABORTED)` and exits
+non-zero instead of claiming success. `./move-arm.sh demo` runs all three steps regardless
+of earlier failures and reports each one; the command exits non-zero if any step failed.
+
+Each `ros2 action send_goal` run is limited to 30 seconds. The controller can fail to
+deliver the goal response to a freshly started CLI (the container log shows `Failed to send
+goal response`); it then never runs that goal. When the CLI printed `Sending goal:` and no
+goal response arrived, the script sends the goal again, up to three times. A goal that was
+accepted is never sent twice: if its result does not arrive in time, the script prints
+`Failed: <pose> (status: UNKNOWN)`. A goal that was never sent (no demo container, no action
+server within 30 seconds, a `ros2` error) is not sent again: the script prints the command's
+output and `Failed: <pose> (goal not sent: ...)`, and exits non-zero.
 
 ### 4. Viewing Logs
 
@@ -209,6 +229,10 @@ curl http://localhost:8080/api/v1/apps/move-group/operations | jq
 curl http://localhost:8080/api/v1/faults | jq
 ```
 
+While the fault manager is not available (for example right after startup), `GET /faults`
+answers `503`. `./check-faults.sh` then prints `Could not read faults (HTTP 503)` and exits
+non-zero; it reports "No active faults" only after a successful read of an empty list.
+
 ### Clear All Faults
 
 ```bash
@@ -308,8 +332,8 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ### How It Works
 
-1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/manipulation_monitor/triggers`:
-   - **Resource:** `/api/v1/apps/manipulation_monitor/faults` (watches fault collection)
+1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/manipulation-monitor/triggers`:
+   - **Resource:** `/api/v1/apps/manipulation-monitor/faults` (watches fault collection)
    - **Condition:** `OnChange` (fires on any new or updated fault)
    - **Multishot:** `true` (fires repeatedly, not just once)
    - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
@@ -320,23 +344,23 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 ```bash
 # Create a trigger
-curl -X POST http://localhost:8080/api/v1/apps/manipulation_monitor/triggers \
+curl -X POST http://localhost:8080/api/v1/apps/manipulation-monitor/triggers \
   -H "Content-Type: application/json" \
   -d '{
-    "resource": "/api/v1/apps/manipulation_monitor/faults",
+    "resource": "/api/v1/apps/manipulation-monitor/faults",
     "trigger_condition": {"condition_type": "OnChange"},
     "multishot": true,
     "lifetime": 3600
   }' | jq
 
 # List triggers
-curl http://localhost:8080/api/v1/apps/manipulation_monitor/triggers | jq
+curl http://localhost:8080/api/v1/apps/manipulation-monitor/triggers | jq
 
 # Watch events (replace TRIGGER_ID)
-curl -N http://localhost:8080/api/v1/apps/manipulation_monitor/triggers/TRIGGER_ID/events
+curl -N http://localhost:8080/api/v1/apps/manipulation-monitor/triggers/TRIGGER_ID/events
 
 # Delete a trigger
-curl -X DELETE http://localhost:8080/api/v1/apps/manipulation_monitor/triggers/TRIGGER_ID
+curl -X DELETE http://localhost:8080/api/v1/apps/manipulation-monitor/triggers/TRIGGER_ID
 ```
 
 ## Fault Injection Scenarios
@@ -445,7 +469,7 @@ Container scripts are stored under `/var/lib/ros2_medkit/scripts/moveit-planning
 | Docker build fails | Apt package missing | Check if MoveIt 2 Jazzy packages are available |
 | "MoveGroup not available" | Slow startup | Wait 60-90 seconds after container starts |
 | Controller not loading | Missing config | Verify `moveit_controllers.yaml` is correct |
-| Joint states empty | Controllers not loaded | Check `ros2 control list_controllers` inside container |
+| Joint states empty (`check-entities.sh` prints "Joint state data not available") | Controllers not loaded | Check `ros2 control list_controllers` inside container |
 | `ros2` CLI hangs in `docker exec` | DDS discovery across container boundaries | Use gateway REST API instead of `ros2` CLI for parameter/service operations |
 
 ## Comparison with Other Demos

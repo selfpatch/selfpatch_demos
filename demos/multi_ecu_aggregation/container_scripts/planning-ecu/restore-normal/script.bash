@@ -1,40 +1,61 @@
 #!/bin/bash
-# Reset all planning node parameters to defaults
+# Reset all planning node parameters to defaults and clear faults
 set -eu
 
-# ROS setup.bash dereferences AMENT_TRACE_SETUP_FILES; relax nounset around it.
-set +u
-# shellcheck source=/dev/null
-source /opt/ros/jazzy/setup.bash
-# shellcheck source=/dev/null
-source /root/demo_ws/install/setup.bash
-set -u
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+API_BASE="${GATEWAY_URL}/api/v1"
 
 ERRORS=0
 
+# Sets one parameter through this ECU's gateway. A refused write is named on
+# stderr, which the Scripts API returns as the error message.
+put_config() {
+    local app="$1" param="$2" value="$3" code
+    code=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X PUT \
+        "${API_BASE}/apps/${app}/configurations/${param}" \
+        -H "Content-Type: application/json" -d "{\"value\": ${value}}") || true
+    case "$code" in
+        2??) echo "${app}: ${param}=${value}" ;;
+        *)
+            echo "FAIL: ${app}/${param} (HTTP ${code})" >&2
+            ERRORS=$((ERRORS + 1))
+            ;;
+    esac
+}
+
 # Path planner
-ros2 param set /planning/path_planner planning_delay_ms 0 || ERRORS=$((ERRORS + 1))
-ros2 param set /planning/path_planner failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+put_config path-planner planning_delay_ms 0
+put_config path-planner failure_probability 0.0
 
 # Behavior planner
-ros2 param set /planning/behavior_planner inject_wrong_direction false || ERRORS=$((ERRORS + 1))
-ros2 param set /planning/behavior_planner failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+put_config behavior-planner inject_wrong_direction false
+put_config behavior-planner failure_probability 0.0
 
 # Task scheduler
-ros2 param set /planning/task_scheduler inject_stuck false || ERRORS=$((ERRORS + 1))
-ros2 param set /planning/task_scheduler failure_probability 0.0 || ERRORS=$((ERRORS + 1))
+put_config task-scheduler inject_stuck false
+put_config task-scheduler failure_probability 0.0
 
-if [ $ERRORS -gt 0 ]; then
-    echo "{\"status\": \"partial\", \"errors\": $ERRORS}"
+if [ "$ERRORS" -gt 0 ]; then
+    echo "${ERRORS} parameter write(s) failed" >&2
     exit 1
 fi
 
-# Clear faults
-GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
-API_BASE="${GATEWAY_URL}/api/v1"
+# Clears the faults of this ECU's fault manager. Prints the HTTP status.
+clear_faults() {
+    curl -s -m 30 -o /dev/null -w '%{http_code}' -X DELETE "${API_BASE}/faults" || true
+}
+
+# The second clear decides the result.
 echo "Clearing faults..."
-curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
+clear_faults > /dev/null
 sleep 2
-curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
+code=$(clear_faults)
+case "$code" in
+    2??) ;;
+    *)
+        echo "FAIL: clear faults (HTTP ${code})" >&2
+        exit 1
+        ;;
+esac
 
 echo '{"status": "restored", "ecu": "planning"}'

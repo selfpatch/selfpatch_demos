@@ -8,13 +8,19 @@
 /// 10-waypoint path in the "map" frame. Offsets the path when detections are
 /// present to simulate obstacle avoidance. Supports artificial planning delay
 /// and failure probability for fault injection.
+///
+/// The planning timer runs in its own callback group on a multi-threaded
+/// executor, so parameter services answer while a planning cycle waits out
+/// the injected delay.
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
@@ -53,6 +59,8 @@ public:
       "/perception/detections", 10,
       std::bind(&PathPlanner::on_detections, this, std::placeholders::_1));
 
+    planning_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
     // Create timer (with rate validation)
     double rate = planning_rate_;
     if (rate <= 0.0) {
@@ -66,7 +74,7 @@ public:
     auto period = std::chrono::duration<double>(1.0 / rate);
     timer_ = this->create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-      std::bind(&PathPlanner::plan_path, this));
+      std::bind(&PathPlanner::plan_path, this), planning_group_);
 
     // Register parameter callback
     param_callback_handle_ = this->add_on_set_parameters_callback(
@@ -91,12 +99,17 @@ private:
 
     for (const auto & param : parameters) {
       if (param.get_name() == "planning_delay_ms") {
-        planning_delay_ms_ = param.as_int();
-        RCLCPP_INFO(this->get_logger(), "Planning delay changed to %ld ms", planning_delay_ms_);
+        {
+          std::lock_guard<std::mutex> lock(delay_mutex_);
+          planning_delay_ms_ = param.as_int();
+        }
+        delay_changed_.notify_all();
+        RCLCPP_INFO(
+          this->get_logger(), "Planning delay changed to %ld ms", planning_delay_ms_.load());
       } else if (param.get_name() == "failure_probability") {
         failure_probability_ = param.as_double();
         RCLCPP_INFO(
-          this->get_logger(), "Failure probability changed to %.2f", failure_probability_);
+          this->get_logger(), "Failure probability changed to %.2f", failure_probability_.load());
       } else if (param.get_name() == "planning_rate") {
         double rate = param.as_double();
         if (rate <= 0.0) {
@@ -108,7 +121,7 @@ private:
         auto period = std::chrono::duration<double>(1.0 / rate);
         timer_ = this->create_wall_timer(
           std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-          std::bind(&PathPlanner::plan_path, this));
+          std::bind(&PathPlanner::plan_path, this), planning_group_);
         RCLCPP_INFO(this->get_logger(), "Planning rate changed to %.1f Hz", planning_rate_);
       }
     }
@@ -125,11 +138,18 @@ private:
   {
     plan_count_++;
 
-    // Intentional blocking sleep to simulate slow computation pipeline.
-    // This blocks the single-threaded executor, preventing parameter changes
-    // and other callbacks from being processed during the delay.
-    if (planning_delay_ms_ > 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(planning_delay_ms_));
+    // Simulated slow computation: the cycle waits planning_delay_ms before it
+    // publishes. A new planning_delay_ms applies to the cycle in progress.
+    {
+      const auto start = std::chrono::steady_clock::now();
+      std::unique_lock<std::mutex> lock(delay_mutex_);
+      while (true) {
+        const auto deadline = start + std::chrono::milliseconds(planning_delay_ms_.load());
+        if (std::chrono::steady_clock::now() >= deadline) {
+          break;
+        }
+        delay_changed_.wait_until(lock, deadline);
+      }
     }
 
     // Check for failure injection
@@ -175,11 +195,11 @@ private:
     if (planning_delay_ms_ > 100) {
       publish_diagnostics(
         "SLOW_PLANNING",
-        "Planning delay: " + std::to_string(planning_delay_ms_) + " ms");
+        "Planning delay: " + std::to_string(planning_delay_ms_.load()) + " ms");
     } else if (last_detection_count_ > 5) {
       publish_diagnostics(
         "HIGH_OBSTACLE_COUNT",
-        "Avoiding " + std::to_string(last_detection_count_) + " detections");
+        "Avoiding " + std::to_string(last_detection_count_.load()) + " detections");
     } else {
       publish_diagnostics("OK", "Operating normally");
     }
@@ -212,11 +232,11 @@ private:
     diag.values.push_back(kv);
 
     kv.key = "detection_count";
-    kv.value = std::to_string(last_detection_count_);
+    kv.value = std::to_string(last_detection_count_.load());
     diag.values.push_back(kv);
 
     kv.key = "planning_delay_ms";
-    kv.value = std::to_string(planning_delay_ms_);
+    kv.value = std::to_string(planning_delay_ms_.load());
     diag.values.push_back(kv);
 
     diag_array.status.push_back(diag);
@@ -230,7 +250,8 @@ private:
   // Subscription
   rclcpp::Subscription<vision_msgs::msg::Detection2DArray>::SharedPtr detection_sub_;
 
-  // Timer
+  // Timer, in its own callback group so it never blocks parameter services
+  rclcpp::CallbackGroup::SharedPtr planning_group_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   // Parameter callback
@@ -240,13 +261,17 @@ private:
   std::mt19937 rng_;
   std::uniform_real_distribution<double> uniform_dist_;
 
-  // Parameters
-  int64_t planning_delay_ms_;
-  double failure_probability_;
+  // Parameters. The planning cycle reads them on another executor thread.
+  std::atomic<int64_t> planning_delay_ms_{0};
+  std::atomic<double> failure_probability_{0.0};
   double planning_rate_;
 
+  // Wakes a waiting planning cycle when planning_delay_ms changes
+  std::mutex delay_mutex_;
+  std::condition_variable delay_changed_;
+
   // State
-  int last_detection_count_{0};
+  std::atomic<int> last_detection_count_{0};
   uint64_t plan_count_{0};
 };
 
@@ -255,7 +280,11 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<multi_ecu_demo::PathPlanner>());
+  auto node = std::make_shared<multi_ecu_demo::PathPlanner>();
+  // One thread for the planning group, one for everything else.
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 2);
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 }
