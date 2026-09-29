@@ -34,6 +34,23 @@ resume_fault_manager() {
     " > /dev/null 2>&1 || true
 }
 
+LIDAR_PATTERN='^/root/demo_ws/install/sensor_diagnostics_demo/lib/sensor_diagnostics_demo/lidar_sim_node '
+
+# SIGSTOP on the LiDAR node keeps it in the ROS graph but stops its scans.
+stop_lidar() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        pid=\$(pgrep -f '${LIDAR_PATTERN}') || exit 1
+        kill -STOP \"\${pid}\"
+    " > /dev/null 2>&1
+}
+
+resume_lidar() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        pid=\$(pgrep -f '${LIDAR_PATTERN}') || exit 0
+        kill -CONT \"\${pid}\"
+    " > /dev/null 2>&1 || true
+}
+
 # print_summary reads the script's exit status from $?, so hand it the status
 # saved on entry. set +e: under errexit `(exit rc)` would end the trap before
 # print_summary runs.
@@ -41,6 +58,7 @@ cleanup_on_exit() {
     local rc=$?
     set +e
     resume_fault_manager
+    resume_lidar
     (exit "${rc}")
     print_summary
 }
@@ -597,6 +615,50 @@ else
 fi
 curl -s -m 20 -X DELETE "${API_BASE}/faults" > /dev/null || true
 
+section "check-demo.sh waits for a sensor without a first message"
+
+# The first run above races the linking and often starts after it. Here the
+# wait is needed on every run: on a fresh gateway the LiDAR is held before
+# anything reads it and resumed 2 s into the run, well inside both the
+# 30 s link wait and the 5 s first-message wait.
+if docker restart "${DEMO_CONTAINER}" > /dev/null 2>&1; then
+    pass "setup: ${DEMO_CONTAINER} restarted"
+else
+    fail "setup: ${DEMO_CONTAINER} restarted" "docker restart failed"
+fi
+wait_for_gateway 90
+if stop_lidar; then
+    pass "setup: lidar_sim held right after /health"
+    ( sleep 2; resume_lidar ) &
+    HOLD_PID=$!
+    HELD_RC=0
+    HELD_TIMED=$(run_check_demo_timed "") || HELD_RC=$?
+    wait "$HOLD_PID" 2>/dev/null || true
+    resume_lidar
+    HELD_PLAIN=$(untimed "$HELD_TIMED")
+    HELD_WAIT_TEXT=$(readiness_wait_output "$HELD_TIMED")
+    echo "  readiness wait $(readiness_wait_ms "$HELD_TIMED") ms:" \
+        "$(grep -vE '^ *$' <<< "$HELD_WAIT_TEXT" | tr '\n' ';' | head -c 300)"
+    HELD_MISSING=""
+    for n in 5 6 7 8; do
+        section_values_printed "$HELD_PLAIN" "$n" || HELD_MISSING="${HELD_MISSING} ${n}"
+    done
+    if [ "$HELD_RC" -eq 0 ] && [ -z "$HELD_MISSING" ] && ! grep -q ': null' <<< "$HELD_PLAIN"; then
+        pass "check-demo.sh with the LiDAR held exits 0 and prints values in sections 5-8"
+    else
+        fail "check-demo.sh with the LiDAR held exits 0 and prints values in sections 5-8" \
+            "exit code ${HELD_RC}; sections without values:${HELD_MISSING:- none}; last lines: $(grep -vE '^ *$' <<< "$HELD_PLAIN" | tail -n 3 | tr '\n' ';')"
+    fi
+    if grep -q "^Waiting for .*lidar-sim" <<< "$HELD_WAIT_TEXT"; then
+        pass "check-demo.sh says it waits for the held LiDAR"
+    else
+        fail "check-demo.sh says it waits for the held LiDAR" \
+            "wait printed: $(grep -vE '^ *$' <<< "$HELD_WAIT_TEXT" | tr '\n' ';' | head -c 300)"
+    fi
+else
+    fail "setup: lidar_sim held right after /health" "no lidar_sim_node process in ${DEMO_CONTAINER}"
+fi
+
 section "check-demo.sh with a failed IMU on a fresh gateway"
 
 # The gateway keeps the last message of a topic it has read. A sensor that
@@ -686,17 +748,23 @@ else
     fail "check-demo.sh's readiness wait ends within the default 30 s plus one request" \
         "waited ${FAILED_IMU_WAIT_MS} ms"
 fi
-for wait_sec in 0 2; do
+# 08 is a whole number of seconds with a leading zero, not an octal number.
+# Here the IMU's 5 s first-message window ends the wait before 8 s, so the
+# wait must last at least 3 s: a value read as 0 or refused ends it at once.
+for wait_sec in 0 2 08; do
     WAIT_RC=0
     WAIT_TIMED=$(run_check_demo_timed "$wait_sec") || WAIT_RC=$?
     WAIT_MS=$(readiness_wait_ms "$WAIT_TIMED")
+    WAIT_MIN_MS=0
+    [ "$wait_sec" = 08 ] && WAIT_MIN_MS=3000
     echo "  DATA_WAIT_SEC=${wait_sec}: readiness wait ${WAIT_MS} ms, exit code ${WAIT_RC}"
-    if [ "$WAIT_RC" -eq 0 ] && [ "$WAIT_MS" -le $(( (wait_sec + CHECK_DEMO_REQUEST_TIMEOUT_SEC) * 1000 )) ] \
+    if [ "$WAIT_RC" -eq 0 ] && [ "$WAIT_MS" -ge "$WAIT_MIN_MS" ] \
+        && [ "$WAIT_MS" -le $(( (10#$wait_sec + CHECK_DEMO_REQUEST_TIMEOUT_SEC) * 1000 )) ] \
         && grep -q "=== 12\. " <<< "$WAIT_TIMED"; then
         pass "check-demo.sh with DATA_WAIT_SEC=${wait_sec} waits at most ${wait_sec} s plus one request and runs to section 12"
     else
         fail "check-demo.sh with DATA_WAIT_SEC=${wait_sec} waits at most ${wait_sec} s plus one request and runs to section 12" \
-            "exit code ${WAIT_RC}, waited ${WAIT_MS} ms"
+            "exit code ${WAIT_RC}, waited ${WAIT_MS} ms: $(grep -vE '^[0-9]+ *$' <<< "$WAIT_TIMED" | tail -n 2 | tr '\n' ';')"
     fi
 done
 
