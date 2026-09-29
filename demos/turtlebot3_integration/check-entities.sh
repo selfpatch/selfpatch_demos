@@ -50,13 +50,19 @@ curl -s "${API_BASE}/functions" | jq '.items[] | {id: .id, name: .name, descript
 
 echo_step "5. Sample Data (LiDAR Scan)"
 echo "Getting latest LiDAR scan from TurtleBot3..."
-curl -s "${API_BASE}/apps/turtlebot3-node/data/scan" 2>/dev/null | jq '{
-    angle_min: .data.angle_min,
-    angle_max: .data.angle_max,
-    range_min: .data.range_min,
-    range_max: .data.range_max,
-    sample_ranges: .data.ranges[:5]
-}' || echo "   (LiDAR data not available - Gazebo may still be starting)"
+# A failed read or a scan topic without a message leaves .data empty.
+SCAN_JSON=$(curl -s "${API_BASE}/apps/turtlebot3-node/data/scan" 2>/dev/null)
+if echo "$SCAN_JSON" | jq -e '.data | type == "object" and length > 0' > /dev/null 2>&1; then
+    echo "$SCAN_JSON" | jq '{
+        angle_min: .data.angle_min,
+        angle_max: .data.angle_max,
+        range_min: .data.range_min,
+        range_max: .data.range_max,
+        sample_ranges: .data.ranges[:5]
+    }'
+else
+    echo "   (LiDAR data not available - Gazebo may still be starting)"
+fi
 
 echo_step "6. Faults"
 curl -s "${API_BASE}/faults" | jq '.items[] | {code: .fault_code, severity: .severity_label, sources: .reporting_sources}'

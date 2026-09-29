@@ -598,7 +598,7 @@ demos/turtlebot3_integration/
 | `run-demo.sh` | Start the full demo (Docker) |
 | `stop-demo.sh` | Stop containers and cleanup |
 | `send-nav-goal.sh [x] [y] [yaw]` | Send navigation goal via SOVD API |
-| `check-entities.sh` | Explore SOVD entity hierarchy |
+| `check-entities.sh` | Explore SOVD entity hierarchy; prints a hint instead of scan values when the LiDAR has no data |
 | `check-faults.sh` | View active faults from gateway; exits 1 when the fault list cannot be read |
 | `nav-health-check.sh` | Check Nav2 stack health |
 | `reset-navigation.sh` | Cancel goals and reset AMCL |
