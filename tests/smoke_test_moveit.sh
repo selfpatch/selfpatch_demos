@@ -286,7 +286,8 @@ run_move_arm_inside() {
 # <dir>/lists and <dir>/calls. `action list` shows the arm action from call
 # FAKE_LIST_MISSES + 1 on (default 0). `action send_goal` hands the goal to
 # the real CLI in CONTAINER_NAME, except the first goal when FAKE_LOST_GOAL is
-# set: it prints "Sending goal:" and then hangs ("hang") or exits 1 ("exit").
+# set: it prints "Sending goal:" and then hangs ("hang"), exits 1 ("exit"),
+# or prints "Goal accepted with ID" and hangs without a result ("accepted").
 write_fake_ros2() {
     cat > "$1/ros2" <<'FAKE'
 #!/bin/sh
@@ -307,7 +308,10 @@ count calls
 if [ "${n}" -eq 1 ] && [ -n "${FAKE_LOST_GOAL:-}" ]; then
     echo "Waiting for an action server to become available..."
     echo "Sending goal:"
-    [ "${FAKE_LOST_GOAL}" = hang ] || exit 1
+    [ "${FAKE_LOST_GOAL}" != exit ] || exit 1
+    if [ "${FAKE_LOST_GOAL}" = accepted ]; then
+        echo "Goal accepted with ID: 0123456789abcdef0123456789abcdef"
+    fi
     echo "$$" > "${FAKE_ROS2_DIR}/hung.pid"
     exec sleep 3600
 fi
@@ -760,6 +764,36 @@ else
 fi
 check_goal_report "${DROPPED_LOG}" "${DROPPED_RC}" "pick"
 
+section "move-arm.sh: an accepted goal without a result is not sent again"
+
+# The CLI printed "Goal accepted with ID" and no result before the timeout.
+# The controller may still run that goal, so it must not be sent twice.
+FAKE_ROS2_DIR=$(mktemp -d)
+write_fake_ros2 "${FAKE_ROS2_DIR}"
+NO_RESULT_LOG=/tmp/moveit_smoke_goal_no_result.log
+export FAKE_ROS2_DIR
+if FAKE_LOST_GOAL=accepted PATH="${FAKE_ROS2_DIR}:${PATH}" CONTAINER_NAME="${DEMO_CONTAINER}" \
+    timeout 120 "${DEMO_DIR}/move-arm.sh" home < /dev/null > "${NO_RESULT_LOG}" 2>&1; then
+    NO_RESULT_RC=0
+else
+    NO_RESULT_RC=$?
+fi
+if [ -f "${FAKE_ROS2_DIR}/hung.pid" ]; then
+    kill "$(cat "${FAKE_ROS2_DIR}/hung.pid")" 2> /dev/null || true
+fi
+NO_RESULT_CALLS=$(cat "${FAKE_ROS2_DIR}/calls" 2> /dev/null || echo 0)
+rm -rf "${FAKE_ROS2_DIR}"
+unset FAKE_ROS2_DIR
+
+if [ "${NO_RESULT_CALLS}" -eq 1 ] && [ "${NO_RESULT_RC}" -ne 0 ] && [ "${NO_RESULT_RC}" -ne 124 ] \
+    && ! grep -q 'sending the goal again' "${NO_RESULT_LOG}" \
+    && reports_status "${NO_RESULT_LOG}" "home" "UNKNOWN"; then
+    pass "move-arm.sh sends an accepted goal once and reports UNKNOWN when no result arrives"
+else
+    fail "move-arm.sh sends an accepted goal once and reports UNKNOWN when no result arrives" \
+        "rc=${NO_RESULT_RC}; goals sent: ${NO_RESULT_CALLS}; resend lines: $(grep -c 'sending the goal again' "${NO_RESULT_LOG}" || true); result lines: $(grep -E '^(✅ Done|Failed):' "${NO_RESULT_LOG}" | tr '\n' ';')"
+fi
+
 section "move-arm.sh: a goal that was never sent is reported once, not sent again"
 
 NOT_SENT_LOG=/tmp/moveit_smoke_not_sent.log
@@ -1004,25 +1038,33 @@ fi
 
 section "check-entities.sh: joint states without data print a hint, not nulls"
 
-# joint_names_served: the gateway returns joint names for joint_states.
-joint_names_served() {
-    curl -s -m 30 "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" \
-        | jq -e '.data.name | arrays | length > 0' > /dev/null 2>&1
+# joint_states_empty: GET joint_states succeeds with HTTP 200 and an empty
+# data object, the gateway's reply for a topic with no publisher. Sets
+# JOINT_HTTP and JOINT_BODY.
+joint_states_empty() {
+    local out
+    out=$(curl -s -m 30 -w '\n%{http_code}' \
+        "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" 2> /dev/null) || true
+    JOINT_HTTP=$(tail -n 1 <<< "${out}")
+    JOINT_BODY=$(sed '$d' <<< "${out}")
+    [ "${JOINT_HTTP}" = 200 ] && jq -e '.data | type == "object" and length == 0' <<< "${JOINT_BODY}" > /dev/null 2>&1
 }
 
 # Unloading joint_state_broadcaster removes the only /joint_states publisher.
 NO_JOINTS_LOG=/tmp/moveit_smoke_entities_no_joints.log
+JOINT_HTTP=""
+JOINT_BODY=""
 stop_pick_place_loop
 if ros2_control set_controller_state joint_state_broadcaster inactive \
     && JSB_DOWN=true && ros2_control unload_controller joint_state_broadcaster; then
     waited=0
-    while joint_names_served && [ "${waited}" -lt 30 ]; do
+    until joint_states_empty || [ "${waited}" -ge 30 ]; do
         sleep 1
         waited=$((waited + 1))
     done
 fi
-if [ "${JSB_DOWN}" = true ] && ! joint_names_served; then
-    pass "setup: joint_states has no data with joint_state_broadcaster unloaded"
+if [ "${JSB_DOWN}" = true ] && joint_states_empty; then
+    pass "setup: joint_states answers 200 with empty data with joint_state_broadcaster unloaded"
     GATEWAY_URL="${GATEWAY_URL}" timeout 120 "${DEMO_DIR}/check-entities.sh" < /dev/null 2>&1 \
         | sed 's/\x1b\[[0-9;]*m//g' > "${NO_JOINTS_LOG}" || true
     NO_JOINTS_SECTION=$(section_text 5 "${NO_JOINTS_LOG}")
@@ -1036,8 +1078,8 @@ if [ "${JSB_DOWN}" = true ] && ! joint_names_served; then
             "section 5: $(tr '\n' ';' <<< "${NO_JOINTS_SECTION}"); null lines: $(grep -cw 'null' "${NO_JOINTS_LOG}" || true)"
     fi
 else
-    fail "setup: joint_states has no data with joint_state_broadcaster unloaded" \
-        "$(docker exec "${DEMO_CONTAINER}" cat /tmp/moveit_smoke_ros2_control.log 2> /dev/null | tail -n 3 | tr '\n' ';')"
+    fail "setup: joint_states answers 200 with empty data with joint_state_broadcaster unloaded" \
+        "HTTP ${JOINT_HTTP:-none}: $(head -c 200 <<< "${JOINT_BODY}" | tr '\n' ' '); ros2 control: $(docker exec "${DEMO_CONTAINER}" cat /tmp/moveit_smoke_ros2_control.log 2> /dev/null | tail -n 3 | tr '\n' ';')"
 fi
 if reload_joint_state_broadcaster && poll_until "/apps/joint-state-broadcaster/data/joint_states" \
     '.data.name | arrays | length > 0' 30; then
