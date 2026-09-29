@@ -637,9 +637,11 @@ fi
 
 section "Fault Clear Failure Reporting"
 
-# HTTP status of a GET on an ECU's own gateway, the one its scripts call.
-ecu_get_code() {
-    docker exec "$1" curl -s -m 30 -o /dev/null -w '%{http_code}' "http://localhost:8080/api/v1$2" 2>/dev/null || true
+# HTTP status of a request $2 $3 on an ECU's own gateway, the one its scripts
+# call.
+ecu_http_code() {
+    docker exec "$1" curl -s -m 30 -o /dev/null -w '%{http_code}' -X "$2" "http://localhost:8080/api/v1$3" \
+        2>/dev/null || true
 }
 
 # Resumes the fault manager in container $1 and waits until its gateway reads
@@ -647,34 +649,56 @@ ecu_get_code() {
 resume_and_wait_fault_manager() {
     local deadline=$((SECONDS + 30))
     resume_fault_manager "$1"
-    until [ "$(ecu_get_code "$1" "/faults")" = "200" ]; do
+    until [ "$(ecu_http_code "$1" GET /faults)" = "200" ]; do
         [ "$SECONDS" -lt "$deadline" ] || return 1
         sleep 1
     done
 }
 
-# Stops the fault manager in container $1 while restore-normal on ECU $2 sleeps
-# between its two clears, so the first clear succeeds and the final one fails.
-# Prints "stopped" once it did.
+# Sets CLEAR_CODE to the status a fault clear gets from the gateway of ECU $1
+# in container $2 and passes when it is not 2xx. Call only while that ECU's
+# fault manager is stopped: a working clear removes faults.
+measure_failed_clear() {
+    CLEAR_CODE=$(ecu_http_code "$2" DELETE /faults)
+    if [[ "$CLEAR_CODE" =~ ^[0-9]{3}$ && "$CLEAR_CODE" != 2?? ]]; then
+        pass "setup: a fault clear on the $1 gateway fails $3 (HTTP ${CLEAR_CODE})"
+    else
+        fail "setup: a fault clear on the $1 gateway fails $3" "DELETE /faults: HTTP ${CLEAR_CODE}"
+        return 1
+    fi
+}
+
+# Watches restore-normal on ECU $2 in container $1 and stops the fault manager
+# while the script sleeps between its two clears, so the first clear succeeds
+# and the final one fails. Prints "armed" when it starts polling and "stopped"
+# once the fault manager is stopped. Exits 1 when the script ends without that
+# pause or does not run within 60 s.
 # shellcheck disable=SC2016  # Expanded by bash in the container.
-stop_fault_manager_between_clears() {
+watch_between_clears() {
     docker exec -e SCRIPT_RE="^bash /var/lib/ros2_medkit/scripts/$2/restore-normal/script\.bash$" \
         -e FM_RE="$FAULT_MANAGER_PATTERN" "$1" bash -c '
-        end=$((SECONDS + 60))
-        until pid=$(pgrep -f "$SCRIPT_RE") && pgrep -P "$pid" -x sleep > /dev/null; do
-            [ "$SECONDS" -lt "$end" ] || exit 1
+        end=$((SECONDS + 60)) seen=""
+        echo armed
+        while [ "$SECONDS" -lt "$end" ]; do
+            if pid=$(pgrep -f "$SCRIPT_RE"); then
+                seen=1
+                if pgrep -P "$pid" -x sleep > /dev/null; then
+                    kill -STOP "$(pgrep -f "$FM_RE")" && echo stopped
+                    exit
+                fi
+            elif [ -n "$seen" ]; then
+                exit 1
+            fi
             sleep 0.05
         done
-        kill -STOP "$(pgrep -f "$FM_RE")" && echo stopped
+        exit 1
     ' 2> /dev/null
 }
 
-CLEAR_FAILED_PATTERN='FAIL: clear faults \(HTTP [0-9]{3}\)'
-
 # An execution of restore-normal on ECU $1 failed and its error names the
-# failed fault clear. $3 says in which case.
+# fault clear with status $3. $4 says in which case.
 assert_clear_failure_reported() {
-    local ecu="$1" exec_json="$2" when="$3" status message
+    local ecu="$1" exec_json="$2" code="$3" when="$4" status message
     status=$(echo "$exec_json" | jq -r '.status // empty' 2>/dev/null) || status=""
     message=$(echo "$exec_json" | jq -r '.error.message // empty' 2>/dev/null) || message=""
     if [ "$status" = "failed" ]; then
@@ -683,10 +707,10 @@ assert_clear_failure_reported() {
         fail "restore-normal on ${ecu} fails ${when}" \
             "status: ${status:-no end state within 60s} $(echo "$exec_json" | jq -c '.parameters // empty' 2>/dev/null)"
     fi
-    if echo "$message" | grep -qE "$CLEAR_FAILED_PATTERN"; then
-        pass "restore-normal error on ${ecu} names the failed fault clear ${when}"
+    if echo "$message" | grep -qF "FAIL: clear faults (HTTP ${code})"; then
+        pass "restore-normal error on ${ecu} names the failed fault clear with HTTP ${code} ${when}"
     else
-        fail "restore-normal error on ${ecu} names the failed fault clear ${when}" "message: ${message}"
+        fail "restore-normal error on ${ecu} names the failed fault clear with HTTP ${code} ${when}" "message: ${message}"
     fi
 }
 
@@ -699,52 +723,60 @@ for ecu in perception-ecu planning-ecu actuation-ecu; do
         fail "setup: fault manager of ${ecu} is stopped" "no fault_manager_node process in ${container}"
         continue
     fi
-    code=$(ecu_get_code "$container" "/faults")
-    if [[ "$code" =~ ^[3-5][0-9]{2}$ ]]; then
-        pass "setup: the ${ecu} gateway fails fault requests while its fault manager is stopped (HTTP ${code})"
-    else
-        fail "setup: the ${ecu} gateway fails fault requests while its fault manager is stopped" "GET /faults: HTTP ${code}"
-    fi
-    exec_json=$(run_script "$ecu" "restore-normal" 60) || exec_json=""
-    assert_clear_failure_reported "$ecu" "$exec_json" "while its fault manager is stopped"
+    if measure_failed_clear "$ecu" "$container" "while its fault manager is stopped"; then
+        exec_json=$(run_script "$ecu" "restore-normal" 60) || exec_json=""
+        assert_clear_failure_reported "$ecu" "$exec_json" "$CLEAR_CODE" "while its fault manager is stopped"
 
-    # The Scripts API drops the stdout of a failed script, so run it directly.
-    if direct_out=$(docker exec "$container" bash "/var/lib/ros2_medkit/scripts/${ecu}/restore-normal/script.bash" \
-        2> "${FM_TMP}/stderr"); then
-        direct_rc=0
-    else
-        direct_rc=$?
-    fi
-    if [ "$direct_rc" -ne 0 ] && ! echo "$direct_out" | grep -q 'restored'; then
-        pass "restore-normal run directly on ${ecu} exits non-zero and does not print restored"
-    else
-        fail "restore-normal run directly on ${ecu} exits non-zero and does not print restored" \
-            "exit ${direct_rc}, stdout: $(echo "$direct_out" | tail -2 | tr '\n' ';')"
-    fi
-    if grep -qE "$CLEAR_FAILED_PATTERN" "${FM_TMP}/stderr"; then
-        pass "restore-normal run directly on ${ecu} names the failed fault clear on stderr"
-    else
-        fail "restore-normal run directly on ${ecu} names the failed fault clear on stderr" \
-            "stderr: $(tail -2 "${FM_TMP}/stderr" | tr '\n' ';')"
+        # The Scripts API drops the stdout of a failed script, so run it directly.
+        if direct_out=$(docker exec "$container" bash "/var/lib/ros2_medkit/scripts/${ecu}/restore-normal/script.bash" \
+            2> "${FM_TMP}/stderr"); then
+            direct_rc=0
+        else
+            direct_rc=$?
+        fi
+        if [ "$direct_rc" -ne 0 ] && ! echo "$direct_out" | grep -q 'restored'; then
+            pass "restore-normal run directly on ${ecu} exits non-zero and does not print restored"
+        else
+            fail "restore-normal run directly on ${ecu} exits non-zero and does not print restored" \
+                "exit ${direct_rc}, stdout: $(echo "$direct_out" | tail -2 | tr '\n' ';')"
+        fi
+        if grep -qF "FAIL: clear faults (HTTP ${CLEAR_CODE})" "${FM_TMP}/stderr"; then
+            pass "restore-normal run directly on ${ecu} names the failed fault clear with HTTP ${CLEAR_CODE} on stderr"
+        else
+            fail "restore-normal run directly on ${ecu} names the failed fault clear with HTTP ${CLEAR_CODE} on stderr" \
+                "stderr: $(tail -2 "${FM_TMP}/stderr" | tr '\n' ';')"
+        fi
     fi
     if ! resume_and_wait_fault_manager "$container"; then
         fail "setup: the ${ecu} gateway reads faults again after its fault manager resumes" "not within 30s"
         continue
     fi
 
-    # Fault manager answers the first clear and stops before the final one.
+    # Fault manager answers the first clear and stops before the final one. The
+    # script starts only once the watcher polls.
     STOPPED_FM_CONTAINER="$container"
-    stop_fault_manager_between_clears "$container" "$ecu" > "${FM_TMP}/watch" &
+    : > "${FM_TMP}/watch"
+    watch_between_clears "$container" "$ecu" > "${FM_TMP}/watch" &
     watch_pid=$!
-    exec_json=$(run_script "$ecu" "restore-normal" 60) || exec_json=""
-    wait "$watch_pid"
+    armed_deadline=$((SECONDS + 15))
+    until grep -qx 'armed' "${FM_TMP}/watch" || [ "$SECONDS" -ge "$armed_deadline" ]; do
+        sleep 0.1
+    done
+    exec_json=""
+    if grep -qx 'armed' "${FM_TMP}/watch"; then
+        exec_json=$(run_script "$ecu" "restore-normal" 60) || exec_json=""
+    fi
+    watch_rc=0
+    wait "$watch_pid" || watch_rc=$?
     if grep -qx 'stopped' "${FM_TMP}/watch"; then
         pass "setup: fault manager of ${ecu} stops between the first and the final clear"
+        if measure_failed_clear "$ecu" "$container" "after that stop"; then
+            assert_clear_failure_reported "$ecu" "$exec_json" "$CLEAR_CODE" "when only its final fault clear fails"
+        fi
     else
         fail "setup: fault manager of ${ecu} stops between the first and the final clear" \
-            "restore-normal was not seen sleeping between its clears"
+            "the watcher saw no pause between the clears (exit ${watch_rc}, output: $(tr '\n' ' ' < "${FM_TMP}/watch"))"
     fi
-    assert_clear_failure_reported "$ecu" "$exec_json" "when only its final fault clear fails"
     if ! resume_and_wait_fault_manager "$container"; then
         fail "setup: the ${ecu} gateway reads faults again after its fault manager resumes" "not within 30s"
         continue
