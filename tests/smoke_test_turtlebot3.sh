@@ -176,6 +176,26 @@ event_fault_codes() {
         | jq -rs '.[].payload.fault_code // empty' 2>/dev/null || true
 }
 
+# Proves watch-triggers.sh live: reports a fault from the anomaly detector's
+# own node path, which fires the trigger, every 2 s until the watcher logs
+# its event (max 20 s). Adds each reported code to PROBE_CODES.
+# Usage: watcher_live PREFIX
+PROBE_CODES=""
+watcher_live() {
+    local n=0 code
+    while [ "$n" -lt 10 ]; do
+        n=$((n + 1))
+        code="${1}_${n}"
+        PROBE_CODES="${PROBE_CODES} ${code}"
+        report_fault "$code" "/bridge/anomaly_detector" || true
+        sleep 2
+        if grep -q "^${1}_" <<< "$(event_fault_codes "$WATCH_LOG")"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # The inject needs a goal that Nav2 accepts and then aborts. An inactive
 # navigator rejects the goal and no fault follows. Nav2 activates well after
 # the gateway answers, so wait for the navigator and the planner.
@@ -200,13 +220,19 @@ TRIGGER_SETUP_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./setup-
 TRIGGER_ID=$(sed -n 's/^  ID:[[:space:]]*//p' <<< "$TRIGGER_SETUP_OUTPUT" | head -1)
 WATCH_LOG=$(mktemp)
 WATCH_PID=""
+WATCH_LIVE_BEFORE=false
 if [ -n "$TRIGGER_ID" ]; then
     pass "setup: setup-triggers.sh creates a trigger on apps/anomaly-detector"
     # exec makes the PID timeout's own; timeout passes a kill on to the whole stream.
-    (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" exec timeout 120 bash ./watch-triggers.sh "$TRIGGER_ID") \
+    (cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" exec timeout 180 bash ./watch-triggers.sh "$TRIGGER_ID") \
         > "$WATCH_LOG" 2>&1 &
     WATCH_PID=$!
-    sleep 2
+    if watcher_live "SMOKE_TRIGGER_BEFORE"; then
+        WATCH_LIVE_BEFORE=true
+        pass "setup: watch-triggers.sh is live before the navigation inject"
+    else
+        fail "setup: watch-triggers.sh is live before the navigation inject" "no probe event within 20 s"
+    fi
 else
     fail "setup: setup-triggers.sh creates a trigger on apps/anomaly-detector" \
         "$(tail -5 <<< "$TRIGGER_SETUP_OUTPUT")"
@@ -238,21 +264,20 @@ else
     fail "NAVIGATION_GOAL_ABORTED fault appeared in /faults" "fault not found after 15s"
 fi
 
-# A fault reported under the detector's own node path fires the trigger. Its
-# event shows the watcher was live across the navigation goal fault above.
+# Only a watcher proven live before and after the navigation goal fault can
+# show that the fault fired no event.
 if [ -n "$WATCH_PID" ]; then
-    PROBE_CODE="SMOKE_TRIGGER_PROBE"
-    report_fault "$PROBE_CODE" "/bridge/anomaly_detector" || true
-    elapsed=0
-    while [ "$elapsed" -lt 20 ] && ! grep -qx "$PROBE_CODE" <<< "$(event_fault_codes "$WATCH_LOG")"; do
-        sleep 1
-        elapsed=$((elapsed + 1))
-    done
+    WATCH_LIVE_AFTER=false
+    if watcher_live "SMOKE_TRIGGER_AFTER"; then
+        WATCH_LIVE_AFTER=true
+        pass "setup: watch-triggers.sh is live after the navigation inject"
+    else
+        fail "setup: watch-triggers.sh is live after the navigation inject" "no probe event within 20 s"
+    fi
     kill "$WATCH_PID" 2>/dev/null || true
     wait "$WATCH_PID" 2>/dev/null || true
     EVENT_CODES=$(event_fault_codes "$WATCH_LOG" | sort -u | paste -sd, -)
-    if grep -qx "$PROBE_CODE" <<< "$(event_fault_codes "$WATCH_LOG")"; then
-        pass "setup: watch-triggers.sh gets an event for a fault the anomaly detector's node reports"
+    if [ "$WATCH_LIVE_BEFORE" = true ] && [ "$WATCH_LIVE_AFTER" = true ]; then
         if grep -qE '^NAVIGATION_GOAL_' <<< "$(event_fault_codes "$WATCH_LOG")"; then
             fail "watch-triggers.sh gets no event for a navigation goal fault, as the README says" \
                 "events carried: ${EVENT_CODES}"
@@ -260,13 +285,13 @@ if [ -n "$WATCH_PID" ]; then
             pass "watch-triggers.sh gets no event for a navigation goal fault, as the README says"
         fi
     else
-        fail "setup: watch-triggers.sh gets an event for a fault the anomaly detector's node reports" \
-            "events carried: ${EVENT_CODES:-none}"
         fail "watch-triggers.sh gets no event for a navigation goal fault, as the README says" \
-            "not checked: the watcher delivered no event"
+            "not checked: the watcher was not live before and after the inject; events carried: ${EVENT_CODES:-none}"
     fi
     curl -s -m 20 -o /dev/null -X DELETE "${API_BASE}/apps/anomaly-detector/triggers/${TRIGGER_ID}" || true
-    curl -s -m 20 -o /dev/null -X DELETE "${API_BASE}/apps/anomaly-detector/faults/${PROBE_CODE}" || true
+    for code in $PROBE_CODES; do
+        curl -s -m 20 -o /dev/null -X DELETE "${API_BASE}/apps/anomaly-detector/faults/${code}" || true
+    done
 fi
 rm -f "$WATCH_LOG"
 
@@ -310,11 +335,13 @@ FAULT_FIELDS='{code: .fault_code, severity: .severity_label, status: .status,
 # a topic it has read, and nothing above reads /scan, so with the simulator
 # stopped the scan read has no message.
 if stop_simulator; then
-    api_get "/apps/turtlebot3-node/data/scan" || true
-    if jq -e '(.data // {}) | length == 0' <<< "$RESPONSE" > /dev/null 2>&1; then
-        pass "setup: /scan has no message while the simulator is stopped"
+    # An error body also lacks .data, so only a successful read counts.
+    if api_get "/apps/turtlebot3-node/data/scan" \
+        && jq -e '.data | type == "object" and length == 0' <<< "$RESPONSE" > /dev/null 2>&1; then
+        pass "setup: the /scan read succeeds and has no message while the simulator is stopped"
     else
-        fail "setup: /scan has no message while the simulator is stopped" "$(head -c 200 <<< "$RESPONSE")"
+        fail "setup: the /scan read succeeds and has no message while the simulator is stopped" \
+            "$(head -c 200 <<< "$RESPONSE")"
     fi
     NO_SCAN_PLAIN=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" timeout 120 bash ./check-entities.sh < /dev/null 2>&1 \
         | sed 's/\x1b\[[0-9;]*m//g') || true
