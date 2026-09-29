@@ -41,10 +41,22 @@ if [ "$ERRORS" -gt 0 ]; then
     exit 1
 fi
 
-# Clear faults
+# Clears the faults of this ECU's fault manager. Prints the HTTP status.
+clear_faults() {
+    curl -s -m 30 -o /dev/null -w '%{http_code}' -X DELETE "${API_BASE}/faults" || true
+}
+
+# The second clear decides the result.
 echo "Clearing faults..."
-curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
+clear_faults > /dev/null
 sleep 2
-curl -sf -X DELETE "${API_BASE}/faults" > /dev/null 2>&1 || true
+code=$(clear_faults)
+case "$code" in
+    2??) ;;
+    *)
+        echo "FAIL: clear faults (HTTP ${code})" >&2
+        exit 1
+        ;;
+esac
 
 echo '{"status": "restored", "ecu": "actuation"}'

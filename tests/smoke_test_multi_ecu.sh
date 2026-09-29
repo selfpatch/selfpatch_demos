@@ -5,6 +5,9 @@
 # plus aggregated entities from planning and actuation ECUs.
 # Reads the demo's container scripts and config from this checkout and runs its
 # host-side wrapper scripts.
+# Stops an ECU's fault manager with docker exec, so it needs access to the ECU
+# containers (names from PERCEPTION_CONTAINER, PLANNING_CONTAINER and
+# ACTUATION_CONTAINER, CI names by default).
 #
 # Usage: ./tests/smoke_test_multi_ecu.sh [GATEWAY_URL]
 # Default GATEWAY_URL: http://localhost:8080
@@ -17,7 +20,49 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tests/smoke_lib.sh
 source "${SCRIPT_DIR}/smoke_lib.sh"
 
-trap print_summary EXIT
+ecu_container() {
+    case "$1" in
+        perception-ecu) echo "${PERCEPTION_CONTAINER:-perception_ecu_ci}" ;;
+        planning-ecu) echo "${PLANNING_CONTAINER:-planning_ecu_ci}" ;;
+        actuation-ecu) echo "${ACTUATION_CONTAINER:-actuation_ecu_ci}" ;;
+    esac
+}
+
+# Anchored so it does not match the bash -c wrapper that runs pgrep.
+FAULT_MANAGER_PATTERN='^/root/demo_ws/install/ros2_medkit_fault_manager/lib/ros2_medkit_fault_manager/fault_manager_node '
+# Container whose fault manager is stopped, resumed on exit.
+STOPPED_FM_CONTAINER=""
+
+# SIGSTOP on the fault manager makes the ECU gateway's fault service calls time
+# out, so its fault reads and clears answer 503.
+stop_fault_manager() {
+    docker exec "$1" bash -c "
+        pid=\$(pgrep -f '${FAULT_MANAGER_PATTERN}') || exit 1
+        kill -STOP \"\${pid}\"
+    " > /dev/null 2>&1 || return 1
+    STOPPED_FM_CONTAINER="$1"
+}
+
+resume_fault_manager() {
+    docker exec "$1" bash -c "
+        pid=\$(pgrep -f '${FAULT_MANAGER_PATTERN}') || exit 0
+        kill -CONT \"\${pid}\"
+    " > /dev/null 2>&1 || true
+    STOPPED_FM_CONTAINER=""
+}
+
+# print_summary reads the script's exit status from $?, so hand it the status
+# saved on entry.
+cleanup_on_exit() {
+    local rc=$?
+    set +e
+    if [ -n "$STOPPED_FM_CONTAINER" ]; then
+        resume_fault_manager "$STOPPED_FM_CONTAINER"
+    fi
+    (exit "$rc")
+    print_summary
+}
+trap cleanup_on_exit EXIT
 
 # --- Wait for gateway startup ---
 
@@ -589,6 +634,131 @@ if [ -n "$lock_id" ]; then
         fail "gripper-controller lock is released" "got HTTP ${unlock_status}"
     fi
 fi
+
+section "Fault Clear Failure Reporting"
+
+# HTTP status of a GET on an ECU's own gateway, the one its scripts call.
+ecu_get_code() {
+    docker exec "$1" curl -s -m 30 -o /dev/null -w '%{http_code}' "http://localhost:8080/api/v1$2" 2>/dev/null || true
+}
+
+# Resumes the fault manager in container $1 and waits until its gateway reads
+# faults again.
+resume_and_wait_fault_manager() {
+    local deadline=$((SECONDS + 30))
+    resume_fault_manager "$1"
+    until [ "$(ecu_get_code "$1" "/faults")" = "200" ]; do
+        [ "$SECONDS" -lt "$deadline" ] || return 1
+        sleep 1
+    done
+}
+
+# Stops the fault manager in container $1 while restore-normal on ECU $2 sleeps
+# between its two clears, so the first clear succeeds and the final one fails.
+# Prints "stopped" once it did.
+# shellcheck disable=SC2016  # Expanded by bash in the container.
+stop_fault_manager_between_clears() {
+    docker exec -e SCRIPT_RE="^bash /var/lib/ros2_medkit/scripts/$2/restore-normal/script\.bash$" \
+        -e FM_RE="$FAULT_MANAGER_PATTERN" "$1" bash -c '
+        end=$((SECONDS + 60))
+        until pid=$(pgrep -f "$SCRIPT_RE") && pgrep -P "$pid" -x sleep > /dev/null; do
+            [ "$SECONDS" -lt "$end" ] || exit 1
+            sleep 0.05
+        done
+        kill -STOP "$(pgrep -f "$FM_RE")" && echo stopped
+    ' 2> /dev/null
+}
+
+CLEAR_FAILED_PATTERN='FAIL: clear faults \(HTTP [0-9]{3}\)'
+
+# An execution of restore-normal on ECU $1 failed and its error names the
+# failed fault clear. $3 says in which case.
+assert_clear_failure_reported() {
+    local ecu="$1" exec_json="$2" when="$3" status message
+    status=$(echo "$exec_json" | jq -r '.status // empty' 2>/dev/null) || status=""
+    message=$(echo "$exec_json" | jq -r '.error.message // empty' 2>/dev/null) || message=""
+    if [ "$status" = "failed" ]; then
+        pass "restore-normal on ${ecu} fails ${when}"
+    else
+        fail "restore-normal on ${ecu} fails ${when}" \
+            "status: ${status:-no end state within 60s} $(echo "$exec_json" | jq -c '.parameters // empty' 2>/dev/null)"
+    fi
+    if echo "$message" | grep -qE "$CLEAR_FAILED_PATTERN"; then
+        pass "restore-normal error on ${ecu} names the failed fault clear ${when}"
+    else
+        fail "restore-normal error on ${ecu} names the failed fault clear ${when}" "message: ${message}"
+    fi
+}
+
+FM_TMP=$(mktemp -d)
+for ecu in perception-ecu planning-ecu actuation-ecu; do
+    container=$(ecu_container "$ecu")
+
+    # Fault manager stopped for both clears.
+    if ! stop_fault_manager "$container"; then
+        fail "setup: fault manager of ${ecu} is stopped" "no fault_manager_node process in ${container}"
+        continue
+    fi
+    code=$(ecu_get_code "$container" "/faults")
+    if [[ "$code" =~ ^[3-5][0-9]{2}$ ]]; then
+        pass "setup: the ${ecu} gateway fails fault requests while its fault manager is stopped (HTTP ${code})"
+    else
+        fail "setup: the ${ecu} gateway fails fault requests while its fault manager is stopped" "GET /faults: HTTP ${code}"
+    fi
+    exec_json=$(run_script "$ecu" "restore-normal" 60) || exec_json=""
+    assert_clear_failure_reported "$ecu" "$exec_json" "while its fault manager is stopped"
+
+    # The Scripts API drops the stdout of a failed script, so run it directly.
+    if direct_out=$(docker exec "$container" bash "/var/lib/ros2_medkit/scripts/${ecu}/restore-normal/script.bash" \
+        2> "${FM_TMP}/stderr"); then
+        direct_rc=0
+    else
+        direct_rc=$?
+    fi
+    if [ "$direct_rc" -ne 0 ] && ! echo "$direct_out" | grep -q 'restored'; then
+        pass "restore-normal run directly on ${ecu} exits non-zero and does not print restored"
+    else
+        fail "restore-normal run directly on ${ecu} exits non-zero and does not print restored" \
+            "exit ${direct_rc}, stdout: $(echo "$direct_out" | tail -2 | tr '\n' ';')"
+    fi
+    if grep -qE "$CLEAR_FAILED_PATTERN" "${FM_TMP}/stderr"; then
+        pass "restore-normal run directly on ${ecu} names the failed fault clear on stderr"
+    else
+        fail "restore-normal run directly on ${ecu} names the failed fault clear on stderr" \
+            "stderr: $(tail -2 "${FM_TMP}/stderr" | tr '\n' ';')"
+    fi
+    if ! resume_and_wait_fault_manager "$container"; then
+        fail "setup: the ${ecu} gateway reads faults again after its fault manager resumes" "not within 30s"
+        continue
+    fi
+
+    # Fault manager answers the first clear and stops before the final one.
+    STOPPED_FM_CONTAINER="$container"
+    stop_fault_manager_between_clears "$container" "$ecu" > "${FM_TMP}/watch" &
+    watch_pid=$!
+    exec_json=$(run_script "$ecu" "restore-normal" 60) || exec_json=""
+    wait "$watch_pid"
+    if grep -qx 'stopped' "${FM_TMP}/watch"; then
+        pass "setup: fault manager of ${ecu} stops between the first and the final clear"
+    else
+        fail "setup: fault manager of ${ecu} stops between the first and the final clear" \
+            "restore-normal was not seen sleeping between its clears"
+    fi
+    assert_clear_failure_reported "$ecu" "$exec_json" "when only its final fault clear fails"
+    if ! resume_and_wait_fault_manager "$container"; then
+        fail "setup: the ${ecu} gateway reads faults again after its fault manager resumes" "not within 30s"
+        continue
+    fi
+
+    exec_json=$(run_script "$ecu" "restore-normal" 60) || exec_json=""
+    if echo "$exec_json" | jq -e '.status == "completed" and (.parameters.stdout | test("restored"))' > /dev/null 2>&1; then
+        pass "restore-normal on ${ecu} completes and reports restored once its fault manager answers"
+    else
+        fail "restore-normal on ${ecu} completes and reports restored once its fault manager answers" \
+            "$(echo "$exec_json" | jq -c '{status, error}' 2>/dev/null)"
+    fi
+done
+rm -rf "$FM_TMP"
 
 # Leave the demo restored.
 move_params_away "actuation-ecu" "restore-normal"

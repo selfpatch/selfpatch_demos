@@ -351,7 +351,9 @@ curl -X PUT http://localhost:8080/api/v1/apps/path-planner/configurations/planni
 A script whose write is refused exits non-zero, and the execution's error
 message names each failed write, for example
 `FAIL: gripper-controller/inject_jam (HTTP 409)`. `restore-normal` clears the
-ECU's faults only after all its writes succeeded.
+ECU's faults only after all its writes succeeded. If that clear fails, for
+example while the ECU's fault manager does not answer, the script exits
+non-zero with `FAIL: clear faults (HTTP 503)` and the faults stay.
 
 `path-planner` runs its planning timer in its own callback group, so its
 parameters stay writable while `inject-planning-delay` is active, and a new
