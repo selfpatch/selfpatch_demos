@@ -45,30 +45,89 @@ if ! curl -sf "${API_BASE}/health" > /dev/null 2>&1; then
 fi
 echo_success "Gateway is healthy!"
 
-# /health answers before the gateway links the sensor nodes, and until then the
-# data and configuration reads below come back empty.
-sensor_data_ready() {
-    local path
-    for path in lidar-sim/data/sensors%2Fscan imu-sim/data/sensors%2Fimu gps-sim/data/sensors%2Ffix; do
-        curl -sf "${API_BASE}/apps/${path}" \
-            | jq -e '.data | type == "object" and length > 0' > /dev/null 2>&1 || return 1
-    done
-    curl -sf "${API_BASE}/apps/lidar-sim/configurations" | jq -e '.items | length > 0' > /dev/null 2>&1
+# /health answers before the gateway links the sensor nodes, and a node's
+# topic reads come back empty until then. A linked sensor that publishes
+# nothing (inject-failure.sh) never gets a message, so each linked sensor
+# gets SAMPLE_WAIT_SEC for its first message and the demo goes on without it.
+# The whole wait ends within DATA_WAIT_SEC plus one request.
+DATA_WAIT_SEC="${DATA_WAIT_SEC:-30}"
+SAMPLE_WAIT_SEC=5
+REQUEST_TIMEOUT_SEC=3
+SENSOR_APPS=(lidar-sim imu-sim gps-sim)
+SENSOR_TOPICS=(sensors/scan sensors/imu sensors/fix)
+
+case "$DATA_WAIT_SEC" in
+    '' | *[!0-9]*)
+        echo_error "DATA_WAIT_SEC must be a whole number of seconds, got '${DATA_WAIT_SEC}'."
+        exit 1
+        ;;
+esac
+# Base 10: bash reads a number with a leading zero as octal.
+DATA_WAIT_SEC=$((10#$DATA_WAIT_SEC))
+
+# True when the gateway has linked APP to its node: its data list is not empty.
+sensor_linked() {
+    curl -sf -m "$REQUEST_TIMEOUT_SEC" "${API_BASE}/apps/$1/data" \
+        | jq -e '.items | length > 0' > /dev/null 2>&1
 }
 
-DATA_WAIT_SEC=30
-waited=0
-until sensor_data_ready; do
-    if [ "$waited" -ge "$DATA_WAIT_SEC" ]; then
-        echo_error "Sensor data not available at ${GATEWAY_URL} after ${DATA_WAIT_SEC}s."
-        echo "   Check that the sensor nodes are running, then retry."
-        exit 1
-    fi
-    if [ "$waited" -eq 0 ]; then
-        echo "Waiting for the gateway to link the sensor nodes (max ${DATA_WAIT_SEC}s)..."
-    fi
+# True when the gateway has a message on APP's TOPIC.
+sensor_has_data() {
+    curl -sf -m "$REQUEST_TIMEOUT_SEC" "${API_BASE}/apps/$1/data/${2//\//%2F}" \
+        | jq -e '.data | type == "object" and length > 0' > /dev/null 2>&1
+}
+
+wait_start=$(date +%s)
+deadline=$((wait_start + DATA_WAIT_SEC))
+# Per sensor: when the link was seen, whether a message was read, and which
+# waiting line was printed.
+linked_at=()
+has_data=()
+announced=()
+while :; do
+    pending=false
+    for i in "${!SENSOR_APPS[@]}"; do
+        [ -n "${has_data[$i]:-}" ] && continue
+        app=${SENSOR_APPS[$i]}
+        [ "$(date +%s)" -lt "$deadline" ] || break 2
+        if [ -z "${linked_at[$i]:-}" ]; then
+            if sensor_linked "$app"; then
+                linked_at[i]=$(date +%s)
+            else
+                if [ -z "${announced[$i]:-}" ]; then
+                    echo "Waiting for the gateway to link ${app} (max ${DATA_WAIT_SEC}s)..."
+                    announced[i]="link"
+                fi
+                pending=true
+                continue
+            fi
+        fi
+        [ "$(date +%s)" -lt "$((linked_at[i] + SAMPLE_WAIT_SEC))" ] || continue
+        [ "$(date +%s)" -lt "$deadline" ] || break 2
+        if sensor_has_data "$app" "${SENSOR_TOPICS[$i]}"; then
+            has_data[i]=1
+            continue
+        fi
+        if [ "${announced[$i]:-}" != sample ]; then
+            echo "Waiting for a first message from ${app} on /${SENSOR_TOPICS[$i]} (max ${SAMPLE_WAIT_SEC}s)..."
+            announced[i]="sample"
+        fi
+        pending=true
+    done
+    "$pending" || break
+    [ "$(date +%s)" -lt "$deadline" ] || break
     sleep 1
-    waited=$((waited + 1))
+done
+
+for i in "${!SENSOR_APPS[@]}"; do
+    [ -n "${has_data[$i]:-}" ] && continue
+    app=${SENSOR_APPS[$i]}
+    if [ -n "${linked_at[$i]:-}" ]; then
+        echo "   No message from ${app} on /${SENSOR_TOPICS[$i]} after $(( $(date +%s) - linked_at[i] ))s; the sensor may have failed."
+    else
+        echo "   The gateway has not linked ${app} after $(( $(date +%s) - wait_start ))s."
+    fi
+    echo "   Its data section below shows no values."
 done
 
 echo_step "1. Checking Gateway Health"
@@ -83,9 +142,22 @@ curl -s "${API_BASE}/components" | jq '.items[] | {id: .id, name: .name, descrip
 echo_step "4. Listing All Apps (ROS 2 Nodes)"
 curl -s "${API_BASE}/apps" | jq '.items[] | {id: .id, name: .name, component: .["x-medkit"].component_id}'
 
+# Prints FILTER applied to the latest message on APP's TOPIC, or says that
+# the gateway has none.
+# Usage: show_sensor_data LABEL APP TOPIC FILTER
+show_sensor_data() {
+    local body
+    body=$(curl -s -m 10 "${API_BASE}/apps/$2/data/${3//\//%2F}")
+    if echo "$body" | jq -e '.data | type == "object" and length > 0' > /dev/null 2>&1; then
+        echo "$body" | jq "$4"
+    else
+        echo "   No $1 data: the gateway has no message from $2 on /$3."
+    fi
+}
+
 echo_step "5. Reading LiDAR Data"
 echo "Getting latest scan from LiDAR simulator..."
-curl -s "${API_BASE}/apps/lidar-sim/data/sensors%2Fscan" | jq '{
+show_sensor_data "LiDAR" lidar-sim sensors/scan '{
   angle_min: .data.angle_min,
   angle_max: .data.angle_max,
   range_min: .data.range_min,
@@ -95,14 +167,14 @@ curl -s "${API_BASE}/apps/lidar-sim/data/sensors%2Fscan" | jq '{
 
 echo_step "6. Reading IMU Data"
 echo "Getting latest IMU reading..."
-curl -s "${API_BASE}/apps/imu-sim/data/sensors%2Fimu" | jq '{
+show_sensor_data "IMU" imu-sim sensors/imu '{
   linear_acceleration: .data.linear_acceleration,
   angular_velocity: .data.angular_velocity
 }'
 
 echo_step "7. Reading GPS Fix"
 echo "Getting current GPS position..."
-curl -s "${API_BASE}/apps/gps-sim/data/sensors%2Ffix" | jq '{
+show_sensor_data "GPS" gps-sim sensors/fix '{
   latitude: .data.latitude,
   longitude: .data.longitude,
   altitude: .data.altitude,
@@ -113,8 +185,12 @@ echo_step "8. Listing LiDAR Configurations"
 echo "These parameters can be modified at runtime to inject faults..."
 # The list endpoint carries id/name/type only; the value and the ROS type are
 # on each parameter's own detail endpoint.
-LIDAR_CONFIG_IDS=$(curl -s "${API_BASE}/apps/lidar-sim/configurations" | jq -r '.items[].id')
+LIDAR_CONFIG_IDS=$(curl -s "${API_BASE}/apps/lidar-sim/configurations" | jq -r '.items[]?.id' 2>/dev/null)
+if [ -z "$LIDAR_CONFIG_IDS" ]; then
+    echo "   No LiDAR configurations available."
+fi
 while IFS= read -r cfg_id; do
+    [ -n "$cfg_id" ] || continue
     curl -s "${API_BASE}/apps/lidar-sim/configurations/${cfg_id}" \
         | jq '{name: .id, value: .data, type: .["x-medkit"].parameter.type}'
 done <<< "$LIDAR_CONFIG_IDS"
@@ -135,12 +211,17 @@ echo "$FAULTS_JSON" | jq '.'
 FAULT_COUNT=$(echo "$FAULTS_JSON" | jq '.items | length')
 if [ "$FAULT_COUNT" -gt 0 ]; then
     # The fault collection carries fault_code and reporting_sources (ROS node
-    # paths), not an entity id. Resolve the owning App by matching the first
-    # reporting source against each App's ROS node.
+    # paths), not an entity id. The owning App is the one whose ROS node is the
+    # first reporting source or a path above it, whole segments only: the
+    # anomaly detector reports as /processing/anomaly_detector/<sensor>.
     FIRST_FAULT=$(echo "$FAULTS_JSON" | jq -r '.items[0].fault_code')
     REPORTING_SOURCE=$(echo "$FAULTS_JSON" | jq -r '.items[0].reporting_sources[0] // empty')
-    FIRST_ENTITY=$(curl -s "${API_BASE}/apps" | jq -r --arg node "$REPORTING_SOURCE" \
-        '.items[] | select(.["x-medkit"].ros2.node == $node) | .id' | head -n 1)
+    FIRST_ENTITY=$(curl -s "${API_BASE}/apps" | jq -r --arg src "$REPORTING_SOURCE" '
+        [.items[] | .["x-medkit"].ros2.node as $node
+         | select(($node | type) == "string"
+                  and ($src == $node or ($src | startswith($node + "/"))))
+         | {id, depth: ($node | length)}]
+        | max_by(.depth) | .id // empty' 2>/dev/null)
 
     if [ -z "$FIRST_ENTITY" ]; then
         echo ""
@@ -164,13 +245,18 @@ if [ "$FAULT_COUNT" -gt 0 ]; then
 
         echo_step "12. Bulk-Data Descriptors (Rosbag Files)"
         echo "Listing available rosbag recordings..."
-        curl -s "${API_BASE}/apps/${FIRST_ENTITY}/bulk-data/rosbags" | jq '.items[] | {
-          id: .id,
-          name: .name,
-          size: .size,
-          mimetype: .mimetype,
-          "x-medkit": ."x-medkit"
-        }'
+        ROSBAGS_JSON=$(curl -s "${API_BASE}/apps/${FIRST_ENTITY}/bulk-data/rosbags")
+        if echo "$ROSBAGS_JSON" | jq -e '.items | length > 0' > /dev/null 2>&1; then
+            echo "$ROSBAGS_JSON" | jq '.items[] | {
+              id: .id,
+              name: .name,
+              size: .size,
+              mimetype: .mimetype,
+              "x-medkit": ."x-medkit"
+            }'
+        else
+            echo "   No rosbag recordings listed for apps/${FIRST_ENTITY}."
+        fi
     fi
 else
     echo ""

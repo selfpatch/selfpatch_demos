@@ -1,7 +1,8 @@
 #!/bin/bash
 # Smoke tests for sensor_diagnostics demo
 # Runs from the host against the containerized gateway on localhost:8080. Needs
-# docker access to the demo container (DEMO_CONTAINER) to pause its fault manager.
+# docker access to the demo container (DEMO_CONTAINER) to pause its fault
+# manager and to restart it.
 #
 # Usage: ./tests/smoke_test.sh [GATEWAY_URL]
 # Default GATEWAY_URL: http://localhost:8080
@@ -33,6 +34,23 @@ resume_fault_manager() {
     " > /dev/null 2>&1 || true
 }
 
+LIDAR_PATTERN='^/root/demo_ws/install/sensor_diagnostics_demo/lib/sensor_diagnostics_demo/lidar_sim_node '
+
+# SIGSTOP on the LiDAR node keeps it in the ROS graph but stops its scans.
+stop_lidar() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        pid=\$(pgrep -f '${LIDAR_PATTERN}') || exit 1
+        kill -STOP \"\${pid}\"
+    " > /dev/null 2>&1
+}
+
+resume_lidar() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        pid=\$(pgrep -f '${LIDAR_PATTERN}') || exit 0
+        kill -CONT \"\${pid}\"
+    " > /dev/null 2>&1 || true
+}
+
 # print_summary reads the script's exit status from $?, so hand it the status
 # saved on entry. set +e: under errexit `(exit rc)` would end the trap before
 # print_summary runs.
@@ -40,6 +58,7 @@ cleanup_on_exit() {
     local rc=$?
     set +e
     resume_fault_manager
+    resume_lidar
     (exit "${rc}")
     print_summary
 }
@@ -52,20 +71,82 @@ run_check_demo() {
     GATEWAY_URL="$GATEWAY_URL" bash "$CHECK_DEMO_SCRIPT" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 }
 
+# Runs check-demo.sh with DATA_WAIT_SEC=$1 (empty: the script's default) and
+# prints each output line without ANSI colours, prefixed with the
+# milliseconds since the run started.
+run_check_demo_timed() {
+    local start=${EPOCHREALTIME//[!0-9]/} line
+    env ${1:+"DATA_WAIT_SEC=$1"} GATEWAY_URL="$GATEWAY_URL" timeout 180 bash "$CHECK_DEMO_SCRIPT" < /dev/null 2>&1 \
+        | while IFS= read -r line; do
+            printf '%d %s\n' $(( (${EPOCHREALTIME//[!0-9]/} - start) / 1000 )) "$line"
+        done | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+# Prints the milliseconds check-demo.sh spent between the health check and
+# section 1, from a run_check_demo_timed output. Without section 1, the time
+# of the last line.
+readiness_wait_ms() {
+    awk '/^[0-9]+ .*Gateway is healthy/ { s = $1 }
+         /^[0-9]+ === 1\. / { e = $1; exit }
+         { last = $1 }
+         END { if (e == "") e = last; print e - s }' <<< "$1"
+}
+
+# Drops the time prefix of a run_check_demo_timed output.
+untimed() {
+    awk '{ sub(/^[0-9]+ /, ""); print }' <<< "$1"
+}
+
+# Prints what check-demo.sh printed between the health check and section 1.
+readiness_wait_output() {
+    untimed "$1" | awk '/Gateway is healthy/ { on = 1; next } /^=== 1\. / { exit } on'
+}
+
+# Prints the text lines of section N of a check-demo.sh output.
+check_demo_section_text() {
+    awk -v hdr="^=== $2\\\\. " '
+        $0 ~ hdr { on = 1; next }
+        on && /^=== [0-9]+\. / { exit }
+        on' <<< "$1"
+}
+
 # Prints the JSON values printed in section N of a check-demo.sh output as
 # one array: [] when the section is missing, nothing when it is not JSON.
 # Usage: check_demo_section OUTPUT N
 check_demo_section() {
-    awk -v hdr="^=== $2\\\\. " '
-        $0 ~ hdr { on = 1; next }
-        on && /^=== [0-9]+\. / { exit }
-        on' <<< "$1" | sed -n '/^[[{]/,$p' | jq -s '.' 2>/dev/null || true
+    check_demo_section_text "$1" "$2" | sed -n '/^[[{]/,$p' | jq -s '.' 2>/dev/null || true
 }
 
 # Prints the value of a configuration, or nothing when it cannot be read.
 # Usage: config_value APP PARAM
 config_value() {
     curl -s -m 10 "${API_BASE}/apps/$1/configurations/$2" | jq -c '.data' 2>/dev/null || true
+}
+
+# True when section N (5 LiDAR, 6 IMU, 7 GPS, 8 configurations) of a
+# check-demo.sh output carries values of the right type.
+# Usage: section_values_printed OUTPUT N
+section_values_printed() {
+    local filter
+    case "$2" in
+        5) filter='length == 1 and ([.[0] | .angle_min, .angle_max, .range_min, .range_max, .sample_ranges[]]
+               | length == 9 and all(type == "number"))' ;;
+        6) filter='length == 1 and ([.[0] | .linear_acceleration[], .angular_velocity[]]
+               | length == 6 and all(type == "number"))' ;;
+        7) filter='length == 1 and ([.[0] | .latitude, .longitude, .altitude] | all(type == "number"))' ;;
+        8) filter='length > 0' ;;
+    esac
+    check_demo_section "$1" "$2" | jq -e "$filter" > /dev/null 2>&1
+}
+
+# Reports a FAILED fault through the fault manager's report_fault service.
+# Usage: report_fault CODE SOURCE_ID
+report_fault() {
+    curl -s -m 20 -X POST "${API_BASE}/apps/medkit-fault-manager/operations/report_fault/executions" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -nc --arg code "$1" --arg src "$2" '{parameters: {fault_code: $code, event_type: 0,
+            severity: 2, description: "smoke test", source_id: $src}}')" \
+        | jq -e '.parameters.accepted == true' > /dev/null 2>&1
 }
 
 # --- Wait for gateway startup ---
@@ -82,12 +163,14 @@ wait_for_gateway 90
 section "Check-Demo Before Linking"
 
 # Until the sensor nodes are linked, their data reads come back empty.
-# check-demo.sh must then wait for real values, or stop with a message and a
-# non-zero exit, and never print null.
+# check-demo.sh must wait for the links and then print real values.
 EARLY_LIDAR_ITEMS=$(curl -s -m 5 "${API_BASE}/apps/lidar-sim/data" | jq '.items | length' 2>/dev/null) || true
 EARLY_RC=0
-EARLY_PLAIN=$(run_check_demo) || EARLY_RC=$?
+EARLY_TIMED=$(run_check_demo_timed "") || EARLY_RC=$?
+EARLY_PLAIN=$(untimed "$EARLY_TIMED")
 echo "  LiDAR data items when check-demo.sh started: ${EARLY_LIDAR_ITEMS:-unreadable}; exit code ${EARLY_RC}"
+echo "  readiness wait $(readiness_wait_ms "$EARLY_TIMED") ms:" \
+    "$(readiness_wait_output "$EARLY_TIMED" | grep -vE '^ *$' | tr '\n' ';' | head -c 300)"
 
 if grep -q ': null' <<< "$EARLY_PLAIN"; then
     fail "check-demo.sh started right after /health prints no null fields" \
@@ -96,31 +179,15 @@ else
     pass "check-demo.sh started right after /health prints no null fields"
 fi
 
-# True when sections 5-8 of the early run carry values of the right type.
-early_values_printed() {
-    check_demo_section "$EARLY_PLAIN" 5 | jq -e 'length == 1 and ([.[0]
-        | .angle_min, .angle_max, .range_min, .range_max, .sample_ranges[]]
-        | length == 9 and all(type == "number"))' > /dev/null 2>&1 &&
-    check_demo_section "$EARLY_PLAIN" 6 | jq -e 'length == 1 and ([.[0]
-        | .linear_acceleration[], .angular_velocity[]]
-        | length == 6 and all(type == "number"))' > /dev/null 2>&1 &&
-    check_demo_section "$EARLY_PLAIN" 7 | jq -e 'length == 1 and ([.[0]
-        | .latitude, .longitude, .altitude] | all(type == "number"))' > /dev/null 2>&1 &&
-    check_demo_section "$EARLY_PLAIN" 8 | jq -e 'length > 0' > /dev/null 2>&1
-}
-
-if [ "$EARLY_RC" -ne 0 ]; then
-    if grep -q "Sensor data not available" <<< "$EARLY_PLAIN"; then
-        pass "check-demo.sh started right after /health prints sensor values or stops with a message"
-    else
-        fail "check-demo.sh started right after /health prints sensor values or stops with a message" \
-             "exit code ${EARLY_RC} without the message: $(tail -3 <<< "$EARLY_PLAIN")"
-    fi
-elif early_values_printed; then
-    pass "check-demo.sh started right after /health prints sensor values or stops with a message"
+EARLY_MISSING=""
+for n in 5 6 7 8; do
+    section_values_printed "$EARLY_PLAIN" "$n" || EARLY_MISSING="${EARLY_MISSING} ${n}"
+done
+if [ "$EARLY_RC" -eq 0 ] && [ -z "$EARLY_MISSING" ]; then
+    pass "check-demo.sh started right after /health exits 0 and prints values in sections 5-8"
 else
-    fail "check-demo.sh started right after /health prints sensor values or stops with a message" \
-         "exit code 0 but sections 5-8 lack values"
+    fail "check-demo.sh started right after /health exits 0 and prints values in sections 5-8" \
+         "exit code ${EARLY_RC}; sections without values:${EARLY_MISSING:- none}; last lines: $(grep -vE '^ *$' <<< "$EARLY_PLAIN" | tail -n 3 | tr '\n' ';')"
 fi
 
 # Wait for entity discovery + runtime linking (nodes need to be linked to manifest apps)
@@ -482,6 +549,226 @@ else
     fail "setup: fault manager stopped" "no fault_manager_node process in ${DEMO_CONTAINER}"
 fi
 rm -f "$FAILED_READ_LOG"
+
+section "check-demo.sh: a fault reported from a sub-path of an App's node"
+
+# The anomaly detector reports as /processing/anomaly_detector/<sensor>, a
+# sub-path of its node. Sections 10-12 use the first listed fault, so the
+# other faults are cleared before each report.
+SUBPATH_CODE="SMOKE_SUBPATH_SOURCE"
+SIBLING_CODE="SMOKE_SIBLING_SOURCE"
+curl -s -m 20 -X DELETE "${API_BASE}/faults" > /dev/null || true
+if report_fault "$SUBPATH_CODE" "/processing/anomaly_detector/imu_sim" \
+    && poll_until "/faults" ".items[0].fault_code == \"${SUBPATH_CODE}\"" 15; then
+    pass "setup: ${SUBPATH_CODE} from /processing/anomaly_detector/imu_sim is the first listed fault"
+    SUBPATH_PLAIN=$(run_check_demo) || true
+    SUBPATH_SHOWN=$(check_demo_section "$SUBPATH_PLAIN" 10 | jq -r '.[0].code // empty' 2>/dev/null) || true
+    if [ "$SUBPATH_SHOWN" = "$SUBPATH_CODE" ] \
+        && grep -q "Fetching fault ${SUBPATH_CODE} on apps/anomaly-detector\.\.\." <<< "$SUBPATH_PLAIN"; then
+        pass "check-demo.sh section 10 shows a sub-path fault on the App that owns the node"
+    else
+        fail "check-demo.sh section 10 shows a sub-path fault on the App that owns the node" \
+            "section 10 code: ${SUBPATH_SHOWN:-none}; $(grep -m1 -E 'Could not map|Fetching fault' <<< "$SUBPATH_PLAIN")"
+    fi
+    if grep -q "=== 11\. " <<< "$SUBPATH_PLAIN" && grep -q "=== 12\. " <<< "$SUBPATH_PLAIN"; then
+        pass "check-demo.sh runs sections 11 and 12 for a sub-path fault"
+    else
+        fail "check-demo.sh runs sections 11 and 12 for a sub-path fault" "section 11 or 12 missing"
+    fi
+    if grep -q ': null' <<< "$SUBPATH_PLAIN"; then
+        fail "check-demo.sh prints no null fields for a sub-path fault" \
+            "$(grep -B1 ': null' <<< "$SUBPATH_PLAIN" | head -10)"
+    else
+        pass "check-demo.sh prints no null fields for a sub-path fault"
+    fi
+    # The gateway lists a node's rosbags only for faults reported under the
+    # exact node path, so this section may have no recording to list.
+    SUBPATH_ROSBAGS_TEXT=$(check_demo_section_text "$SUBPATH_PLAIN" 12)
+    if check_demo_section "$SUBPATH_PLAIN" 12 | jq -e 'length > 0' > /dev/null 2>&1 \
+        || grep -q "No rosbag recordings" <<< "$SUBPATH_ROSBAGS_TEXT"; then
+        pass "check-demo.sh section 12 lists rosbags or says there are none"
+    else
+        fail "check-demo.sh section 12 lists rosbags or says there are none" \
+            "section 12: $(tr '\n' ';' <<< "$SUBPATH_ROSBAGS_TEXT" | head -c 300)"
+    fi
+else
+    fail "setup: ${SUBPATH_CODE} from /processing/anomaly_detector/imu_sim is the first listed fault" \
+        "first listed: $(curl -s -m 10 "${API_BASE}/faults" | jq -c '.items[0] | {fault_code, reporting_sources}' 2>/dev/null)"
+fi
+
+# A source that only shares a name prefix with a node is not under it.
+curl -s -m 20 -X DELETE "${API_BASE}/faults" > /dev/null || true
+if report_fault "$SIBLING_CODE" "/processing/anomaly_detector_extra" \
+    && poll_until "/faults" ".items[0].fault_code == \"${SIBLING_CODE}\"" 15; then
+    pass "setup: ${SIBLING_CODE} from /processing/anomaly_detector_extra is the first listed fault"
+    SIBLING_PLAIN=$(run_check_demo) || true
+    if grep -q "Could not map fault ${SIBLING_CODE} to a reporting App" <<< "$SIBLING_PLAIN" \
+        && ! grep -q "=== 10\. " <<< "$SIBLING_PLAIN"; then
+        pass "check-demo.sh maps no App to a source that only shares a name prefix with its node"
+    else
+        fail "check-demo.sh maps no App to a source that only shares a name prefix with its node" \
+            "$(grep -m1 -E 'Could not map|Fetching fault' <<< "$SIBLING_PLAIN")"
+    fi
+else
+    fail "setup: ${SIBLING_CODE} from /processing/anomaly_detector_extra is the first listed fault" \
+        "first listed: $(curl -s -m 10 "${API_BASE}/faults" | jq -c '.items[0] | {fault_code, reporting_sources}' 2>/dev/null)"
+fi
+curl -s -m 20 -X DELETE "${API_BASE}/faults" > /dev/null || true
+
+section "check-demo.sh waits for a sensor without a first message"
+
+# The first run above races the linking and often starts after it. Here the
+# wait is needed on every run: on a fresh gateway the LiDAR is held before
+# anything reads it and resumed 2 s into the run, well inside both the
+# 30 s link wait and the 5 s first-message wait.
+if docker restart "${DEMO_CONTAINER}" > /dev/null 2>&1; then
+    pass "setup: ${DEMO_CONTAINER} restarted"
+else
+    fail "setup: ${DEMO_CONTAINER} restarted" "docker restart failed"
+fi
+wait_for_gateway 90
+if stop_lidar; then
+    pass "setup: lidar_sim held right after /health"
+    ( sleep 2; resume_lidar ) &
+    HOLD_PID=$!
+    HELD_RC=0
+    HELD_TIMED=$(run_check_demo_timed "") || HELD_RC=$?
+    wait "$HOLD_PID" 2>/dev/null || true
+    resume_lidar
+    HELD_PLAIN=$(untimed "$HELD_TIMED")
+    HELD_WAIT_TEXT=$(readiness_wait_output "$HELD_TIMED")
+    echo "  readiness wait $(readiness_wait_ms "$HELD_TIMED") ms:" \
+        "$(grep -vE '^ *$' <<< "$HELD_WAIT_TEXT" | tr '\n' ';' | head -c 300)"
+    HELD_MISSING=""
+    for n in 5 6 7 8; do
+        section_values_printed "$HELD_PLAIN" "$n" || HELD_MISSING="${HELD_MISSING} ${n}"
+    done
+    if [ "$HELD_RC" -eq 0 ] && [ -z "$HELD_MISSING" ] && ! grep -q ': null' <<< "$HELD_PLAIN"; then
+        pass "check-demo.sh with the LiDAR held exits 0 and prints values in sections 5-8"
+    else
+        fail "check-demo.sh with the LiDAR held exits 0 and prints values in sections 5-8" \
+            "exit code ${HELD_RC}; sections without values:${HELD_MISSING:- none}; last lines: $(grep -vE '^ *$' <<< "$HELD_PLAIN" | tail -n 3 | tr '\n' ';')"
+    fi
+    if grep -q "^Waiting for .*lidar-sim" <<< "$HELD_WAIT_TEXT"; then
+        pass "check-demo.sh says it waits for the held LiDAR"
+    else
+        fail "check-demo.sh says it waits for the held LiDAR" \
+            "wait printed: $(grep -vE '^ *$' <<< "$HELD_WAIT_TEXT" | tr '\n' ';' | head -c 300)"
+    fi
+else
+    fail "setup: lidar_sim held right after /health" "no lidar_sim_node process in ${DEMO_CONTAINER}"
+fi
+
+section "check-demo.sh with a failed IMU on a fresh gateway"
+
+# The gateway keeps the last message of a topic it has read. A sensor that
+# stops before its first read has no message at all, so the demo restarts
+# and the IMU fails before anything reads it.
+if docker restart "${DEMO_CONTAINER}" > /dev/null 2>&1; then
+    pass "setup: ${DEMO_CONTAINER} restarted"
+else
+    fail "setup: ${DEMO_CONTAINER} restarted" "docker restart failed"
+fi
+wait_for_gateway 90
+wait_for_runtime_linking "/apps/imu-sim/data" 60
+assert_script_execution "compute-unit" "inject-failure" 30
+if poll_until "/faults" '.items | length > 0' 30; then
+    pass "setup: a fault is listed after the IMU failure"
+else
+    fail "setup: a fault is listed after the IMU failure" "no fault after 30 s"
+fi
+if api_get "/health" && jq -e '."x-medkit-data-provider".pool_size == 0' <<< "$RESPONSE" > /dev/null 2>&1; then
+    pass "setup: the gateway has read no topic before check-demo.sh runs"
+else
+    fail "setup: the gateway has read no topic before check-demo.sh runs" \
+        "$(jq -c '."x-medkit-data-provider"' <<< "$RESPONSE" 2>/dev/null)"
+fi
+
+# check-demo.sh bounds each request of its readiness wait to this many seconds.
+CHECK_DEMO_REQUEST_TIMEOUT_SEC=3
+
+FAILED_IMU_RC=0
+FAILED_IMU_TIMED=$(run_check_demo_timed "") || FAILED_IMU_RC=$?
+FAILED_IMU_PLAIN=$(untimed "$FAILED_IMU_TIMED")
+FAILED_IMU_WAIT_MS=$(readiness_wait_ms "$FAILED_IMU_TIMED")
+echo "  readiness wait ${FAILED_IMU_WAIT_MS} ms, exit code ${FAILED_IMU_RC}"
+
+if [ "$FAILED_IMU_RC" -eq 0 ]; then
+    pass "check-demo.sh exits 0 with the IMU failed"
+else
+    fail "check-demo.sh exits 0 with the IMU failed" \
+        "exit code ${FAILED_IMU_RC}: $(grep -vE '^ *$' <<< "$FAILED_IMU_PLAIN" | tail -n 3 | tr '\n' ';')"
+fi
+if grep -q ': null' <<< "$FAILED_IMU_PLAIN"; then
+    fail "check-demo.sh prints no null fields with the IMU failed" \
+        "$(grep -B1 ': null' <<< "$FAILED_IMU_PLAIN" | head -10)"
+else
+    pass "check-demo.sh prints no null fields with the IMU failed"
+fi
+FAILED_IMU_SECTION_6=$(check_demo_section_text "$FAILED_IMU_PLAIN" 6)
+if grep -q "=== 6\. " <<< "$FAILED_IMU_PLAIN" \
+    && check_demo_section "$FAILED_IMU_PLAIN" 6 | jq -e 'length == 0' > /dev/null 2>&1 \
+    && grep -qi "no IMU data" <<< "$FAILED_IMU_SECTION_6"; then
+    pass "check-demo.sh section 6 says the IMU has no data"
+else
+    fail "check-demo.sh section 6 says the IMU has no data" \
+        "section 6: $(tr '\n' ';' <<< "$FAILED_IMU_SECTION_6" | head -c 300)"
+fi
+if section_values_printed "$FAILED_IMU_PLAIN" 5 && section_values_printed "$FAILED_IMU_PLAIN" 7; then
+    pass "check-demo.sh prints LiDAR and GPS values with the IMU failed"
+else
+    fail "check-demo.sh prints LiDAR and GPS values with the IMU failed" \
+        "section 5: $(check_demo_section "$FAILED_IMU_PLAIN" 5 | jq -c . 2>/dev/null | head -c 150); section 7: $(check_demo_section "$FAILED_IMU_PLAIN" 7 | jq -c . 2>/dev/null | head -c 150)"
+fi
+FAILED_IMU_MISSING=""
+for n in 9 10 11 12; do
+    grep -q "=== ${n}\. " <<< "$FAILED_IMU_PLAIN" || FAILED_IMU_MISSING="${FAILED_IMU_MISSING} ${n}"
+done
+if [ -z "$FAILED_IMU_MISSING" ]; then
+    pass "check-demo.sh runs sections 9-12 with the IMU failed"
+else
+    fail "check-demo.sh runs sections 9-12 with the IMU failed" "missing sections:${FAILED_IMU_MISSING}"
+fi
+
+# The wait names only the sensor it waited for; LiDAR and GPS had data.
+FAILED_IMU_WAIT_TEXT=$(readiness_wait_output "$FAILED_IMU_TIMED")
+if grep -q "imu-sim" <<< "$FAILED_IMU_WAIT_TEXT" && ! grep -qE "lidar-sim|gps-sim" <<< "$FAILED_IMU_WAIT_TEXT"; then
+    pass "check-demo.sh's wait names the sensor it waited for"
+else
+    fail "check-demo.sh's wait names the sensor it waited for" \
+        "wait printed: $(grep -vE '^ *$' <<< "$FAILED_IMU_WAIT_TEXT" | tr '\n' ';' | head -c 300)"
+fi
+
+# The wait is bounded by wall-clock time: DATA_WAIT_SEC plus one request.
+# A cold IMU read blocks for the gateway's sample timeout, so a wait that
+# counts passes instead of seconds overruns here.
+if [ "$FAILED_IMU_WAIT_MS" -le $(( (30 + CHECK_DEMO_REQUEST_TIMEOUT_SEC) * 1000 )) ]; then
+    pass "check-demo.sh's readiness wait ends within the default 30 s plus one request"
+else
+    fail "check-demo.sh's readiness wait ends within the default 30 s plus one request" \
+        "waited ${FAILED_IMU_WAIT_MS} ms"
+fi
+# 08 is a whole number of seconds with a leading zero, not an octal number.
+# Here the IMU's 5 s first-message window ends the wait before 8 s, so the
+# wait must last at least 3 s: a value read as 0 or refused ends it at once.
+for wait_sec in 0 2 08; do
+    WAIT_RC=0
+    WAIT_TIMED=$(run_check_demo_timed "$wait_sec") || WAIT_RC=$?
+    WAIT_MS=$(readiness_wait_ms "$WAIT_TIMED")
+    WAIT_MIN_MS=0
+    [ "$wait_sec" = 08 ] && WAIT_MIN_MS=3000
+    echo "  DATA_WAIT_SEC=${wait_sec}: readiness wait ${WAIT_MS} ms, exit code ${WAIT_RC}"
+    if [ "$WAIT_RC" -eq 0 ] && [ "$WAIT_MS" -ge "$WAIT_MIN_MS" ] \
+        && [ "$WAIT_MS" -le $(( (10#$wait_sec + CHECK_DEMO_REQUEST_TIMEOUT_SEC) * 1000 )) ] \
+        && grep -q "=== 12\. " <<< "$WAIT_TIMED"; then
+        pass "check-demo.sh with DATA_WAIT_SEC=${wait_sec} waits at most ${wait_sec} s plus one request and runs to section 12"
+    else
+        fail "check-demo.sh with DATA_WAIT_SEC=${wait_sec} waits at most ${wait_sec} s plus one request and runs to section 12" \
+            "exit code ${WAIT_RC}, waited ${WAIT_MS} ms: $(grep -vE '^[0-9]+ *$' <<< "$WAIT_TIMED" | tail -n 2 | tr '\n' ';')"
+    fi
+done
+
+assert_script_execution "compute-unit" "restore-normal" 30
 
 # --- Summary ---
 

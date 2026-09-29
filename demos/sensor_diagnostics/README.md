@@ -304,7 +304,7 @@ curl http://localhost:8080/api/v1/faults | jq
 |--------|-------------|
 | `run-demo.sh` | Start Docker services (daemon mode) |
 | `stop-demo.sh` | Stop Docker services |
-| `check-demo.sh` | Interactive API demonstration and exploration; waits up to 30 s for the sensor data after the demo starts, exits 1 when the fault list cannot be read |
+| `check-demo.sh` | Interactive API demonstration and exploration; waits for the sensor data after the demo starts (see below), exits 1 when the fault list cannot be read |
 | `run-diagnostics.sh` | Check health of all sensors |
 | `inject-fault-scenario.sh` | Composite fault injection across all sensors |
 | `inject-noise.sh` | Inject high noise fault |
@@ -316,6 +316,15 @@ curl http://localhost:8080/api/v1/faults | jq
 | `watch-triggers.sh` | Watch trigger events via SSE stream |
 
 > **Note:** All diagnostic scripts (`inject-*.sh`, `restore-normal.sh`, `run-diagnostics.sh`, `inject-fault-scenario.sh`) are also available via the [Scripts API](#scripts-api) - callable as REST endpoints without requiring the host-side scripts.
+
+`check-demo.sh` waits up to 30 s for the gateway to link the sensor nodes, and up to 5 s for a first
+message from each linked sensor. Set `DATA_WAIT_SEC=<seconds>` to change the 30 s. A sensor that sends
+nothing, such as the IMU after `inject-failure.sh`, is named in the output, its data section says it has
+no data, and the fault sections still run.
+
+The fault sections show the first listed fault on the App whose node reported it. This includes faults
+the anomaly detector reports as `/processing/anomaly_detector/<sensor>`. For those faults the rosbag list
+of `apps/anomaly-detector` can be empty.
 
 ## Sensor Parameters
 
