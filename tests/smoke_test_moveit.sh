@@ -261,15 +261,16 @@ ROS_ENV='source /opt/ros/jazzy/setup.bash && source /root/demo_ws/install/setup.
 
 # run_move_arm_inside <log> <setup> <args...>: run the copy of move-arm.sh at
 # /tmp/move-arm.sh in the demo container. Bash code <setup> runs first; the
-# ROS environment is there only if <setup> sources it. Output goes to a file in
-# the container: docker exec can drop the end of a ros2 CLI's stdout.
-# Sets MOVE_ARM_RC.
+# ROS environment is there only if <setup> sources it. move-arm.sh runs only
+# if <setup> succeeds, else MOVE_ARM_RC is 255 and the log is empty. Output
+# goes to a file in the container: docker exec can drop the end of a ros2
+# CLI's stdout. Sets MOVE_ARM_RC.
 run_move_arm_inside() {
     local log="$1" setup="$2"
     shift 2
     docker exec "${DEMO_CONTAINER}" bash -c "
         rm -f /tmp/moveit_smoke_inside.log /tmp/moveit_smoke_inside.rc
-        ${setup}
+        { ${setup}; } || exit 0
         timeout ${MOVE_ARM_LIMIT_SEC} bash /tmp/move-arm.sh $* < /dev/null > /tmp/moveit_smoke_inside.log 2>&1
         echo \$? > /tmp/moveit_smoke_inside.rc
     " > /dev/null 2>&1 || true
@@ -558,15 +559,21 @@ SHOWN_COMPONENTS=$(shown_items 2) || SHOWN_COMPONENTS='[]'
 SHOWN_APPS=$(shown_items 3) || SHOWN_APPS='[]'
 SHOWN_FAULTS=$(shown_items 6) || SHOWN_FAULTS='[]'
 
-# Section 5 holds one text line and then the joint state object.
-SHOWN_JOINTS=$(section_text 5 | sed -n '/^{/,/^}/p' | jq -c '.joint_names') || SHOWN_JOINTS=""
+# Section 5 holds one text line and then the joint state object. Values move
+# with the arm, so they are checked by type and count, not compared.
+SHOWN_JOINT_STATE=$(section_text 5 | sed -n '/^{/,/^}/p' | jq -c '.') || SHOWN_JOINT_STATE=""
 API_JOINTS=$(curl -s -m 30 "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" \
     | jq -c '.data.name // empty') || API_JOINTS=""
-if [ -n "${API_JOINTS}" ] && [ "${API_JOINTS}" != "[]" ] && [ "${SHOWN_JOINTS}" = "${API_JOINTS}" ]; then
-    pass "check-entities.sh shows the joint names the API returns"
+if [ -n "${API_JOINTS}" ] && [ "${API_JOINTS}" != "[]" ] \
+    && jq -e --argjson names "${API_JOINTS}" '
+        .joint_names == $names
+        and ([.positions, .velocities]
+            | all(type == "array" and length == ($names | length) and all(.[]; type == "number")))
+    ' <<< "${SHOWN_JOINT_STATE}" > /dev/null 2>&1; then
+    pass "check-entities.sh shows the API's joint names with one numeric position and velocity each"
 else
-    fail "check-entities.sh shows the joint names the API returns" \
-        "api=${API_JOINTS:-none} shown=${SHOWN_JOINTS:-none}"
+    fail "check-entities.sh shows the API's joint names with one numeric position and velocity each" \
+        "api names=${API_JOINTS:-none} shown=${SHOWN_JOINT_STATE:-none}"
 fi
 
 API_COMPONENTS=$(curl -s -m 30 "${API_BASE}/components")
@@ -793,8 +800,14 @@ check_not_sent "with an invalid action type" "${NOT_SENT_LOG}" "${MOVE_ARM_RC}" 
 
 section "move-arm.sh inside the container: the local ros2 sends every goal"
 
-# A cold `ros2 action list` (no daemon) can miss the arm action, so the
-# daemon is stopped before every run.
+# A cold `ros2 action list` (no daemon) can miss the arm action, so every run
+# starts with the daemon stopped. `ros2 daemon status` goes to a file in the
+# container; move-arm.sh runs only if it says the daemon is not running, and
+# a run without that proof counts as a failure.
+DAEMON_STATUS_FILE=/tmp/moveit_smoke_daemon_status.log
+DAEMON_STOPPED='The daemon is not running'
+COLD_SETUP="rm -f ${DAEMON_STATUS_FILE}; ${ROS_ENV} && ros2 daemon stop > /dev/null 2>&1; \
+    ros2 daemon status > ${DAEMON_STATUS_FILE} 2>&1; grep -qFx '${DAEMON_STOPPED}' ${DAEMON_STATUS_FILE}"
 INSIDE_RUNS=8
 INSIDE_ACCEPTED=0
 INSIDE_MISSED=""
@@ -802,8 +815,11 @@ INSIDE_LOG=/tmp/moveit_smoke_inside.log
 for run in $(seq 1 "${INSIDE_RUNS}"); do
     pose=ready
     [ $((run % 2)) -eq 0 ] && pose=extended
-    run_move_arm_inside "${INSIDE_LOG}" "${ROS_ENV} && ros2 daemon stop > /dev/null 2>&1" "${pose}"
-    if grep -q '^Goal accepted with ID' "${INSIDE_LOG}"; then
+    run_move_arm_inside "${INSIDE_LOG}" "${COLD_SETUP}" "${pose}"
+    daemon_status=$(docker exec "${DEMO_CONTAINER}" cat "${DAEMON_STATUS_FILE}" 2> /dev/null) || daemon_status=""
+    if [ "${daemon_status}" != "${DAEMON_STOPPED}" ]; then
+        INSIDE_MISSED="${INSIDE_MISSED} run ${run}: daemon not proven stopped (status: ${daemon_status:-none});"
+    elif grep -q '^Goal accepted with ID' "${INSIDE_LOG}"; then
         INSIDE_ACCEPTED=$((INSIDE_ACCEPTED + 1))
     else
         INSIDE_MISSED="${INSIDE_MISSED} run ${run} (rc=${MOVE_ARM_RC}): $(tail -n 2 "${INSIDE_LOG}" | tr '\n' ';')"
