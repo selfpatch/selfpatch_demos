@@ -62,6 +62,8 @@ case "$DATA_WAIT_SEC" in
         exit 1
         ;;
 esac
+# Base 10: bash reads a number with a leading zero as octal.
+DATA_WAIT_SEC=$((10#$DATA_WAIT_SEC))
 
 # True when the gateway has linked APP to its node: its data list is not empty.
 sensor_linked() {
