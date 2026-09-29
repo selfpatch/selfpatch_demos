@@ -118,8 +118,10 @@ untimed() {
 }
 
 # Prints what check-demo.sh printed between the health check and section 1.
+# One awk reads the output: an early exit behind a pipe would SIGPIPE the
+# writer, and pipefail would fail the caller.
 readiness_wait_output() {
-    untimed "$1" | awk '/Gateway is healthy/ { on = 1; next } /^=== 1\. / { exit } on'
+    awk '{ sub(/^[0-9]+ /, "") } /Gateway is healthy/ { on = 1; next } /^=== 1\. / { exit } on' <<< "$1"
 }
 
 # Prints the text lines of section N of a check-demo.sh output.
@@ -828,8 +830,8 @@ fi
 
 # The IMU line reports how long the wait went on for it, which here is the
 # whole wait.
-FAILED_IMU_REPORTED_S=$(grep "imu-sim" <<< "$FAILED_IMU_WAIT_TEXT" | grep -v "^Waiting" \
-    | grep -oE '[0-9]+s' | head -n 1 | tr -d s)
+FAILED_IMU_REPORTED_S=$(awk '/imu-sim/ && !/^Waiting/ && match($0, /[0-9]+s/) {
+    print substr($0, RSTART, RLENGTH - 1); exit }' <<< "$FAILED_IMU_WAIT_TEXT")
 if [ -n "$FAILED_IMU_REPORTED_S" ] \
     && [ "$(( FAILED_IMU_REPORTED_S * 1000 - FAILED_IMU_WAIT_MS ))" -le 2000 ] \
     && [ "$(( FAILED_IMU_WAIT_MS - FAILED_IMU_REPORTED_S * 1000 ))" -le 2000 ]; then

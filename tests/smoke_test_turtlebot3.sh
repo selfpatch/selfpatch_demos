@@ -217,7 +217,7 @@ fi
 # The README says the trigger setup-triggers.sh creates does not fire for
 # navigation goal faults. Watch it across the inject below as a user would.
 TRIGGER_SETUP_OUTPUT=$(cd "$TB3_DIR" && GATEWAY_URL="$GATEWAY_URL" bash ./setup-triggers.sh 2>&1) || true
-TRIGGER_ID=$(sed -n 's/^  ID:[[:space:]]*//p' <<< "$TRIGGER_SETUP_OUTPUT" | head -1)
+TRIGGER_ID=$(awk '/^  ID:/ { sub(/^  ID:[ \t]*/, ""); print; exit }' <<< "$TRIGGER_SETUP_OUTPUT")
 WATCH_LOG=$(mktemp)
 WATCH_PID=""
 WATCH_LIVE_BEFORE=false
