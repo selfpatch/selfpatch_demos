@@ -404,7 +404,9 @@ GATEWAY_URL=http://192.168.1.10:8080 ./inject-nav-failure.sh
 
 ## Triggers (Condition-Based Alerts)
 
-The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on any new or updated faults reported by the anomaly detector, such as localization uncertainty.
+The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger on the anomaly detector. It fires for the localization fault that `./inject-localization-failure.sh` causes (`LOCALIZATION_UNCERTAINTY`).
+
+Navigation goal faults (`NAVIGATION_GOAL_ABORTED`, `NAVIGATION_GOAL_CANCELED`), such as the one `./inject-nav-failure.sh` causes, do not fire this trigger. They still appear in `GET /api/v1/faults` and in `./check-faults.sh`.
 
 ### Setup
 
@@ -426,11 +428,11 @@ The gateway supports condition-based triggers that fire when specific events occ
 
 1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/anomaly-detector/triggers`:
    - **Resource:** `/api/v1/apps/anomaly-detector/faults` (watches fault collection)
-   - **Condition:** `OnChange` (fires on any new or updated fault)
+   - **Condition:** `OnChange` (fires when the localization fault is reported or updated; navigation goal faults do not fire it)
    - **Multishot:** `true` (fires repeatedly, not just once)
    - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
 2. `watch-triggers.sh` connects to the SSE event stream at the trigger's `event_source` URL
-3. When a fault is injected and detected by the gateway, the trigger fires and an SSE event is delivered
+3. When `./inject-localization-failure.sh` makes the anomaly detector report the localization fault, the trigger fires and an SSE event is delivered
 
 ### Manual API Usage
 
