@@ -469,7 +469,7 @@ Container scripts are stored under `/var/lib/ros2_medkit/scripts/moveit-planning
 | Docker build fails | Apt package missing | Check if MoveIt 2 Jazzy packages are available |
 | "MoveGroup not available" | Slow startup | Wait 60-90 seconds after container starts |
 | Controller not loading | Missing config | Verify `moveit_controllers.yaml` is correct |
-| Joint states empty | Controllers not loaded | Check `ros2 control list_controllers` inside container |
+| Joint states empty (`check-entities.sh` prints "Joint state data not available") | Controllers not loaded | Check `ros2 control list_controllers` inside container |
 | `ros2` CLI hangs in `docker exec` | DDS discovery across container boundaries | Use gateway REST API instead of `ros2` CLI for parameter/service operations |
 
 ## Comparison with Other Demos

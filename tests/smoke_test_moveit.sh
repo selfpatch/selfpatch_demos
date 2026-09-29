@@ -336,6 +336,22 @@ check_not_sent() {
     fi
 }
 
+# ros2_control <args...>: `ros2 control <args>` in the demo container. Output
+# goes to /tmp/moveit_smoke_ros2_control.log there.
+ros2_control() {
+    docker exec "${DEMO_CONTAINER}" bash -c "
+        ${ROS_ENV} && timeout 60 ros2 control \"\$@\" > /tmp/moveit_smoke_ros2_control.log 2>&1
+    " ros2_control "$@"
+}
+
+# True while a test has joint_state_broadcaster inactive or unloaded.
+JSB_DOWN=false
+
+reload_joint_state_broadcaster() {
+    { ros2_control load_controller --set-state active joint_state_broadcaster \
+        || ros2_control set_controller_state joint_state_broadcaster active; } && JSB_DOWN=false
+}
+
 # real_status <log>: the final status the action client printed itself, read
 # without move-arm.sh's own verdict. Empty when no goal finished.
 real_status() {
@@ -390,6 +406,9 @@ check_goal_report() {
 cleanup_on_exit() {
     local rc=$?
     set +e
+    if [ "${JSB_DOWN}" = true ]; then
+        reload_joint_state_broadcaster
+    fi
     resume_pick_place_loop
     resume_fault_manager
     (exit "${rc}")
@@ -520,19 +539,35 @@ else
     pass "check-entities.sh prints no null fields"
 fi
 
-# shown_items <n>: the JSON objects check-entities.sh printed under its
-# "=== <n>. ..." heading, as one array.
-shown_items() {
+# section_text <n> [log]: the lines check-entities.sh printed under its
+# "=== <n>. ..." heading.
+section_text() {
     awk -v heading="=== $1. " '
         index($0, "=== ") == 1 { on = (index($0, heading) == 1); next }
         index($0, "Entity hierarchy exploration complete") { on = 0 }
         on
-    ' "${ENTITIES_LOG}" | jq -s -c '.'
+    ' "${2:-${ENTITIES_LOG}}"
+}
+
+# shown_items <n>: the JSON objects printed under heading <n>, as one array.
+shown_items() {
+    section_text "$1" | jq -s -c '.'
 }
 
 SHOWN_COMPONENTS=$(shown_items 2) || SHOWN_COMPONENTS='[]'
 SHOWN_APPS=$(shown_items 3) || SHOWN_APPS='[]'
 SHOWN_FAULTS=$(shown_items 6) || SHOWN_FAULTS='[]'
+
+# Section 5 holds one text line and then the joint state object.
+SHOWN_JOINTS=$(section_text 5 | sed -n '/^{/,/^}/p' | jq -c '.joint_names') || SHOWN_JOINTS=""
+API_JOINTS=$(curl -s -m 30 "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" \
+    | jq -c '.data.name // empty') || API_JOINTS=""
+if [ -n "${API_JOINTS}" ] && [ "${API_JOINTS}" != "[]" ] && [ "${SHOWN_JOINTS}" = "${API_JOINTS}" ]; then
+    pass "check-entities.sh shows the joint names the API returns"
+else
+    fail "check-entities.sh shows the joint names the API returns" \
+        "api=${API_JOINTS:-none} shown=${SHOWN_JOINTS:-none}"
+fi
 
 API_COMPONENTS=$(curl -s -m 30 "${API_BASE}/components")
 for id in panda-arm panda-gripper moveit-planning pick-place-loop gateway fault-manager diagnostic-bridge; do
@@ -950,6 +985,52 @@ if stop_fault_manager; then
 else
     fail "setup: fault manager stopped" "no fault_manager_node process in ${DEMO_CONTAINER}"
 fi
+
+section "check-entities.sh: joint states without data print a hint, not nulls"
+
+# joint_names_served: the gateway returns joint names for joint_states.
+joint_names_served() {
+    curl -s -m 30 "${API_BASE}/apps/joint-state-broadcaster/data/joint_states" \
+        | jq -e '.data.name | arrays | length > 0' > /dev/null 2>&1
+}
+
+# Unloading joint_state_broadcaster removes the only /joint_states publisher.
+NO_JOINTS_LOG=/tmp/moveit_smoke_entities_no_joints.log
+stop_pick_place_loop
+if ros2_control set_controller_state joint_state_broadcaster inactive \
+    && JSB_DOWN=true && ros2_control unload_controller joint_state_broadcaster; then
+    waited=0
+    while joint_names_served && [ "${waited}" -lt 30 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+fi
+if [ "${JSB_DOWN}" = true ] && ! joint_names_served; then
+    pass "setup: joint_states has no data with joint_state_broadcaster unloaded"
+    GATEWAY_URL="${GATEWAY_URL}" timeout 120 "${DEMO_DIR}/check-entities.sh" < /dev/null 2>&1 \
+        | sed 's/\x1b\[[0-9;]*m//g' > "${NO_JOINTS_LOG}" || true
+    NO_JOINTS_SECTION=$(section_text 5 "${NO_JOINTS_LOG}")
+    if ! grep -q 'exploration complete' "${NO_JOINTS_LOG}"; then
+        fail "check-entities.sh without joint data runs to completion" "$(tail -n 5 "${NO_JOINTS_LOG}")"
+    elif grep -q 'Joint state data not available' <<< "${NO_JOINTS_SECTION}" \
+        && ! grep -q '^{' <<< "${NO_JOINTS_SECTION}" && ! grep -qw 'null' "${NO_JOINTS_LOG}"; then
+        pass "check-entities.sh without joint data prints the hint and no null"
+    else
+        fail "check-entities.sh without joint data prints the hint and no null" \
+            "section 5: $(tr '\n' ';' <<< "${NO_JOINTS_SECTION}"); null lines: $(grep -cw 'null' "${NO_JOINTS_LOG}" || true)"
+    fi
+else
+    fail "setup: joint_states has no data with joint_state_broadcaster unloaded" \
+        "$(docker exec "${DEMO_CONTAINER}" cat /tmp/moveit_smoke_ros2_control.log 2> /dev/null | tail -n 3 | tr '\n' ';')"
+fi
+if reload_joint_state_broadcaster && poll_until "/apps/joint-state-broadcaster/data/joint_states" \
+    '.data.name | arrays | length > 0' 30; then
+    pass "setup: joint states return after joint_state_broadcaster is loaded again"
+else
+    fail "setup: joint states return after joint_state_broadcaster is loaded again" \
+        "$(docker exec "${DEMO_CONTAINER}" cat /tmp/moveit_smoke_ros2_control.log 2> /dev/null | tail -n 3 | tr '\n' ';')"
+fi
+resume_pick_place_loop
 
 # --- Summary ---
 
