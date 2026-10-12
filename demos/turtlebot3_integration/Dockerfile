@@ -1,7 +1,10 @@
 # TurtleBot3 + ros2_medkit Discovery Demo with Nav2 Navigation
-# Full desktop image with Gazebo GUI support
+#
+# ros:jazzy-ros-base is multi-arch. osrf/ros:jazzy-desktop is amd64 only, so on
+# Apple Silicon and other arm64 hosts it ran under emulation, which broke the
+# simulated lidar and Nav2. Gazebo (server and GUI) comes in with ros_gz.
 
-FROM osrf/ros:jazzy-desktop
+FROM ros:jazzy-ros-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=jazzy
@@ -11,6 +14,7 @@ ENV COLCON_WS=/root/demo_ws
 
 # Install TurtleBot3, Nav2, and build dependencies
 RUN apt-get update && apt-get install -y \
+    ros-jazzy-ros-gz \
     ros-jazzy-turtlebot3-gazebo \
     ros-jazzy-turtlebot3-msgs \
     ros-jazzy-turtlebot3-description \
@@ -78,9 +82,13 @@ RUN find /var/lib/ros2_medkit/scripts -name "*.bash" -exec chmod +x {} \;
 
 # Build ros2_medkit and demo package
 WORKDIR ${COLCON_WS}
+# apt-get update first: the base image ships no package lists, and rosdep
+# installs what the workspace needs that the image does not carry.
 RUN bash -c "source /opt/ros/jazzy/setup.bash && \
+    apt-get update && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y && \
+    rm -rf /var/lib/apt/lists/* && \
     MAKEFLAGS='-j 2' colcon build --executor sequential --symlink-install --cmake-args -DBUILD_TESTING=OFF"
 
 # Setup environment
