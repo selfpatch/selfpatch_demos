@@ -43,7 +43,7 @@ if [[ "$ACTION" == "--disconnect" ]]; then
     exit 0
 fi
 
-if ! docker inspect "$GATEWAY_CONTAINER" >/dev/null 2>&1; then
+if [[ "$(docker inspect -f '{{.State.Running}}' "$GATEWAY_CONTAINER" 2>/dev/null)" != "true" ]]; then
     echo "Container ${GATEWAY_CONTAINER} is not running. Start the demo first: ./run-demo.sh"
     exit 1
 fi
@@ -86,4 +86,4 @@ docker run -d --name "$AGENT_NAME" --restart unless-stopped --network "$NETWORK"
 echo ""
 echo "Agent ${AGENT_NAME} is running. The demo appears in the platform within a few seconds."
 echo "Logs:       docker logs -f ${AGENT_NAME}"
-echo "Disconnect: ./connect-platform.sh --disconnect (in the demo directory)"
+echo "Disconnect: GATEWAY_CONTAINER=${GATEWAY_CONTAINER} ./connect-platform.sh --disconnect (in the demo directory)"

@@ -57,6 +57,13 @@ COMPOSE_PROJECT_NAME=robot2 DEMO_CONTAINER=robot2 GATEWAY_PORT=8082 \
 GATEWAY_CONTAINER=robot2 ./connect-platform.sh
 ```
 
+To stop it, disconnect the agent first. While it is attached, compose cannot remove the network:
+
+```bash
+GATEWAY_CONTAINER=robot2 ./connect-platform.sh --disconnect
+COMPOSE_PROJECT_NAME=robot2 ./stop-demo.sh
+```
+
 Give each instance its own `ROS_DOMAIN_ID` so the robots do not see each other's ROS graph. The fault scripts take `GATEWAY_URL`, for example `GATEWAY_URL=http://localhost:8082 ./inject-noise.sh`.
 
 ## Making something happen
@@ -64,7 +71,7 @@ Give each instance its own `ROS_DOMAIN_ID` so the robots do not see each other's
 | Demo | Faults | Back to normal |
 |---|---|---|
 | `sensor_diagnostics` | `./inject-noise.sh`, `./inject-drift.sh`, `./inject-nan.sh`, `./inject-failure.sh`, `./inject-fault-scenario.sh` (all sensors at once) | `./restore-normal.sh` |
-| `ota_nav2_sensor_fix` | `./send-goal.sh`: the robot drives into the phantom obstacle of the broken lidar, Nav2 aborts | `./publish-fix.sh`, `./apply-fix.sh`, `./send-goal.sh` again |
+| `ota_nav2_sensor_fix` | `./send-goal.sh`: the robot drives into the phantom obstacle of the broken lidar, Nav2 aborts | `./publish-fix.sh`, `./apply-fix.sh`, `./clear-fault.sh`, `./send-goal.sh` again |
 | `turtlebot3_integration` | `./inject-nav-failure.sh`, `./inject-localization-failure.sh` | `./restore-normal.sh` |
 
 ## What the gateway exposes
