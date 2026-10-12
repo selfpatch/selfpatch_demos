@@ -2,7 +2,8 @@
 #
 # ros:jazzy-ros-base is multi-arch. osrf/ros:jazzy-desktop is amd64 only, so on
 # Apple Silicon and other arm64 hosts it ran under emulation, which broke the
-# simulated lidar and Nav2. Gazebo (server and GUI) comes in with ros_gz.
+# simulated lidar and Nav2. Gazebo (server and GUI) comes in with
+# turtlebot3_gazebo.
 
 FROM ros:jazzy-ros-base
 
@@ -14,7 +15,7 @@ ENV COLCON_WS=/root/demo_ws
 
 # Install TurtleBot3, Nav2, and build dependencies
 RUN apt-get update && apt-get install -y \
-    ros-jazzy-ros-gz \
+    ros-jazzy-rviz2 \
     ros-jazzy-turtlebot3-gazebo \
     ros-jazzy-turtlebot3-msgs \
     ros-jazzy-turtlebot3-description \
