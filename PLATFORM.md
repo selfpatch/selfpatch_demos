@@ -8,7 +8,7 @@ This page is also written for AI coding assistants. Paste it into the assistant'
 
 - A running demo (`./run-demo.sh` in its directory).
 - An account on the platform you want to use.
-- The agent image. The scripts use `ghcr.io/selfpatch/agent:0.1`. If you cannot pull it, set `SELFPATCH_AGENT_IMAGE` to an agent image you have locally.
+- Docker. The scripts pull the public agent image `ghcr.io/selfpatch/agent:0.1` (amd64 and arm64). `SELFPATCH_AGENT_IMAGE` picks another one.
 
 ## Connect a demo
 
