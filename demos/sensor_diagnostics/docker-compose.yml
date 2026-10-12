@@ -4,12 +4,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: sensor_diagnostics_demo
+    # Names, ports and the ROS domain can be overridden to run more than one
+    # robot side by side, see "Several robots" in the README.
+    container_name: ${DEMO_CONTAINER:-sensor_diagnostics_demo}
     environment:
-      - ROS_DOMAIN_ID=40
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-40}
       - BEACON_MODE=${BEACON_MODE:-none}
     ports:
-      - "8080:8080"
+      - "${GATEWAY_PORT:-8080}:8080"
     stdin_open: true
     tty: true
     # Default command launches the full demo
@@ -23,9 +25,9 @@ services:
   # Web UI for visualization (optional)
   medkit-web-ui:
     image: ghcr.io/selfpatch/ros2_medkit_web_ui:latest
-    container_name: ros2_medkit_web_ui
+    container_name: ${WEB_UI_CONTAINER:-ros2_medkit_web_ui}
     ports:
-      - "3000:80"
+      - "${WEB_UI_PORT:-3000}:80"
     depends_on:
       - sensor-demo
 

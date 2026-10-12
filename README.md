@@ -207,6 +207,18 @@ cd demos/sensor_diagnostics  # or turtlebot3_integration, moveit_pick_place, mul
 # Follow the README.md in that directory
 ```
 
+## Connect a Demo to the selfpatch Platform
+
+`sensor_diagnostics`, `ota_nav2_sensor_fix` and `turtlebot3_integration` can show up in the selfpatch platform as robots through the selfpatch agent:
+
+```bash
+cd demos/sensor_diagnostics
+./run-demo.sh
+./connect-platform.sh   # paste the pairing code from the platform
+```
+
+Several robots side by side, a platform on your own machine and what the gateway exposes to the platform: see [PLATFORM.md](PLATFORM.md).
+
 ## Example API Usage
 
 All demos expose a SOVD-compliant REST API. Here are some common operations:
