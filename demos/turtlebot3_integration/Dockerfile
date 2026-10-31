@@ -61,6 +61,7 @@ RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} https://github.com/selfpatch
     mv ros2_medkit/src/ros2_medkit_msgs . && \
     mv ros2_medkit/src/ros2_medkit_serialization . && \
     mv ros2_medkit/src/ros2_medkit_fault_manager . && \
+    mv ros2_medkit/src/ros2_medkit_fault_detection . && \
     mv ros2_medkit/src/ros2_medkit_fault_reporter . && \
     mv ros2_medkit/src/ros2_medkit_diagnostic_bridge . && \
     mv ros2_medkit/src/ros2_medkit_plugins/ros2_medkit_graph_provider . && \
