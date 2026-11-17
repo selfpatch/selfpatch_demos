@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import List
 
+from benchmark.lib import docker_helpers as dh
+
 
 # ReportFault.srv request fields (verified against ros2_medkit_msgs source):
 #   string source_id
@@ -50,43 +52,33 @@ def build_inject_yaml(source_id: str, fault_code: str, description: str) -> str:
     )
 
 
-def inject_faults(container: str, n: int, run_fn, prefix: str = "BENCH_FAULT_") -> None:
-    """Inject N faults with distinct codes into the fault_manager via docker exec.
+_CALL_TIMEOUT_S = 15
 
-    Each fault has a unique code ``BENCH_FAULT_<i>`` and is reported at
-    CRITICAL severity so it confirms immediately (no debounce). ``prefix`` makes
-    the codes of separate bursts distinct.
 
-    ``run_fn`` is a callable with the same signature as ``docker_helpers.run``:
-    it accepts a list-of-str argv and raises RuntimeError on failure.
+def inject_faults(container: str, n: int, prefix: str = "BENCH_FAULT_",
+                  timeout_s: int = _CALL_TIMEOUT_S) -> int:
+    """Report N faults with distinct codes to the fault manager; return how many it ACCEPTED.
 
-    Uses ``ros2 service call`` inside the container, sourcing the ROS and
-    workspace install envs first.
+    Each fault has a unique code ``<prefix><i>`` at CRITICAL severity, so it
+    confirms immediately (no debounce). Every call runs under ``timeout`` inside
+    the container, so a missing fault manager costs ``timeout_s`` per fault and
+    counts as not accepted instead of hanging. The count comes from the
+    ``accepted`` field of the service response.
     """
+    calls = []
     for i in range(1, n + 1):
-        fault_code = f"{prefix}{i}"
         yaml_arg = build_inject_yaml(
             source_id=SOURCE_ID,
-            fault_code=fault_code,
+            fault_code=f"{prefix}{i}",
             description=f"benchmark burst injection {i}",
         )
-        cmd = [
-            "docker", "exec", container,
-            "bash", "-c",
-            (
-                # docker exec does NOT inherit the compose `environment:` vars, so
-                # ROS_DOMAIN_ID would default to 0 and the injector's transient node
-                # would not discover the fault_manager (which runs on the container's
-                # domain). Read PID 1's ROS_DOMAIN_ID so we join the same domain.
-                "export ROS_DOMAIN_ID=$(tr '\\0' '\\n' < /proc/1/environ | "
-                "sed -n 's/^ROS_DOMAIN_ID=//p'); "
-                "source /opt/ros/jazzy/setup.bash; "
-                "source /ws/install/setup.bash; "
-                f"ros2 service call {_SERVICE} {_SERVICE_TYPE} "
-                f'"{yaml_arg}"'
-            ),
-        ]
-        run_fn(cmd)
+        calls.append(
+            f'out=$(timeout {int(timeout_s)} ros2 service call {_SERVICE} '
+            f'{_SERVICE_TYPE} "{yaml_arg}" 2>&1); '
+            'case "$out" in *accepted=True*) echo ACCEPTED;; *) echo REJECTED;; esac')
+    text = dh.exec_via_file(container, dh.ROS_PRELUDE + "; ".join(calls),
+                            timeout=n * (timeout_s + 5) + 30)
+    return text.count("ACCEPTED")
 
 
 def count_rosbag_warns(log_text: str, n_faults: int) -> int:

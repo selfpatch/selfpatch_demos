@@ -666,7 +666,10 @@ def _fault_burst(container, n, mode, out, tag, args):
         raise RuntimeError("warmup gate did not converge before fault burst")
 
     csv_path = str(out / f"{tag}.csv")
-    trigger_fn = lambda: inject_faults(container, n, dh.run)  # noqa: E731
+    def trigger_fn():
+        accepted = inject_faults(container, n)
+        if accepted != n:
+            raise RuntimeError(f"fault manager accepted {accepted} of {n} injected faults")
 
     by_proc, t_trigger = sample_burst_procs(
         read_fn=read,

@@ -15,6 +15,7 @@
 from __future__ import annotations
 import subprocess
 import time
+import uuid
 
 # Per-call subprocess timeouts (seconds). A wedged `docker exec` or a gateway
 # that accepts a connection but never responds must not hang the whole harness
@@ -138,10 +139,9 @@ def exec_via_file(container, script, timeout=_EXEC_TIMEOUT, shell="bash", poll_s
     to files, and this call polls for the exit-code file until ``timeout``.
     A non-zero exit code raises RuntimeError.
     """
-    out, rc = "/tmp/.bench_exec.out", "/tmp/.bench_exec.rc"
+    tag = uuid.uuid4().hex[:12]
+    out, rc = f"/tmp/.bench_exec_{tag}.out", f"/tmp/.bench_exec_{tag}.rc"
     wrapped = f"rm -f {rc}; ( {script} ) > {out} 2>&1; echo $? > {rc}"
-    run(["docker", "exec", container, shell, "-c", f"rm -f {rc} {out}"],
-        timeout=_EXEC_TIMEOUT)
     run(["docker", "exec", "-d", container, shell, "-c", wrapped], timeout=_EXEC_TIMEOUT)
     end = time.monotonic() + timeout
     while True:
@@ -154,6 +154,7 @@ def exec_via_file(container, script, timeout=_EXEC_TIMEOUT, shell="bash", poll_s
             raise RuntimeError(f"command did not finish within {timeout}s")
         time.sleep(poll_s)
     text = run(["docker", "exec", container, "cat", out], timeout=_EXEC_TIMEOUT)
+    run(["docker", "exec", container, "rm", "-f", out, rc], timeout=_EXEC_TIMEOUT)
     if code != "0":
         raise RuntimeError(f"command exited {code}: {text.strip()[-300:]}")
     return text

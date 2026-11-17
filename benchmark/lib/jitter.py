@@ -14,17 +14,20 @@ NON_RT_NOTE = ("This kernel is not PREEMPT_RT: the numbers show the scheduling c
 def _burst_loop(container, burst_n, stop, errors, counter):
     """Inject bursts of distinct faults until ``stop`` is set.
 
-    ``counter["bursts"]`` counts completed bursts.
+    ``counter`` counts bursts issued and faults the fault manager accepted.
     """
     n = 0
     while not stop.is_set():
         n += 1
         try:
-            inject_faults(container, burst_n, dh.run, prefix=f"JIT{n}_")
-            counter["bursts"] += 1
+            accepted = inject_faults(container, burst_n, prefix=f"JIT{n}_")
         except Exception as exc:  # noqa: BLE001 - recorded, the window keeps running
             errors.append(str(exc))
             return
+        counter["bursts"] += 1
+        counter["accepted"] += accepted
+        if accepted < burst_n:
+            errors.append(f"burst {n}: {accepted}/{burst_n} faults accepted")
 
 
 def run_cyclictest(container, duration_s, cpu):
@@ -43,7 +46,7 @@ def run_load_window(container, duration_s, cpu, burst_n, start_load, stop_load,
     """
     stop = threading.Event()
     errors = []
-    counter = {"bursts": 0}
+    counter = {"bursts": 0, "accepted": 0}
     stats_path = start_load()
     worker = threading.Thread(target=_burst_loop,
                               args=(container, burst_n, stop, errors, counter),
@@ -58,7 +61,8 @@ def run_load_window(container, duration_s, cpu, burst_n, start_load, stop_load,
     stats = read_load_stats(stats_path) or {}
     result["load"] = {
         "fault_bursts": counter["bursts"],
-        "faults_injected": counter["bursts"] * burst_n,
+        "faults_requested": counter["bursts"] * burst_n,
+        "faults_accepted": counter["accepted"],
         "burst_errors": len(errors),
         "http_requests": int(stats.get("request_count", 0)),
         "http_errors": int(stats.get("error_count", 0)),
@@ -76,7 +80,8 @@ def _load_cells(row):
     if ld is None:
         return "- | -"
     errs = ld["burst_errors"] + ld["http_errors"]
-    return (f"{ld['fault_bursts']} ({ld['faults_injected']} faults) | "
+    return (f"{ld['fault_bursts']} ({ld['faults_accepted']}/{ld['faults_requested']} "
+            f"faults accepted) | "
             f"{ld['http_requests']} ({errs} errors)")
 
 
