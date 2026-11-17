@@ -1,5 +1,6 @@
 """Jitter lane: cyclictest latency alone and next to a loaded Medkit."""
 from __future__ import annotations
+import shlex
 import threading
 
 from benchmark.lib import cyclictest
@@ -23,8 +24,8 @@ def _burst_loop(container, burst_n, stop, errors):
 
 
 def run_cyclictest(container, duration_s, cpu):
-    out = dh.run(["docker", "exec", container, *cyclictest.build_args(duration_s, cpu)],
-                 timeout=duration_s + 120, merge_stderr=True)
+    out = dh.exec_via_file(container, shlex.join(cyclictest.build_args(duration_s, cpu)),
+                           timeout=duration_s + 120)
     return cyclictest.parse_summary(out), out
 
 

@@ -28,7 +28,7 @@ def build_args(duration_s, cpu):
 _ROW = re.compile(r"^(\d+)\s+(\d+)\s*$")
 _FIELD = re.compile(r"^#\s*(Min|Avg|Max) Latencies:\s*(\d+)")
 _OVERFLOW = re.compile(r"^#\s*Histogram Overflows:\s*(\d+)")
-_TOTAL = re.compile(r"^#\s*Total:\s*(\d+)")
+
 
 
 def _percentile_us(counts, overflow, q):
@@ -56,22 +56,19 @@ def parse_summary(text):
     counts = {}
     fields = {}
     overflow = 0
-    total = None
     for line in text.splitlines():
         m = _ROW.match(line.strip())
         if m:
             counts[int(m.group(1))] = int(m.group(2))
             continue
-        for rx, key in ((_FIELD, None), (_OVERFLOW, "overflow"), (_TOTAL, "total")):
+        for rx, key in ((_FIELD, None), (_OVERFLOW, "overflow"),):
             m = rx.match(line.strip())
             if not m:
                 continue
             if key is None:
                 fields[m.group(1).lower()] = int(m.group(2))
-            elif key == "overflow":
-                overflow = int(m.group(1))
             else:
-                total = int(m.group(1))
+                overflow = int(m.group(1))
     if not {"min", "avg", "max"} <= fields.keys():
         raise ValueError("no cyclictest summary (Min/Avg/Max Latencies) in output")
     buckets = [counts.get(i, 0) for i in range(max(counts) + 1)] if counts else []
@@ -79,6 +76,6 @@ def parse_summary(text):
     return {
         "min_us": fields["min"], "avg_us": fields["avg"], "max_us": fields["max"],
         "p99_us": p99, "p99_lower_bound": lower,
-        "samples": total if total is not None else sum(buckets) + overflow,
+        "samples": sum(buckets) + overflow,
         "overflow": overflow, "histogram_us": HISTOGRAM_US,
     }
