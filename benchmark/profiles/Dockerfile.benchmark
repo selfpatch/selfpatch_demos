@@ -11,21 +11,26 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM osrf/ros:jazzy-desktop
+# ros:jazzy-ros-base is multi-arch (amd64 and arm64); osrf/ros:jazzy-desktop is amd64 only.
+FROM ros:jazzy-ros-base AS deps
 ARG ROS2_MEDKIT_REF=main
 RUN apt-get update && apt-get install -y --no-install-recommends \
     heaptrack valgrind git python3-yaml python3-colcon-common-extensions \
     nlohmann-json3-dev libcpp-httplib-dev libsystemd-dev \
+    rt-tests curl procps binutils \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /ws
 RUN git clone --depth 1 --branch ${ROS2_MEDKIT_REF} \
     https://github.com/selfpatch/ros2_medkit.git src
 RUN git -C src rev-parse HEAD > /ws/gateway_sha
 RUN . /opt/ros/jazzy/setup.sh && apt-get update && rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y; \
+    rosdep install --from-paths src --ignore-src -r -y && \
     rm -rf /var/lib/apt/lists/*
+
+# Stage `deps` ends here: base image, apt packages, source checkout and rosdep.
+FROM deps AS build
 RUN . /opt/ros/jazzy/setup.sh && \
-    MAKEFLAGS='-j 2' colcon build --executor sequential --symlink-install \
+    MAKEFLAGS='-j 2' colcon build --executor sequential \
       --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DCMAKE_CXX_FLAGS="-fno-omit-frame-pointer -g" -DBUILD_TESTING=OFF
 COPY . /ws/benchmark
