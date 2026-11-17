@@ -35,10 +35,10 @@ fi
 python3 -m benchmark.scaler.topic_source &
 SRC_PID=$!
 
-# Start fault_manager_node in background on the same namespace.
+# fault_manager_node runs in the root namespace: the injector and the gateway
+# call /fault_manager/report_fault.
 ros2 run ros2_medkit_fault_manager fault_manager_node \
     --ros-args \
-    -r __ns:=/diagnostics \
     -r __node:=fault_manager \
     -p storage_type:=memory \
     -p confirmation_threshold:=-1 \
