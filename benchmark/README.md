@@ -1,12 +1,15 @@
 # Gateway Benchmark Harness
 
-A benchmark for the ros2_medkit gateway. It measures the gateway process's memory
-and CPU cost while it runs against a real or synthetic ROS 2 graph, and reports the
-numbers with statistical confidence (repeats and spread, not a single sample).
+A benchmark for the ros2_medkit runtime: the gateway and the fault manager. It
+measures their memory and CPU cost while they run against a real or synthetic ROS 2
+graph, and reports the numbers with statistical confidence (repeats and spread, not a
+single sample).
 
-It answers four questions:
+It answers these questions:
 
-- How much memory and CPU does the gateway use on a real stack?
+- How much memory and CPU do the gateway and the fault manager use, each and summed?
+- How much disk does the runtime take, and how fast does it grow?
+- Does it add scheduling latency to other processes on the same machine?
 - How does that cost grow as the ROS 2 graph gets larger?
 - Which gateway config setting costs the most?
 - Does the heap grow over time (a leak), and where?
@@ -24,6 +27,18 @@ It answers four questions:
 
 USS, PSS and RSS are read from `/proc/<pid>/smaps_rollup`; CPU is computed from the
 `utime`+`stime` counters in `/proc/<pid>/stat`.
+
+Every lane that samples `gateway_node` also samples `fault_manager_node` with the same
+metrics over the same window. Reports show the gateway, the fault manager and their
+**sum** (`USS sum`, `CPU sum`, `threads sum`); `summary.json` carries them as `fm_*` and
+`sum_*` keys. The steady-state gate covers both processes: a rising fault manager makes
+the repeat not-steady. The fault manager is found by its command line, not by name
+(`pgrep -x` cannot match names over 15 characters, and `ros2 run` puts a launcher in
+front of the node); the PID and command line of each sampled process are printed in the
+report and stored in `run_metadata.json` under `processes`.
+
+The synthetic lanes start the fault manager next to the gateway at its default settings
+(SQLite store). Set `BENCH_FAULT_MANAGER=0` to run the gateway alone.
 
 ## Method
 
@@ -87,6 +102,8 @@ The goal is numbers you can trust and compare, not a single reading.
 | `memcheck` | valgrind memcheck on a short controlled run: definitely/indirectly lost bytes. |
 | `load` | Footprint, CPU, threads and request latency (p50/p95) under M concurrent HTTP clients (off/light/heavy). |
 | `fault` | Snapshot-capture impact as a burst (peak memory/CPU, capture duration, recovery) vs fault count N, with and without rosbag. |
+| `disk` | Installed size of the Medkit packages, fault store growth, bytes per captured fault, ROS log growth. |
+| `jitter` | `cyclictest` scheduling latency alone and next to a loaded Medkit. |
 | `churn` | Leak-under-graph-churn gate: gateway USS slope on a static graph vs a churning graph (nodes recycled, bounded count). PASS/FAIL, exits 1 if memory grows under churn. |
 | `all` | Runs the above and writes one combined report. |
 
@@ -129,6 +146,105 @@ what transfers.
 - **fault** - peak memory/CPU and recovery of snapshot capture across a burst of N faults,
   with and without rosbag.
 - **churn** - PASS/FAIL leak gate: USS slope on a static graph vs a churning one.
+
+### disk
+
+```bash
+python -m benchmark.benchmark disk --faults 0,10,100,1000 --occurrences 1,10,50
+```
+
+Each scenario is a fresh container, so one store never carries over. Faults are reported
+at CRITICAL severity (they confirm at once) by `scaler/fault_flood.py`, from a source node
+that publishes one `std_msgs/String` (`--payload-bytes`, default 1024), so every fault
+captures a snapshot at the fault manager defaults. The flood waits for each capture to
+reach the store, so the capture queue (default depth 16, `reject_newest`) never drops one.
+
+| Section | What it measures |
+|---|---|
+| Installed size | `ros2_medkit*` directories of the install tree, per package and total, as built and stripped. The image is built RelWithDebInfo, so "installed" carries debug info. |
+| Distinct faults | Store growth for N distinct fault codes (default `0,10,100,1000`; the N=0 row must show zero growth) and the least-squares marginal cost per fault. `db used` is the SQLite page count minus free pages as a reader sees it, so a WAL file's high-water size does not inflate it; per-table bytes come from `dbstat` in `summary.json`. |
+| Occurrences | Reports of ONE code (default `1,10,50`) with the default `snapshots.recapture_cooldown_sec` (60) and with `0`. With cooldown 0 the count passes `snapshots.max_per_fault` (default 10), so the store must stop growing at the cap. |
+| Rosbag | Rosbag recording enabled (it is off by default; `storage_path` points to a directory the lane can measure), other settings default: bytes per fault when each fault gets its own recording and when a burst shares one. Recording rows are awaited until the directory size stops changing. |
+| Log growth | Growth of the ROS log directory (`~/.ros/log`) per scenario, and over an idle window (`--idle-s`, default 60) with no faults. |
+
+Fault store defaults used (ros2_medkit `docs/config/fault-manager.rst`): `storage_type`
+`sqlite` at `/var/lib/ros2_medkit/faults.db`, `snapshots.max_per_fault` 10,
+`snapshots.recapture_cooldown_sec` 60, `near_miss.max_per_fault` 200,
+`rosbag.max_bags_per_fault` 1, `rosbag.max_total_storage_mb` 500.
+
+### jitter
+
+```bash
+python -m benchmark.benchmark jitter --duration 120 --repeats 3
+```
+
+Runs `cyclictest` (rt-tests) in a container, first alone, then next to Medkit: gateway and
+fault manager, repeated bursts of `--burst` faults, and the heavy HTTP client load of the
+`load` lane for the whole run. Fixed parameters (also printed in the report):
+
+```
+cyclictest -m -p 80 -i 1000 -t 1 -a <cpu> -h 2000 -q -D <duration>s
+```
+
+`-m` locks memory, `-p 80` is `SCHED_FIFO` priority 80, `-i 1000` a 1 ms wake-up interval,
+one thread pinned to `--cpu` (default 2), `-h 2000` a 2000 us histogram. The report gives
+min, avg, p99 and max latency per run. p99 comes from the histogram; samples above the
+range are counted as `overflow`, and a p99 that falls in the overflow is printed as
+`>=2000`. The container gets `SYS_NICE` and an `rtprio` ulimit so `SCHED_FIFO` works.
+
+The report records the kernel and whether it is PREEMPT_RT (`run_metadata.json` keys
+`kernel`, `kernel_version`, `preempt_rt`). When it is not, the report opens with a warning:
+the numbers show the scheduling cost of Medkit on that host and do not represent a
+real-time target. A container shares the host kernel, so a WSL2 or desktop kernel is not
+real-time. Run the lane on an idle machine: host load is recorded, and a busy host moves
+the baseline too.
+
+### Extra plugin and extra process (footprint)
+
+The footprint lane can run the gateway with more plugins and start one extra process in the
+same container, so a plugin fed by a publisher can be measured. It needs the synthetic
+substrate (`--demo synthetic`); the turtlebot3 demo starts its gateway from its own launch
+file.
+
+```bash
+python -m benchmark.benchmark footprint --demo synthetic --entities 10 --repeats 1 \
+  --plugin topic_beacon=/ws/install/ros2_medkit_topic_beacon/lib/ros2_medkit_topic_beacon/libros2_medkit_topic_beacon.so \
+  --plugin-param topic_beacon.allow_new_entities=true \
+  --gateway-param discovery.mode=hybrid \
+  --extra-cmd 'ros2 topic pub -r 2 /ros2_medkit/discovery ros2_medkit_msgs/msg/MedkitDiscoveryHint "{entity_id: bench_beacon}"' \
+  --expect-entity bench_beacon
+```
+
+`--plugin NAME=PATH` and `--plugin-param NAME.KEY=VALUE` are repeatable (VALUE is read as
+YAML), `--gateway-param KEY=VALUE` sets a gateway parameter, `--extra-cmd` is one command
+line started in the container. `--expect-entity ID` checks after the window that the
+gateway lists the entity; a missing one marks the run `partial`. The sampled USS, CPU and
+threads of the gateway then include the plugin.
+
+## Running on an arm64 host
+
+Every image the harness builds starts from a multi-arch base: `ros:jazzy-ros-base`
+(`Dockerfile.benchmark`, and the turtlebot3 demo image the footprint lane uses). On an
+arm64 host Docker resolves them to native arm64 images, so the lanes run unchanged:
+
+```bash
+uname -m                                   # aarch64
+python -m benchmark.benchmark footprint --demo synthetic --repeats 3
+python -m benchmark.benchmark disk
+python -m benchmark.benchmark jitter
+```
+
+To check the build from another host, build the stage that holds the apt and rosdep
+installs under emulation (needs `qemu-user-static` binfmt handlers):
+
+```bash
+docker buildx build --platform linux/arm64 --target deps \
+  -f benchmark/profiles/Dockerfile.benchmark benchmark
+```
+
+The jitter lane needs a kernel with `SCHED_FIFO` available to containers; use a PREEMPT_RT
+kernel on the board for numbers that represent a real-time target. CPU, `CLK_TCK` and the
+allocator are read inside the container, so nothing is x86-specific.
 
 ## What to optimize
 
