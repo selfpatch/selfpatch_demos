@@ -1,6 +1,6 @@
 services:
   bench:
-    image: ros2-medkit-benchmark:local
+    image: "${BENCH_IMAGE:-ros2-medkit-benchmark:local}"
     build:
       context: ..
       dockerfile: profiles/Dockerfile.benchmark
@@ -28,7 +28,7 @@ services:
   # fault lane: gateway_node + fault_manager_node, no synthetic graph.
   # BENCH_ROSBAG=1 enables rosbag capture on snapshot (off by default).
   bench-fault:
-    image: ros2-medkit-benchmark:local
+    image: "${BENCH_IMAGE:-ros2-medkit-benchmark:local}"
     build:
       context: ..
       dockerfile: profiles/Dockerfile.benchmark
@@ -47,7 +47,7 @@ services:
   # BENCH_ROSBAG=1 enables rosbag recording; BENCH_COOLDOWN sets the
   # snapshot recapture cooldown in seconds (unset = the fault manager default).
   bench-disk:
-    image: ros2-medkit-benchmark:local
+    image: "${BENCH_IMAGE:-ros2-medkit-benchmark:local}"
     build:
       context: ..
       dockerfile: profiles/Dockerfile.benchmark
@@ -68,7 +68,7 @@ services:
   # jitter lane: cyclictest runs next to Medkit (BENCH_JITTER_MEDKIT=1) or alone.
   # SYS_NICE and rtprio allow cyclictest to run as SCHED_FIFO.
   bench-jitter:
-    image: ros2-medkit-benchmark:local
+    image: "${BENCH_IMAGE:-ros2-medkit-benchmark:local}"
     build:
       context: ..
       dockerfile: profiles/Dockerfile.benchmark

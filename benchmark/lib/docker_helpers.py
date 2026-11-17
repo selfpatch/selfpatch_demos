@@ -13,6 +13,7 @@
 # limitations under the License.
 """docker/compose wrappers + gateway PID resolution inside a container."""
 from __future__ import annotations
+import os
 import subprocess
 import time
 import uuid
@@ -50,7 +51,9 @@ def compose(args, file, project):
 def compose_up(file, project, env=None, service=None):
     # Bring up ONLY the target service (+ its depends_on) so sibling services in
     # the compose file (e.g. a fixed-container-name web UI) don't start/conflict.
-    args = ["up", "-d", "--build"]
+    # BENCH_IMAGE names a prebuilt image: building would overwrite its tag.
+    prebuilt = bool((env if env is not None else os.environ).get("BENCH_IMAGE"))
+    args = ["up", "-d"] if prebuilt else ["up", "-d", "--build"]
     if service:
         args.append(service)
     run(compose(args, file, project), env=env, timeout=_BUILD_TIMEOUT)

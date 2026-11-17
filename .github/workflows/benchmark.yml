@@ -78,6 +78,9 @@ jobs:
           # sees scaling AND footprint; separate timestamp dirs would leave
           # compare looking at only the most recent lane.
           echo "BENCH_RUN_DIR=ci-${{ github.run_id }}" >> "$GITHUB_ENV"
+          # ci.json was measured without the fault manager; compare refuses a run
+          # measured with it. Both lanes run the gateway alone.
+          echo "BENCH_FAULT_MANAGER=0" >> "$GITHUB_ENV"
 
       - name: Run scaling lane
         run: |

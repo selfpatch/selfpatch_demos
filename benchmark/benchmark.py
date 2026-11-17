@@ -220,6 +220,8 @@ def _footprint_substrate(args):
     if extra:
         raise SystemExit("--plugin, --gateway-param and --extra-cmd need --demo synthetic: "
                          "the turtlebot3 demo starts its gateway from its own launch file")
+    if os.environ.get("BENCH_IMAGE"):
+        raise SystemExit("--image applies to --demo synthetic only")
     demo = turtlebot3.TURTLEBOT3
     env = dict(os.environ, COMPOSE_PROFILES=demo.compose_profile)
     return (str(REPO / demo.compose_file), demo.gateway_service, demo.gateway_proc,
@@ -1249,6 +1251,10 @@ def main():
                    help="Write this lane into benchmark/results/<run-dir> instead "
                         "of a fresh timestamp dir, so multiple lanes can share one "
                         "run dir for a single 'compare'.")
+    p.add_argument("--image", default=None,
+                   help="Run the synthetic lanes from this prebuilt image instead of "
+                        "building ros2-medkit-benchmark:local (it must hold the harness "
+                        "at /ws/benchmark).")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp):
@@ -1401,6 +1407,8 @@ def main():
     ub.set_defaults(func=cmd_update_baseline)
 
     args = p.parse_args()
+    if args.image:
+        os.environ["BENCH_IMAGE"] = args.image
     args.func(args)
 
 

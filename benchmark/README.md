@@ -239,6 +239,13 @@ line started in the container. `--expect-entity ID` checks after the window that
 gateway lists the entity; a missing one marks the run `partial`. The sampled USS, CPU and
 threads of the gateway then include the plugin.
 
+### A prebuilt image (synthetic lanes)
+
+`--image TAG` (before the lane name) runs the synthetic lanes from a prebuilt image instead of
+building `ros2-medkit-benchmark:local`; compose does not build it. The image must hold the
+harness at `/ws/benchmark`, so derive it `FROM ros2-medkit-benchmark:local` under its own tag.
+It does not apply to `--demo turtlebot3`.
+
 ## Running on an arm64 host
 
 `Dockerfile.benchmark` and the turtlebot3 demo image start from the multi-arch base
