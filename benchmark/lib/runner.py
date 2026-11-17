@@ -181,7 +181,7 @@ def _is_steady(out, prefix=""):
     return True, None
 
 
-def _start_load_in_container(container, level, duration, port, api_base):
+def _start_load_in_container(container, level, duration, port, api_base, cpus=None):
     """Start the in-container load generator as a detached background process.
 
     The load_gen module lives at /ws/benchmark/scaler/load_gen.py inside the
@@ -200,8 +200,9 @@ def _start_load_in_container(container, level, duration, port, api_base):
     ])
     if "ok" not in check:
         return None
+    pin = f"taskset -c {cpus} " if cpus else ""
     cmd = (
-        f"python3 /ws/benchmark/scaler/load_gen.py"
+        f"{pin}python3 /ws/benchmark/scaler/load_gen.py"
         f" --level {level}"
         f" --duration {int(duration + 5)}"
         f" --base-url http://localhost:{port}{api_base}"

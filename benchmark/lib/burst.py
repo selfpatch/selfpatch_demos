@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -128,15 +129,19 @@ def summarize_burst(
     residual_uss_delta_kib = post[-1].uss_kib - baseline_uss_kib
 
     # Settle: time from the trigger until USS stays within the band of its final
-    # value. A process that keeps what the burst created (an in-memory store)
+    # value; None when only the last sample is inside it (the series never
+    # settled). A process that keeps what the burst created (an in-memory store)
     # never recovers to baseline but does settle.
+    tail = 0
     settle_at = post[-1].t
     for s in reversed(post):
         if abs(s.uss_kib - post[-1].uss_kib) > band:
             break
         settle_at = s.t
-    settle_s = settle_at - t_trigger
-    retained = abs(residual_uss_delta_kib) > band
+        tail += 1
+    settle_s = settle_at - t_trigger if tail >= 2 else None
+    # Retained: USS ends above its baseline by more than the band.
+    retained = residual_uss_delta_kib > band
 
     return {
         "baseline_uss_kib": baseline_uss_kib,
@@ -187,8 +192,12 @@ def sample_burst_procs(
 
         def _tick():
             load = host_load_fn()
-            for name, pid in pids.items():
-                s = sample_once(read_fn, pid, load)
+            # Read the processes in parallel so their samples share one instant.
+            with ThreadPoolExecutor(max_workers=len(pids)) as pool:
+                futs = {name: pool.submit(sample_once, read_fn, pid, load)
+                        for name, pid in pids.items()}
+                got = {name: f.result() for name, f in futs.items()}
+            for name, s in got.items():
                 write_sample_row(writers[name], prev[name], s, clk_tck)
                 files[name].flush()
                 samples[name].append(s)

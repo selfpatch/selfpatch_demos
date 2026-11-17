@@ -293,6 +293,7 @@ def render_scaling_markdown(rows, verdict, fit, meta=None):
         warn = _high_load_warning(meta)
         if warn:
             lines += [warn, ""]
+    lines += process_meta_lines(meta)
     lines += [f"**Verdict:** {verdict}", "",
               f"_fit: USS ~ entities^{fit['exponent']:.2f}, R2={fit['r2']:.2f}, "
               f"CI [{fit.get('ci_lo', 0):.2f},{fit.get('ci_hi', 0):.2f}]_", "",
@@ -316,6 +317,7 @@ def render_sweep_markdown(cells, meta=None):
         warn = _high_load_warning(meta)
         if warn:
             lines += [warn, ""]
+    lines += process_meta_lines(meta)
     lines += ["| Config | steady | USS med | USS IQR | CPU-cores | dUSS vs default |",
               "|---|---|---|---|---|---|"]
     for c in cells:
@@ -517,13 +519,19 @@ def render_fault_markdown(rows: list, meta: dict = None) -> str:
         for r in ok_rows:
             lines.append(
                 f"| {r['n']} | {r['mode']} | {r['fm_peak_uss_delta_mib']:.2f} MiB | "
-                f"{r['fm_peak_cpu_cores']:.2f} | {r['fm_settle_s']:.2f} | "
+                f"{r['fm_peak_cpu_cores']:.2f} | {'never' if r['fm_settle_s'] is None else format(r['fm_settle_s'], '.2f')} | "
                 f"{r['fm_residual_mib']:.2f} MiB | "
                 f"{'yes' if r['fm_retained'] else 'no'} | "
                 f"{r['sum_peak_uss_delta_mib']:.2f} MiB | {r['sum_peak_cpu_cores']:.2f} |")
+        offs = [r["sampler_offset_s"] for r in ok_rows if r.get("sampler_offset_s") is not None]
+        if offs:
+            lines += ["", f"_The two processes are read in parallel; their sample times differ by "
+                          f"a median of {max(offs) * 1000:.0f} ms at most (worst cell)._"]
+        lines += ["", "_rosbag got/N = recordings found in the rosbag directory over faults "
+                  "injected; a burst shares one recording, so fewer than N is expected._"]
         lines += ["", "_settle = seconds from the trigger until the fault manager's USS stays "
-                  "within the recovery band of its final value; retained = it ends above "
-                  "its baseline by more than that band (the store keeps the faults), so it "
+                  "within the recovery band of its final value (never = it did not settle); "
+                  "retained = it ends above its baseline by more than that band (the store keeps the faults), so it "
                   "does not recover._"]
     lines.append("")
 

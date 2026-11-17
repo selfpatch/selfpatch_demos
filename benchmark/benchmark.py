@@ -165,6 +165,10 @@ def check_host_load(strict=False):
     return {"host_load1": load1, "high_host_load": high}
 
 
+def runner_fm_sampled(meta):
+    return dh.FAULT_MANAGER_EXE in (meta.get("processes") or {})
+
+
 def _write_metadata(out_dir, args, cell_meta, refresh_ms):
     """Write run_metadata.json for any lane.
 
@@ -183,6 +187,13 @@ def _write_metadata(out_dir, args, cell_meta, refresh_ms):
     # and propagate the high_host_load flag.
     meta["host_load1"] = load_info["host_load1"]
     meta["high_host_load"] = load_info["high_host_load"]
+    # What was measured: compare refuses a baseline with a different setup.
+    # Only the footprint and fault lanes pick their substrate with --demo; the
+    # others always run the synthetic image.
+    substrate = getattr(args, "demo", "unknown") if out_dir.name in ("footprint", "fault") \
+        else "synthetic"
+    meta["setup"] = {"demo": substrate,
+                     "fault_manager": runner_fm_sampled(meta)}
     (out_dir / "run_metadata.json").write_text(json.dumps(meta, indent=2, default=str))
     return meta
 
@@ -222,9 +233,13 @@ def cmd_footprint(args, root=None):
     file, service, proc, api_base, env, refresh_ms = _footprint_substrate(args)
     expect = getattr(args, "expect_entity", None) or []
     probe_fn = None
-    if expect:
-        probe_fn = lambda c: extras.check_entities(  # noqa: E731
-            c, GATEWAY_PORT, api_base, dh.curl_status_body, expect)
+    plugins = [spec.split("=", 1)[1] for spec in (getattr(args, "plugin", None) or [])]
+    extra_cmd = getattr(args, "extra_cmd", None)
+    if expect or plugins or extra_cmd:
+        probe_fn = lambda c: extras.check_extras(  # noqa: E731
+            c, plugins, bool(extra_cmd), expect,
+            lambda: extras.check_entities(c, GATEWAY_PORT, api_base, dh.curl_status_body,
+                                          expect))
     reps, status = [], "ok"
     for rep in range(args.repeats):
         try:
@@ -245,7 +260,7 @@ def cmd_footprint(args, root=None):
     first_meta = reps[0].get("_meta", {}) if reps else {}
     _write_metadata(out, args, first_meta, refresh_ms)
     probes = [r["probe"] for r in reps if r.get("probe")]
-    if probes and any(p["missing"] for p in probes):
+    if any(p.get("problems") for p in probes):
         status = "partial"
     (out / "summary.json").write_text(json.dumps(
         {"status": status, "cell": cell, "probes": probes}, indent=2, default=str))
@@ -256,9 +271,16 @@ def cmd_footprint(args, root=None):
             meta["threads"] = first_meta["threads"]
         md = report.render_footprint_markdown([cell], meta)
         for p in probes[:1]:
-            md += ("\n**Extra entities the gateway lists:** "
-                   f"found {p['found']}, missing {p['missing']} "
-                   f"({p['listed_total']} entities listed in total)\n")
+            if "found" in p:
+                md += ("\n**Extra entities the gateway lists:** "
+                       f"found {p['found']}, missing {p['missing']} "
+                       f"({p['listed_total']} entities listed in total)\n")
+            if "extra_process_alive" in p:
+                md += f"\n**Extra process alive at the end of the window:** {p['extra_process_alive']}\n"
+            if "plugin_load_failures" in p:
+                md += f"\n**Plugins that failed to load:** {p['plugin_load_failures'] or 'none'}\n"
+            for prob in p.get("problems", []):
+                md += f"\n**PROBLEM: {prob}; the lane is partial.**\n"
         (out / "report.md").write_text(md)
         report.render_footprint_chart([cell], str(out / "footprint.png"))
     print(f"footprint: {status} -> {out}")
@@ -689,6 +711,9 @@ def _fault_burst(container, n, mode, out, tag, args):
                g.num_threads + f.num_threads, g.host_load1)
         for g, f in zip(by_proc["gateway"], by_proc["fault_manager"])]
 
+    offsets = sorted(abs(g.t - f.t) for g, f in zip(by_proc["gateway"], by_proc["fault_manager"]))
+    sampler_offset_s = offsets[len(offsets) // 2] if offsets else 0.0
+
     results = {}
     for name, samples in by_proc.items():
         # Baseline: median USS over pre-trigger samples.
@@ -704,21 +729,14 @@ def _fault_burst(container, n, mode, out, tag, args):
     burst_result["fault_manager"] = results["fault_manager"]
     burst_result["sum"] = results["sum"]
     burst_result["processes"] = runner._process_meta(container, pid, fm_pid)
+    burst_result["sampler_offset_s"] = sampler_offset_s
 
-    # Count rosbag WARNs from container logs.
+    # Recordings that reached disk: bag entries in the fault manager's rosbag directory.
     rosbag_got = 0
     if mode == "rosbag":
-        try:
-            import subprocess
-            log_result = subprocess.run(
-                ["docker", "logs", container],
-                capture_output=True, text=True,
-            )
-            log_text = log_result.stdout + log_result.stderr
-            from benchmark.lib.fault_injector import count_rosbag_warns
-            rosbag_got = count_rosbag_warns(log_text, n)
-        except Exception:
-            rosbag_got = 0
+        text = dh.exec_via_file(container, "ls -1 /var/lib/ros2_medkit/rosbags 2>/dev/null | wc -l",
+                                timeout=60, shell="sh")
+        rosbag_got = int(text.strip().splitlines()[-1])
 
     return burst_result, rosbag_got
 
@@ -800,8 +818,8 @@ def cmd_fault(args, root=None):
 
 
 _DISK_SERVICE = "bench-disk"
-_BUILD_NOTE = ("Built RelWithDebInfo (-g): 'installed' includes debug info, "
-               "'stripped' is the same tree after strip --strip-unneeded")
+_BUILD_NOTE = ("Built RelWithDebInfo (-g): the full install carries debug info "
+               "and static libraries; 'stripped' strips every ELF file and static library")
 
 
 def cmd_disk(args, root=None):
@@ -825,7 +843,7 @@ def cmd_disk(args, root=None):
         try:
             res = disk.run_scenario(SYN_COMPOSE, f"bench_disk_{tag}", _DISK_SERVICE,
                                     dict(base_env, **env_extra), flood_args,
-                                    idle_s, expect_rosbags)
+                                    idle_s, expect_rosbags, window_s=args.window_s)
             (out / f"{tag}.json").write_text(json.dumps(res, indent=2, default=str))
             return {"growth": disk.growth(res)}
         except Exception as exc:
@@ -884,8 +902,7 @@ def cmd_disk(args, root=None):
             rosbag.append(r)
     report_data["rosbag"] = rosbag
 
-    if args.idle_s:
-        report_data["idle"] = scenario("idle", {}, idle_s=args.idle_s)
+    report_data["idle"] = scenario("idle", {}, idle_s=args.idle_s)
 
     meta = _write_metadata(out, args, first_meta, refresh_ms="n/a")
     (out / "summary.json").write_text(
@@ -910,13 +927,17 @@ def cmd_jitter(args, root=None):
               "cpu": args.cpu, "duration_s": int(args.duration)}
     rows, status, first_meta = [], "ok", {}
     for run in range(1, args.repeats + 1):
-        for scenario, medkit in (("baseline (no Medkit)", False), ("Medkit under load", True)):
+        for key, scenario, medkit, load in (
+                ("baseline", "baseline (no load, no Medkit)", False, False),
+                ("harness", "harness load, no Medkit", False, True),
+                ("medkit", "Medkit + the same load", True, True)):
             project = f"bench_jitter_{int(medkit)}"
             env = dict(os.environ, BENCH_JITTER_MEDKIT="1" if medkit else "0")
             dh.compose_down(SYN_COMPOSE, project)
             dh.compose_up(SYN_COMPOSE, project, env=env, service=_JITTER_SERVICE)
             try:
                 container = dh.service_container(SYN_COMPOSE, project, _JITTER_SERVICE)
+                pid = fm_pid = None
                 if medkit:
                     if not runner.ready_in(container, GATEWAY_PORT, "/api/v1"):
                         raise RuntimeError("gateway never became ready")
@@ -928,22 +949,32 @@ def cmd_jitter(args, root=None):
                         raise RuntimeError("warmup gate did not converge")
                     if not first_meta:
                         first_meta["processes"] = runner._process_meta(container, pid, fm_pid)
+                if load:
+                    cpus = jitter.load_cpus(container, args.cpu)
+                    params["load_cpus"] = cpus
                     res, raw = jitter.run_load_window(
                         container, args.duration, args.cpu, args.burst,
                         lambda: runner._start_load_in_container(
-                            container, "heavy", args.duration + 30, GATEWAY_PORT, "/api/v1"),
+                            container, "heavy", args.duration + 30, GATEWAY_PORT, "/api/v1",
+                            cpus=cpus),
                         lambda: runner._stop_load_in_container(container),
-                        lambda path: runner._read_load_stats(container, path))
+                        lambda path: runner._read_load_stats(container, path), cpus=cpus)
                 else:
                     res, raw = jitter.run_cyclictest(container, args.duration, args.cpu)
-                (out / f"run{run}_{int(medkit)}.txt").write_text(raw)
+                if medkit:
+                    for name, p in (("gateway", pid), ("fault manager", fm_pid)):
+                        if p is None or dh.read_cmdline(container, p) in ("", "unknown"):
+                            raise RuntimeError(f"{name} was not running at the end of the window")
+                (out / f"run{run}_{key}.txt").write_text(raw)
                 rows.append({"scenario": scenario, "run": run, **res})
             except Exception as exc:
                 status = "partial"
-                (out / f"run{run}_{int(medkit)}.error").write_text(str(exc))
+                (out / f"run{run}_{key}.error").write_text(str(exc))
             finally:
                 dh.compose_down(SYN_COMPOSE, project)
     meta = _write_metadata(out, args, first_meta, refresh_ms="n/a")
+    meta["affinity"] = {"cyclictest_cpu": args.cpu, "load_cpus": params.get("load_cpus")}
+    (out / "run_metadata.json").write_text(json.dumps(meta, indent=2, default=str))
     (out / "summary.json").write_text(json.dumps(
         {"status": status, "rows": rows, "preempt_rt": meta["preempt_rt"],
          "kernel": meta["kernel"], "params": params}, indent=2, default=str))
@@ -1038,7 +1069,8 @@ def _find_run_dir(run_arg):
 
 
 def cmd_compare(args):
-    from benchmark.lib.compare import load_baseline, host_matches, extract_metrics, diff
+    from benchmark.lib.compare import (load_baseline, host_matches, extract_metrics, diff,
+                                       setup_mismatch)
 
     run_dir = _find_run_dir(args.run)
     baseline_path = Path(args.baseline)
@@ -1071,6 +1103,17 @@ def cmd_compare(args):
     if not ok:
         print(f"ERROR: host mismatch - {reason}\n"
               "Cannot compare runs from different hardware.", flush=True)
+        raise SystemExit(2)
+
+    mismatches = []
+    for name, m in lane_metas:
+        why = setup_mismatch(baseline, name, m.get("setup"))
+        if why:
+            mismatches.append(f"{name}: {why}")
+    if mismatches:
+        print("ERROR: the run was measured with a different setup than the baseline:\n  "
+              + "\n  ".join(mismatches) + "\nRegenerate the baseline with `update-baseline` "
+              "from a run with the same setup.", flush=True)
         raise SystemExit(2)
 
     any_regression = False
@@ -1133,6 +1176,11 @@ def cmd_update_baseline(args):
         if lane_dir.is_dir() and meta_path.exists():
             lane_shas[lane_dir.name] = json.loads(
                 meta_path.read_text()).get("gateway_sha", "unknown")
+    lane_setups = {}
+    for lane_dir in sorted(run_dir.iterdir()):
+        meta_path = lane_dir / "run_metadata.json"
+        if lane_dir.is_dir() and meta_path.exists():
+            lane_setups[lane_dir.name] = json.loads(meta_path.read_text()).get("setup")
     real_shas = sorted({s for s in lane_shas.values() if s != "unknown"})
     gateway_sha = real_shas[0] if real_shas else "unknown"
     if lane_shas and all(s != "unknown" for s in lane_shas.values()) and len(real_shas) == 1:
@@ -1174,6 +1222,9 @@ def cmd_update_baseline(args):
         metrics = extract_metrics(lane, summary)
         if metrics:
             baseline[lane] = {k: v for k, v in metrics.items() if v is not None}
+            lane_setup = lane_setups.get(lane)
+            if lane_setup:
+                baseline.setdefault("setup", {})[lane] = lane_setup
 
     out_dir = Path(__file__).resolve().parent / "baseline"
     out_dir.mkdir(exist_ok=True)
@@ -1285,8 +1336,11 @@ def main():
                     help="Reports of ONE fault code (past snapshots.max_per_fault=10).")
     dk.add_argument("--rosbag-faults", dest="rosbag_faults", type=int, default=5,
                     help="Faults reported in each rosbag scenario.")
-    dk.add_argument("--idle-s", dest="idle_s", type=float, default=60.0,
-                    help="Window for the no-fault log growth scenario (0 = skip).")
+    dk.add_argument("--window-s", dest="window_s", type=float, default=30.0,
+                    help="Shortest time between a scenario's two probes (the same for every "
+                         "scenario, N=0 included).")
+    dk.add_argument("--idle-s", dest="idle_s", type=float, default=0.0,
+                    help="Window of the no-fault scenario when longer than --window-s.")
     dk.add_argument("--payload-bytes", dest="payload_bytes", type=int, default=1024,
                     help="Size of the String the source node publishes (captured per fault).")
     dk.set_defaults(func=cmd_disk, demo="synthetic")

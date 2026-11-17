@@ -35,10 +35,21 @@ metrics over the same window. Reports show the gateway, the fault manager and th
 the repeat not-steady. The fault manager is found by its command line, not by name
 (`pgrep -x` cannot match names over 15 characters, and `ros2 run` puts a launcher in
 front of the node); the PID and command line of each sampled process are printed in the
-report and stored in `run_metadata.json` under `processes`.
+report (footprint, fault, scaling, sweep and jitter) and stored in `run_metadata.json` under
+`processes`.
 
 The synthetic lanes start the fault manager next to the gateway at its default settings
-(SQLite store). Set `BENCH_FAULT_MANAGER=0` to run the gateway alone.
+(SQLite store). Set `BENCH_FAULT_MANAGER=0` to run the gateway alone. The fault manager is
+itself an app the gateway lists, so with it a synthetic graph shows one entity more (13
+instead of 12 for 10 nodes), which moves the "Discovered entities" axis of `scaling` and the
+per-entity values. `run_metadata.json` records `setup` (substrate and whether the fault
+manager was sampled) and `compare` refuses a baseline measured with a different setup;
+`baseline/ci.json` was measured without the fault manager, so a CI comparison needs
+`BENCH_FAULT_MANAGER=0` or a regenerated baseline (`update-baseline`).
+
+The gateway and the fault manager are judged separately: an unsteady fault manager keeps
+the gateway's steady repeats, and a process that is not sampled over the whole window makes
+the lane `partial`.
 
 ## Method
 
@@ -161,11 +172,11 @@ reach the store, so the capture queue (default depth 16, `reject_newest`) never 
 
 | Section | What it measures |
 |---|---|
-| Installed size | `ros2_medkit*` directories of the install tree, per package and total, as built and stripped. The image is built RelWithDebInfo, so "installed" carries debug info. |
-| Distinct faults | Store growth for N distinct fault codes (default `0,10,100,1000`; the N=0 row must show zero growth) and the least-squares marginal cost per fault. `db used` is the SQLite page count minus free pages as a reader sees it, so a WAL file's high-water size does not inflate it; per-table bytes come from `dbstat` in `summary.json`. |
+| Installed size | `ros2_medkit*` directories of the install tree, per package and total: the full install as built (RelWithDebInfo, so it carries debug info and static libraries), the same with every ELF file and static library stripped, and the runtime set (without the integration-test and cmake packages, headers, static libraries and the OPC UA tool data), as built and stripped. The report lists the exclusions. |
+| Distinct faults | Store growth for N distinct fault codes (default `0,10,100,1000`) over the same `--window-s` for every row, N=0 included, after the start-up log flush. Columns: `db used` (SQLite pages minus free pages, logical), the db file, the WAL and shm files, and `total on disk` (all store files). The fault manager enables WAL with no size limit or truncating checkpoint (`sqlite_fault_storage.cpp`, `PRAGMA journal_mode=WAL`), so the WAL keeps its high-water size while it runs and dominates small stores; the lane reports it instead of hiding it. Per-table bytes come from `dbstat` in the scenario JSON. |
 | Occurrences | Reports of ONE code (default `1,10,50`) with the default `snapshots.recapture_cooldown_sec` (60) and with `0`. Each report is followed by a clear, so the next one is a new occurrence, and `snapshots.retain_on_clear` is on so the cleared occurrences keep their snapshots. With cooldown 0 the count passes `snapshots.max_per_fault` (default 10), so the store stops growing at the cap while the capture ids keep rising. A clear drops the code's cooldown entry in the fault manager, so both variants capture every occurrence. |
-| Rosbag | Rosbag recording enabled (it is off by default; `storage_path` points to a directory the lane can measure), other settings default: bytes per fault when each fault gets its own recording and when a burst shares one. Recording rows are awaited until the directory size stops changing. |
-| Log growth | Growth of the ROS log directory (`~/.ros/log`) per scenario, and over an idle window (`--idle-s`, default 60) with no faults. |
+| Rosbag | Rosbag recording enabled (it is off by default; `storage_path` points to a directory the lane can measure), other settings default: bytes per fault when each fault gets its own recording and when a burst shares one. Recordings are the bag files in the rosbag directory (a shared burst recording counts once); the lane waits until the directory size stops changing. |
+| Log growth | Growth of the ROS log directory (`~/.ros/log`) over each scenario's window. The probe waits until the log size is steady (the start-up flush is over), so the idle row is a rate, not the flush. |
 
 Fault store defaults used (ros2_medkit `docs/config/fault-manager.rst`): `storage_type`
 `sqlite` at `/var/lib/ros2_medkit/faults.db`, `snapshots.max_per_fault` 10,
@@ -178,9 +189,16 @@ Fault store defaults used (ros2_medkit `docs/config/fault-manager.rst`): `storag
 python -m benchmark.benchmark jitter --duration 120 --repeats 3
 ```
 
-Runs `cyclictest` (rt-tests) in a container, first alone, then next to Medkit: gateway and
-fault manager, repeated bursts of `--burst` faults, and the heavy HTTP client load of the
-`load` lane for the whole run. Fixed parameters (also printed in the report):
+Runs `cyclictest` (rt-tests) in a container in three scenarios: alone (baseline); with the
+load drivers and no Medkit (the cost of the harness itself); and next to Medkit (gateway and
+fault manager) under the same load. The load is repeated bursts of `--burst` faults
+(`ros2 service call` processes) and the heavy HTTP client load of the `load` lane, for the
+whole run. Compare the second and third rows to see what Medkit adds beyond the drivers. The
+drivers are pinned (`taskset`) to every CPU except cyclictest's; the CPUs are in the report
+and in `run_metadata.json` (`affinity`). The report counts the bursts, the faults the fault
+manager accepted and the HTTP requests and errors of each loaded window. The fault manager
+runs with the in-memory store (`storage_type: memory`), so no SQLite writes happen in this
+lane. Fixed parameters (also printed in the report):
 
 ```
 cyclictest -m -p 80 -i 1000 -t 1 -a <cpu> -h 2000 -q -D <duration>s
@@ -223,9 +241,12 @@ threads of the gateway then include the plugin.
 
 ## Running on an arm64 host
 
-Every image the harness builds starts from a multi-arch base: `ros:jazzy-ros-base`
-(`Dockerfile.benchmark`, and the turtlebot3 demo image the footprint lane uses). On an
-arm64 host Docker resolves them to native arm64 images, so the lanes run unchanged:
+`Dockerfile.benchmark` and the turtlebot3 demo image start from the multi-arch base
+`ros:jazzy-ros-base`, which has an arm64 manifest entry. Only the `deps` stage of
+`Dockerfile.benchmark` (apt and rosdep, up to `All required rosdeps installed successfully`)
+was built for arm64, under emulation. The ros2_medkit compile stage and the turtlebot3 image
+were not built for arm64, and no lane has run on arm64 hardware. On an arm64 host the
+commands below are expected to work unchanged:
 
 ```bash
 uname -m                                   # aarch64

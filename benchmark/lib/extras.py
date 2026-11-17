@@ -1,3 +1,16 @@
+# Copyright 2026 bburda
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """Extra gateway plugins and one extra process for the footprint lane."""
 from __future__ import annotations
 import json
@@ -71,3 +84,39 @@ def check_entities(container, port, api_base, curl, expected):
             "found": sorted(set(expected) & found),
             "missing": sorted(set(expected) - found),
             "listed_total": len(found)}
+
+
+_EXTRA_PID_FILE = "/tmp/extra_cmd.pid"
+
+
+def check_extras(container, plugin_paths, has_extra_cmd, expected_entities, entity_check,
+                 run=None):
+    """Did the extras survive the window: plugins loaded, the extra process still alive.
+
+    ``entity_check`` returns the entity probe dict (or None). A plugin the gateway
+    logged as failed to load, a dead extra process or a missing entity are
+    ``problems``; the lane is partial when there is one.
+    """
+    from benchmark.lib import docker_helpers as dh
+    run = run or dh.run
+    problems = []
+    out = {"problems": problems}
+    if expected_entities:
+        ent = entity_check()
+        out.update(ent)
+        if ent["missing"]:
+            problems.append(f"entities not listed: {', '.join(ent['missing'])}")
+    if plugin_paths:
+        logs = run(["docker", "logs", container], merge_stderr=True)
+        failed = [p for p in plugin_paths if f"Failed to load plugin from {p}" in logs]
+        out["plugin_load_failures"] = failed
+        problems += [f"plugin failed to load: {p}" for p in failed]
+    if has_extra_cmd:
+        try:
+            run(["docker", "exec", container, "sh", "-c",
+                 f"kill -0 $(cat {_EXTRA_PID_FILE})"])
+            out["extra_process_alive"] = True
+        except RuntimeError:
+            out["extra_process_alive"] = False
+            problems.append("the extra process exited during the run")
+    return out

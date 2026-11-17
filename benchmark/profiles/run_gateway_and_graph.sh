@@ -40,6 +40,7 @@ fi
 # One extra process in the same container (footprint --extra-cmd), e.g. a publisher.
 if [ -n "${BENCH_EXTRA_CMD:-}" ]; then
   bash -c "${BENCH_EXTRA_CMD}" &
+  echo $! > /tmp/extra_cmd.pid
 fi
 GW_ARGS=(--ros-args -r __ns:=/diagnostics -r __node:=ros2_medkit_gateway \
   -p server.host:=0.0.0.0 -p server.port:=8080 "${PARAMS_ARG[@]}")

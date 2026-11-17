@@ -56,15 +56,17 @@ _CALL_TIMEOUT_S = 15
 
 
 def inject_faults(container: str, n: int, prefix: str = "BENCH_FAULT_",
-                  timeout_s: int = _CALL_TIMEOUT_S) -> int:
+                  timeout_s: int = _CALL_TIMEOUT_S, cpus: str | None = None) -> int:
     """Report N faults with distinct codes to the fault manager; return how many it ACCEPTED.
 
     Each fault has a unique code ``<prefix><i>`` at CRITICAL severity, so it
     confirms immediately (no debounce). Every call runs under ``timeout`` inside
     the container, so a missing fault manager costs ``timeout_s`` per fault and
     counts as not accepted instead of hanging. The count comes from the
-    ``accepted`` field of the service response.
+    ``accepted`` field of the service response. ``cpus`` (a taskset list such as
+    "0,1,3") pins the CLI calls.
     """
+    pin = f"taskset -c {cpus} " if cpus else ""
     calls = []
     for i in range(1, n + 1):
         yaml_arg = build_inject_yaml(
@@ -73,7 +75,7 @@ def inject_faults(container: str, n: int, prefix: str = "BENCH_FAULT_",
             description=f"benchmark burst injection {i}",
         )
         calls.append(
-            f'out=$(timeout {int(timeout_s)} ros2 service call {_SERVICE} '
+            f'out=$({pin}timeout {int(timeout_s)} ros2 service call {_SERVICE} '
             f'{_SERVICE_TYPE} "{yaml_arg}" 2>&1); '
             'case "$out" in *accepted=True*) echo ACCEPTED;; *) echo REJECTED;; esac')
     text = dh.exec_via_file(container, dh.ROS_PRELUDE + "; ".join(calls),
@@ -154,6 +156,7 @@ def build_fault_rows(
                 "recovered": burst.get("recovered", False),
                 "rosbag_got": got,
                 "rosbag_total": n if mode == "rosbag" else 0,
+                "sampler_offset_s": burst.get("sampler_offset_s"),
                 "fm_peak_uss_delta_mib": fm.get("peak_uss_delta_kib", 0.0) / 1024.0,
                 "fm_peak_cpu_cores": fm.get("peak_cpu_cores", 0.0),
                 "fm_settle_s": fm.get("settle_s", 0.0),
