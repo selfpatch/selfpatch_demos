@@ -208,7 +208,7 @@ file.
 
 ```bash
 python -m benchmark.benchmark footprint --demo synthetic --entities 10 --repeats 1 \
-  --plugin topic_beacon=/ws/install/ros2_medkit_topic_beacon/lib/ros2_medkit_topic_beacon/libros2_medkit_topic_beacon.so \
+  --plugin topic_beacon=/ws/install/ros2_medkit_topic_beacon/lib/ros2_medkit_topic_beacon/libtopic_beacon_plugin.so \
   --plugin-param topic_beacon.allow_new_entities=true \
   --gateway-param discovery.mode=hybrid \
   --extra-cmd 'ros2 topic pub -r 2 /ros2_medkit/discovery ros2_medkit_msgs/msg/MedkitDiscoveryHint "{entity_id: bench_beacon}"' \
