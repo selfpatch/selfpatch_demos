@@ -113,8 +113,10 @@ def check_extras(container, plugin_paths, has_extra_cmd, expected_entities, enti
         problems += [f"plugin failed to load: {p}" for p in failed]
     if has_extra_cmd:
         try:
+            # An exited child stays a zombie until the container's init reaps it.
             run(["docker", "exec", container, "sh", "-c",
-                 f"kill -0 $(cat {_EXTRA_PID_FILE})"])
+                 f"p=$(cat {_EXTRA_PID_FILE}); [ -r /proc/$p/status ] && "
+                 f"! grep -q '^State:.*Z' /proc/$p/status"])
             out["extra_process_alive"] = True
         except RuntimeError:
             out["extra_process_alive"] = False
