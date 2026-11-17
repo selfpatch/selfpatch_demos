@@ -21,6 +21,7 @@ source /ws/install/setup.bash
 # Disk lane: fault manager at its default settings, a topic source for captures,
 # and the gateway. Only what a scenario asks for is changed:
 #   BENCH_ROSBAG=1      enable rosbag recording (off by default)
+#   BENCH_RETAIN=1      snapshots.retain_on_clear: a cleared fault keeps its snapshots
 #   BENCH_COOLDOWN=<s>  snapshots.recapture_cooldown_sec (default 60)
 mkdir -p /var/lib/ros2_medkit/rosbags
 FM_ARGS=()
@@ -28,8 +29,12 @@ if [ "${BENCH_ROSBAG:-0}" = "1" ]; then
     FM_ARGS+=(-p snapshots.rosbag.enabled:=true
               -p snapshots.rosbag.storage_path:=/var/lib/ros2_medkit/rosbags)
 fi
+if [ "${BENCH_RETAIN:-0}" = "1" ]; then
+    FM_ARGS+=(-p snapshots.retain_on_clear:=true)
+fi
 if [ -n "${BENCH_COOLDOWN:-}" ]; then
-    FM_ARGS+=(-p "snapshots.recapture_cooldown_sec:=${BENCH_COOLDOWN}")
+    # The parameter is a double: an integer literal is rejected.
+    FM_ARGS+=(-p "snapshots.recapture_cooldown_sec:=${BENCH_COOLDOWN}.0")
 fi
 
 python3 -m benchmark.scaler.topic_source --payload-bytes "${BENCH_PAYLOAD_BYTES:-1024}" &

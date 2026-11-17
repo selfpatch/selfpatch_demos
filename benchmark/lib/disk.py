@@ -54,7 +54,7 @@ def install_report(sizes, stripped):
 def measure_install(container):
     sizes = parse_install_sizes(dh.exec_text(container, "sh", "-c", _INSTALL_CMD))
     stripped = parse_install_sizes(
-        dh.run(["docker", "exec", container, "sh", "-c", _STRIPPED_CMD], timeout=600))
+        dh.exec_via_file(container, _STRIPPED_CMD, timeout=600, shell="sh"))
     return install_report(sizes, stripped)
 
 
@@ -100,9 +100,11 @@ def run_scenario(compose_file, project, service, env, flood_args=None,
         t0 = time.monotonic()
         flood = None
         if flood_args:
-            raw = dh.ros_bash(
-                container, f"cd /ws && {_FLOOD} {flood_args}", timeout=3600)
-            flood = json.loads(raw.strip().splitlines()[-1])
+            raw = dh.exec_via_file(
+                container, dh.ROS_PRELUDE + f"cd /ws && {_FLOOD} {flood_args}",
+                timeout=3600)
+            flood = json.loads(
+                [ln for ln in raw.splitlines() if ln.startswith("{")][-1])
             if "error" in flood:
                 raise RuntimeError(f"fault flood failed: {flood['error']}")
         if idle_s:

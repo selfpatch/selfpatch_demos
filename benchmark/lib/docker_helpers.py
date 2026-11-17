@@ -14,6 +14,7 @@
 """docker/compose wrappers + gateway PID resolution inside a container."""
 from __future__ import annotations
 import subprocess
+import time
 
 # Per-call subprocess timeouts (seconds). A wedged `docker exec` or a gateway
 # that accepts a connection but never responds must not hang the whole harness
@@ -112,6 +113,12 @@ def read_cmdline(container, pid):
     return raw.replace("\0", " ").strip()
 
 
+ROS_PRELUDE = (
+    "export ROS_DOMAIN_ID=$(tr '\\0' '\\n' < /proc/1/environ | "
+    "sed -n 's/^ROS_DOMAIN_ID=//p'); "
+    "source /opt/ros/jazzy/setup.bash; source /ws/install/setup.bash; ")
+
+
 def ros_bash(container, script, timeout=_EXEC_TIMEOUT):
     """Run a bash script in the container with the ROS environment sourced.
 
@@ -119,12 +126,37 @@ def ros_bash(container, script, timeout=_EXEC_TIMEOUT):
     ROS_DOMAIN_ID is read from PID 1 and exported; without it the command would
     join domain 0 and see no node of the container.
     """
-    prelude = (
-        "export ROS_DOMAIN_ID=$(tr '\\0' '\\n' < /proc/1/environ | "
-        "sed -n 's/^ROS_DOMAIN_ID=//p'); "
-        "source /opt/ros/jazzy/setup.bash; source /ws/install/setup.bash; ")
-    return run(["docker", "exec", container, "bash", "-c", prelude + script],
+    return run(["docker", "exec", container, "bash", "-c", ROS_PRELUDE + script],
                timeout=timeout)
+
+
+def exec_via_file(container, script, timeout=_EXEC_TIMEOUT, shell="bash", poll_s=1.0):
+    """Run ``script`` in the container and return its stdout and stderr.
+
+    An attached ``docker exec`` can return before a long command ends and lose
+    its late output. The script runs detached, writes its output and exit code
+    to files, and this call polls for the exit-code file until ``timeout``.
+    A non-zero exit code raises RuntimeError.
+    """
+    out, rc = "/tmp/.bench_exec.out", "/tmp/.bench_exec.rc"
+    wrapped = f"rm -f {rc}; ( {script} ) > {out} 2>&1; echo $? > {rc}"
+    run(["docker", "exec", container, shell, "-c", f"rm -f {rc} {out}"],
+        timeout=_EXEC_TIMEOUT)
+    run(["docker", "exec", "-d", container, shell, "-c", wrapped], timeout=_EXEC_TIMEOUT)
+    end = time.monotonic() + timeout
+    while True:
+        res = subprocess.run(["docker", "exec", container, "cat", rc],
+                             capture_output=True, text=True, timeout=_EXEC_TIMEOUT)
+        if res.returncode == 0 and res.stdout.strip():
+            code = res.stdout.strip()
+            break
+        if time.monotonic() > end:
+            raise RuntimeError(f"command did not finish within {timeout}s")
+        time.sleep(poll_s)
+    text = run(["docker", "exec", container, "cat", out], timeout=_EXEC_TIMEOUT)
+    if code != "0":
+        raise RuntimeError(f"command exited {code}: {text.strip()[-300:]}")
+    return text
 
 
 def read_proc(container, pid, fname):

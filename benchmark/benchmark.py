@@ -812,11 +812,14 @@ def cmd_disk(args, root=None):
 
     occ = []
     for variant, env_extra, wait_for in (
-            ("default cooldown", {}, "none"),
+            ("default cooldown", {}, "occurrence"),
             ("cooldown 0", {"BENCH_COOLDOWN": "0"}, "capture")):
         for m in occurrences:
-            r = scenario(f"occ_{variant.replace(' ', '_')}_{m}", env_extra,
-                         f"--mode repeat --count {m} --wait-for {wait_for}")
+            # Each occurrence is a report, then a clear, so the next report is a new
+            # one; retain_on_clear keeps the snapshots of the cleared occurrences.
+            r = scenario(f"occ_{variant.replace(' ', '_')}_{m}",
+                         dict(env_extra, BENCH_RETAIN="1"),
+                         f"--mode repeat --count {m} --wait-for {wait_for} --clear-between")
             if r:
                 r["n"], r["variant"] = m, variant
                 occ.append(r)

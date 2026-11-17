@@ -56,6 +56,7 @@ services:
     environment:
       ROS_DOMAIN_ID: "43"
       BENCH_ROSBAG: "${BENCH_ROSBAG:-0}"
+      BENCH_RETAIN: "${BENCH_RETAIN:-0}"
       BENCH_COOLDOWN: "${BENCH_COOLDOWN:-}"
       BENCH_PAYLOAD_BYTES: "${BENCH_PAYLOAD_BYTES:-1024}"
     command: ["bash", "/ws/benchmark/profiles/run_disk.sh"]
