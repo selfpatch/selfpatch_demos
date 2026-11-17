@@ -134,12 +134,14 @@ def count_in(container, port, api_base):
     return total
 
 
-def _warmup_gate(read, pid, container, port, api_base, timeout_s=_WARMUP_TIMEOUT_S,
-                 fm_pid=None):
-    """Block until the gateway USS and entity count are stable.
+def _warmup_verdict(read, pid, container, port, api_base, timeout_s=_WARMUP_TIMEOUT_S,
+                    fm_pid=None):
+    """Block until the gateway and the fault manager are stable, or the timeout.
 
-    Returns True when convergence is reached within the timeout, False
-    when the timeout expires without convergence.
+    Returns {"gateway": bool, "fm": bool or None}: whether each process was stable
+    at the end (``fm`` is None without a fault manager). The wait ends early only
+    when both are stable at once, so a gateway verdict never depends on the fault
+    manager settling.
 
     Guards against a dead gateway: when count_in returns None for all
     probes, a sentinel value (None) is appended to the history so that
@@ -147,6 +149,8 @@ def _warmup_gate(read, pid, container, port, api_base, timeout_s=_WARMUP_TIMEOUT
     requires the stable value to be > 0).
     """
     warm, fm_warm, hist = [], [], []
+    gw_ok = False
+    fm_ok = None if fm_pid is None else False
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         warm.append(sampler.sample_once(read, pid, _host_load1()))
@@ -155,14 +159,21 @@ def _warmup_gate(read, pid, container, port, api_base, timeout_s=_WARMUP_TIMEOUT
         count = count_in(container, port, api_base)
         # Append None when all probes fail; entity_count_stable rejects None.
         hist.append(count)
-        fm_flat = (fm_pid is None
-                   or (len(fm_warm) >= 5
-                       and warmup.uss_derivative_below(fm_warm[-5:], 5.0)))
-        if (len(warm) >= 5 and warmup.uss_derivative_below(warm[-5:], 5.0)
-                and fm_flat and warmup.entity_count_stable(hist, 3)):
-            return True
+        gw_ok = (len(warm) >= 5 and warmup.uss_derivative_below(warm[-5:], 5.0)
+                 and warmup.entity_count_stable(hist, 3))
+        if fm_pid is not None:
+            fm_ok = (len(fm_warm) >= 5 and warmup.uss_derivative_below(fm_warm[-5:], 5.0))
+        if gw_ok and fm_ok is not False:
+            break
         time.sleep(2)
-    return False
+    return {"gateway": bool(gw_ok), "fm": fm_ok}
+
+
+def _warmup_gate(read, pid, container, port, api_base, timeout_s=_WARMUP_TIMEOUT_S,
+                 fm_pid=None):
+    """True when every sampled process was stable before the timeout."""
+    v = _warmup_verdict(read, pid, container, port, api_base, timeout_s, fm_pid)
+    return v["gateway"] and v["fm"] is not False
 
 
 def _is_steady(out, prefix=""):
@@ -181,7 +192,8 @@ def _is_steady(out, prefix=""):
     return True, None
 
 
-def _start_load_in_container(container, level, duration, port, api_base, cpus=None):
+def _start_load_in_container(container, level, duration, port, api_base, cpus=None,
+                             progress=None):
     """Start the in-container load generator as a detached background process.
 
     The load_gen module lives at /ws/benchmark/scaler/load_gen.py inside the
@@ -190,6 +202,8 @@ def _start_load_in_container(container, level, duration, port, api_base, cpus=No
 
     The generator is given ``duration + 5`` seconds so it outlasts the sample
     window and the caller can read the output file before teardown.
+
+    ``progress`` names a file inside the container that the running counts go to.
 
     Returns the path of the JSON output file written inside the container, or
     None when the module is absent.
@@ -206,7 +220,8 @@ def _start_load_in_container(container, level, duration, port, api_base, cpus=No
         f" --level {level}"
         f" --duration {int(duration + 5)}"
         f" --base-url http://localhost:{port}{api_base}"
-        f" --out {_LOAD_STATS_PATH} &"
+        f" --out {_LOAD_STATS_PATH}"
+        + (f" --progress {progress}" if progress else "") + " &"
     )
     dh.run(["docker", "exec", "-d", container, "sh", "-c", cmd])
     return _LOAD_STATS_PATH
@@ -245,6 +260,12 @@ def _read_load_stats(container, out_path, wait_s=30):
             pass
         time.sleep(1)
     return {}
+
+
+def _fm_expected(env):
+    """True when the setup starts a fault manager (BENCH_FAULT_MANAGER not 0, no tool)."""
+    return (env or {}).get("BENCH_FAULT_MANAGER", "1") != "0" and \
+        (env or {}).get("TOOL", "none") == "none"
 
 
 def _resolve_fault_manager(container):
@@ -310,7 +331,9 @@ def run_cell(compose_file, project, service, gateway_proc, api_base, port,
             gen_runtime = _WARMUP_TIMEOUT_S + ld + 30
             load_out_path = _start_load_in_container(
                 container, load_level, gen_runtime, port, api_base)
-        converged = _warmup_gate(read, pid, container, port, api_base, fm_pid=fm_pid)
+        verdict = _warmup_verdict(read, pid, container, port, api_base, fm_pid=fm_pid)
+        converged = verdict["gateway"]
+        fm_converged = bool(verdict["fm"])
         samples, fm_samples = _sample_both(read, pid, fm_pid, clk, duration,
                                            interval, csv_path)
         out = summarize_window(samples, clk)
@@ -324,6 +347,9 @@ def run_cell(compose_file, project, service, gateway_proc, api_base, port,
                 out["fm_status"] = "incomplete"
                 out["fm_status_reason"] = (
                     f"fault manager sampled for {span:.0f} s of a {duration:.0f} s window")
+        elif _fm_expected(env):
+            out["fm_status"] = "failed"
+            out["fm_status_reason"] = "the fault manager is expected but was not found"
         else:
             out["fm_status"] = "absent"
         # Stop the generator (flushes stats), then read them while the container
@@ -352,8 +378,8 @@ def run_cell(compose_file, project, service, gateway_proc, api_base, port,
         else:
             out["steady_reason"] = "warmup did not converge"
         if out.get("fm_status") == "ok":
-            out["fm_steady"] = converged
-            if converged:
+            out["fm_steady"] = fm_converged
+            if fm_converged:
                 fm_flat, fm_reason = _is_steady(out, "fm_")
                 if not fm_flat:
                     out["fm_steady"] = False
@@ -366,7 +392,8 @@ def run_cell(compose_file, project, service, gateway_proc, api_base, port,
         if probe_fn is not None:
             out["probe"] = probe_fn(container)
         if not no_samples:
-            out["status"] = "ok"  # else keep summarize_window's "failed"
+            # A gateway sampled for less than the window is as incomplete as a fault manager is.
+            out["status"] = "ok" if gw_covered else "incomplete"  # else keep "failed"
         out["container"] = container
         # Capture per-cell reproducibility metadata while the container is alive.
         # Each field degrades to "unknown" on failure so a capture error never

@@ -32,7 +32,11 @@ Every lane that samples `gateway_node` also samples `fault_manager_node` with th
 metrics over the same window. Reports show the gateway, the fault manager and their
 **sum** (`USS sum`, `CPU sum`, `threads sum`); `summary.json` carries them as `fm_*` and
 `sum_*` keys. The steady-state gate covers both processes: a rising fault manager makes
-the repeat not-steady. The fault manager is found by its command line, not by name
+the repeat not-steady. The gateway's verdict does not depend on the fault manager settling
+(`fm_steady` is separate). `sum_*` is the median over repeats of each repeat's gateway plus
+fault manager value. A setup that starts a fault manager (`BENCH_FAULT_MANAGER` not `0`) and
+does not find it makes the lane `partial`; a gateway sampled for less than 80% of the window
+does too. The fault manager is found by its command line, not by name
 (`pgrep -x` cannot match names over 15 characters, and `ros2 run` puts a launcher in
 front of the node); the PID and command line of each sampled process are printed in the
 report (footprint, fault, scaling, sweep and jitter) and stored in `run_metadata.json` under
@@ -112,7 +116,7 @@ The goal is numbers you can trust and compare, not a single reading.
 | `heap` | heaptrack over a long run: heap growth over time and top allocation call-sites. |
 | `memcheck` | valgrind memcheck on a short controlled run: definitely/indirectly lost bytes. |
 | `load` | Footprint, CPU, threads and request latency (p50/p95) under M concurrent HTTP clients (off/light/heavy). |
-| `fault` | Snapshot-capture impact as a burst (peak memory/CPU, capture duration, recovery; for the fault manager the settle time and whether it retains the memory) vs fault count N, with and without rosbag. |
+| `fault` | (`--demo synthetic` only) Snapshot-capture impact as a burst (peak memory/CPU, capture duration, recovery; for the fault manager the settle time and whether it retains the memory) vs fault count N, with and without rosbag. |
 | `disk` | Installed size of the Medkit packages, fault store growth, bytes per captured fault, ROS log growth. |
 | `jitter` | `cyclictest` scheduling latency alone and next to a loaded Medkit. |
 | `churn` | Leak-under-graph-churn gate: gateway USS slope on a static graph vs a churning graph (nodes recycled, bounded count). PASS/FAIL, exits 1 if memory grows under churn. |
@@ -169,6 +173,8 @@ at CRITICAL severity (they confirm at once) by `scaler/fault_flood.py`, from a s
 that publishes one `std_msgs/String` (`--payload-bytes`, default 1024), so every fault
 captures a snapshot at the fault manager defaults. The flood waits for each capture to
 reach the store, so the capture queue (default depth 16, `reject_newest`) never drops one.
+A scenario in which a report was rejected, a capture did not reach the store or a clear
+failed is `partial`; growth is never divided by a smaller count.
 
 | Section | What it measures |
 |---|---|
@@ -193,7 +199,14 @@ Runs `cyclictest` (rt-tests) in a container in three scenarios: alone (baseline)
 load drivers and no Medkit (the cost of the harness itself); and next to Medkit (gateway and
 fault manager) under the same load. The load is repeated bursts of `--burst` faults
 (`ros2 service call` processes) and the heavy HTTP client load of the `load` lane, for the
-whole run. Compare the second and third rows to see what Medkit adds beyond the drivers. The
+whole run. In the second row a stand-in (`scaler/standin.py`) answers the HTTP requests and
+accepts the fault reports at once, so both rows issue the same requests. The lane is `partial`
+when the two rows' HTTP request rate or number of fault bursts differ by more than 25% (bursts:
+or one burst), a fault is rejected, or more than 5% of the HTTP requests fail. The load counts
+only work inside the cyclictest window: a burst counts when it starts and ends inside it, and
+HTTP requests are the difference of two progress reads at the window's edges (the window may
+include up to 1.5 s of polling lag at its end). An invalid cyclictest CPU, or a container
+with one CPU, is refused before cyclictest starts. Compare the second and third rows to see what Medkit adds beyond the drivers. The
 drivers are pinned (`taskset`) to every CPU except cyclictest's; the CPUs are in the report
 and in `run_metadata.json` (`affinity`). The report counts the bursts, the faults the fault
 manager accepted and the HTTP requests and errors of each loaded window. The fault manager

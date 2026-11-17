@@ -51,9 +51,10 @@ def compose(args, file, project):
 def compose_up(file, project, env=None, service=None):
     # Bring up ONLY the target service (+ its depends_on) so sibling services in
     # the compose file (e.g. a fixed-container-name web UI) don't start/conflict.
-    # BENCH_IMAGE names a prebuilt image: building would overwrite its tag.
+    # BENCH_IMAGE names a prebuilt image: a build would overwrite its tag, and a
+    # missing tag must fail the lane, not trigger a build or a pull.
     prebuilt = bool((env if env is not None else os.environ).get("BENCH_IMAGE"))
-    args = ["up", "-d"] if prebuilt else ["up", "-d", "--build"]
+    args = ["up", "-d", "--no-build", "--pull", "never"] if prebuilt else ["up", "-d", "--build"]
     if service:
         args.append(service)
     run(compose(args, file, project), env=env, timeout=_BUILD_TIMEOUT)

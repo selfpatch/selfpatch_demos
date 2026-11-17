@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import statistics
+import subprocess
 import time
 from pathlib import Path
 
@@ -98,10 +100,14 @@ def _aggregate_steady(reps):
             for k, v in fm_cell.items():
                 if k != "repeats":
                     cell[k] = v
+            # Sum per repeat (one window), then take the median: a sum of two
+            # independent medians can pair different repeats.
+            pair_steady = [r for r in ok if r.get("steady", True) and r.get("fm_steady", True)]
+            pair = pair_steady if pair_steady else ok
             for k in runner._SUM_KEYS:
-                gw, fm = cell.get(f"{k}_median"), cell.get(f"fm_{k}_median")
-                if gw is not None and fm is not None:
-                    cell[f"sum_{k}_median"] = gw + fm
+                sums = [r[f"sum_{k}"] for r in pair if f"sum_{k}" in r]
+                if sums:
+                    cell[f"sum_{k}_median"] = statistics.median(sums)
             cell["fm_status"] = "ok"
         else:
             cell["fm_status"] = fm_present[0].get("fm_status", "failed")
@@ -116,7 +122,8 @@ def _aggregate_steady(reps):
 
 def _incomplete(reps):
     """True when a sampled process died or was lost in any repeat."""
-    return any(r.get("fm_status") in ("incomplete", "failed") for r in reps)
+    return any(r.get("fm_status") in ("incomplete", "failed")
+               or r.get("status") in ("incomplete", "failed") for r in reps)
 
 
 def _args_dict(args):
@@ -751,13 +758,14 @@ def cmd_fault(args, root=None):
     """Fault/snapshot burst lane: measure snapshot capture cost vs N concurrent faults.
 
     For each N in --faults, runs two modes (data-snapshot only, data+rosbag).
-    The synthetic substrate brings up gateway_node + fault_manager_node in one
-    container.  The demo substrate (--demo turtlebot3) injects via Scripts API
-    when a suitable script is available.
+    The lane runs on the synthetic substrate only: gateway_node + fault_manager_node
+    in one container.
 
     Metrics per (N, mode): peak USS delta, peak CPU, capture duration,
     residual, recovered, rosbag_got/N.
     """
+    if getattr(args, "demo", "synthetic") != "synthetic":
+        raise SystemExit("the fault lane runs on --demo synthetic only")
     check_host_load(strict=getattr(args, "strict", False))
     out = _run_dir(_resolve_root(args, root), "fault")
     n_list = [int(x) for x in args.faults.split(",")]
@@ -920,6 +928,33 @@ def cmd_disk(args, root=None):
 _JITTER_SERVICE = "bench-jitter"
 
 
+_LOAD_PROGRESS = "/tmp/load_progress.json"
+
+
+def _start_standin(container):
+    """Start the stand-in for the gateway and the report service in a container without Medkit."""
+    dh.run(["docker", "exec", "-d", container, "bash", "-c",
+            dh.ROS_PRELUDE + "cd /ws && exec python3 -m benchmark.scaler.standin "
+            "> /tmp/standin.log 2>&1"])
+    if not runner.ready_in(container, GATEWAY_PORT, "/api/v1", timeout_s=60):
+        raise RuntimeError("the load stand-in never answered")
+    end = time.monotonic() + 60
+    while time.monotonic() < end:
+        try:
+            dh.ros_bash(container, "ros2 service type /fault_manager/report_fault")
+            return
+        except RuntimeError:
+            time.sleep(1)
+    raise RuntimeError("the stand-in report service never appeared")
+
+
+def _read_progress(container):
+    try:
+        return json.loads(dh.run(["docker", "exec", container, "cat", _LOAD_PROGRESS]))
+    except Exception:  # noqa: BLE001 - a missing read is reported as an unmeasured rate
+        return None
+
+
 def cmd_jitter(args, root=None):
     """Jitter lane: cyclictest alone (baseline) and next to Medkit under load.
 
@@ -933,6 +968,7 @@ def cmd_jitter(args, root=None):
               "cpu": args.cpu, "duration_s": int(args.duration)}
     rows, status, first_meta = [], "ok", {}
     for run in range(1, args.repeats + 1):
+        loaded = {}
         for key, scenario, medkit, load in (
                 ("baseline", "baseline (no load, no Medkit)", False, False),
                 ("harness", "harness load, no Medkit", False, True),
@@ -958,13 +994,16 @@ def cmd_jitter(args, root=None):
                 if load:
                     cpus = jitter.load_cpus(container, args.cpu)
                     params["load_cpus"] = cpus
+                    if not medkit:
+                        _start_standin(container)
                     res, raw = jitter.run_load_window(
                         container, args.duration, args.cpu, args.burst,
                         lambda: runner._start_load_in_container(
                             container, "heavy", args.duration + 30, GATEWAY_PORT, "/api/v1",
-                            cpus=cpus),
+                            cpus=cpus, progress=_LOAD_PROGRESS),
                         lambda: runner._stop_load_in_container(container),
-                        lambda path: runner._read_load_stats(container, path), cpus=cpus)
+                        lambda path: runner._read_load_stats(container, path), cpus=cpus,
+                        read_progress=lambda: _read_progress(container))
                 else:
                     res, raw = jitter.run_cyclictest(container, args.duration, args.cpu)
                 if medkit:
@@ -973,11 +1012,18 @@ def cmd_jitter(args, root=None):
                             raise RuntimeError(f"{name} was not running at the end of the window")
                 (out / f"run{run}_{key}.txt").write_text(raw)
                 rows.append({"scenario": scenario, "run": run, **res})
+                if load:
+                    loaded[key] = rows[-1]
             except Exception as exc:
                 status = "partial"
                 (out / f"run{run}_{key}.error").write_text(str(exc))
             finally:
                 dh.compose_down(SYN_COMPOSE, project)
+        if len(loaded) == 2:
+            problems = jitter.check_load_parity(loaded["harness"], loaded["medkit"])
+            if problems:
+                status = "partial"
+                (out / f"run{run}_load_parity.error").write_text("; ".join(problems))
     meta = _write_metadata(out, args, first_meta, refresh_ms="n/a")
     meta["affinity"] = {"cyclictest_cpu": args.cpu, "load_cpus": params.get("load_cpus")}
     (out / "run_metadata.json").write_text(json.dumps(meta, indent=2, default=str))
@@ -1042,6 +1088,7 @@ def cmd_all(args, root=None):
     heap_args.duration, heap_args.interval = 600, 5
     cmd_heap(heap_args, root=shared)
     fault_args = _copy.copy(args)
+    fault_args.demo = "synthetic"
     fault_args.faults = _DEFAULT_FAULTS
     fault_args.pre_s = 10.0
     fault_args.window_s = 60.0
@@ -1112,8 +1159,11 @@ def cmd_compare(args):
         raise SystemExit(2)
 
     mismatches = []
-    for name, m in lane_metas:
-        why = setup_mismatch(baseline, name, m.get("setup"))
+    metas = dict(lane_metas)
+    compared = sorted({d.name for d in run_dir.iterdir()
+                       if d.is_dir() and ((d / "summary.json").exists() or d.name in metas)})
+    for name in compared:
+        why = setup_mismatch(baseline, name, (metas.get(name) or {}).get("setup"))
         if why:
             mismatches.append(f"{name}: {why}")
     if mismatches:
@@ -1337,7 +1387,7 @@ def main():
     fl.add_argument("--interval", type=float, default=0.2,
                     help="Sample interval (seconds); default 0.2 for burst resolution.")
     fl.add_argument("--demo", default="synthetic",
-                    help="Substrate: 'synthetic' (default) or 'turtlebot3'.")
+                    help="Substrate; only 'synthetic' is supported.")
     fl.set_defaults(func=cmd_fault)
 
     dk = sub.add_parser(
@@ -1415,6 +1465,9 @@ def main():
 
     args = p.parse_args()
     if args.image:
+        if subprocess.run(["docker", "image", "inspect", args.image],
+                          capture_output=True).returncode != 0:
+            raise SystemExit(f"--image {args.image}: no such image (it is never built or pulled)")
         os.environ["BENCH_IMAGE"] = args.image
     args.func(args)
 

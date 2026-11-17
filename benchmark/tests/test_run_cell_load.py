@@ -83,7 +83,7 @@ def _run_cell_with_mocked_dh(dh_mock, **kwargs):
          patch("benchmark.lib.sampler.per_sample_cores", return_value=[0.1] * 3):
         # Also patch ready_in and _warmup_gate to return immediately.
         with patch.object(runner_mod, "ready_in", return_value=True), \
-             patch.object(runner_mod, "_warmup_gate", return_value=True):
+             patch.object(runner_mod, "_warmup_verdict", return_value={"gateway": True, "fm": True}):
             return runner_mod.run_cell(
                 "compose.yml", "proj", "bench", "gateway_node",
                 "/api/v1", 8080, {}, 30.0, 1.0, "/tmp/test.csv",
@@ -101,7 +101,7 @@ def test_run_cell_empty_window_is_failed_not_ok():
     with patch.object(runner_mod, "dh", dh_mock), \
          patch("benchmark.lib.sampler.sample_window", return_value=[]), \
          patch.object(runner_mod, "ready_in", return_value=True), \
-         patch.object(runner_mod, "_warmup_gate", return_value=True):
+         patch.object(runner_mod, "_warmup_verdict", return_value={"gateway": True, "fm": True}):
         cell = runner_mod.run_cell(
             "compose.yml", "proj", "bench", "gateway_node",
             "/api/v1", 8080, {}, 30.0, 1.0, "/tmp/test.csv")

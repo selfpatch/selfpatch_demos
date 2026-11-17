@@ -109,7 +109,7 @@ def main(argv=None):
     sql = _PROGRESS_SQL[args.wait_for]
     # The store may already hold rows (a baseline); progress is measured from it.
     base = _scalar(args.db, sql) if sql else 0
-    accepted = landed = 0
+    accepted = landed = clear_failed = 0
     for i in range(1, args.count + 1):
         code = args.code if args.mode == "repeat" else f"{args.prefix}{i}"
         req = ReportFault.Request()
@@ -133,7 +133,8 @@ def main(argv=None):
     node.destroy_node()
     rclpy.shutdown()
     print(json.dumps({"reported": args.count, "accepted": accepted,
-                      "landed": landed, "waited_for": args.wait_for}))
+                      "landed": landed, "waited_for": args.wait_for,
+                      "clear_failed": clear_failed}))
     return 0
 
 

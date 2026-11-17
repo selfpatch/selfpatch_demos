@@ -208,3 +208,13 @@ def test_cmd_compare_clean_lanes_pass_host_check(tmp_path, capsys):
     args = argparse.Namespace(run=str(run_dir), baseline=str(baseline))
     bm.cmd_compare(args)  # must not raise (no summary.json -> no metrics)
     assert "No comparable lanes" in capsys.readouterr().out
+
+
+def test_sum_is_the_median_of_per_repeat_sums():
+    # Gateway (10, 10, 110) and fault manager (110, 10, 10): the medians are 10 and
+    # 10, but the repeats sum to (120, 20, 120).
+    gw, fm = (10, 10, 110), (110, 10, 10)
+    reps = [{"uss_kib": g, "fm_uss_kib": f, "sum_uss_kib": g + f, "fm_status": "ok",
+             "steady": True, "fm_steady": True} for g, f in zip(gw, fm)]
+    cell = bm._aggregate_steady(reps)
+    assert cell["sum_uss_kib_median"] == 120

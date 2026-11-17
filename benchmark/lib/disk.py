@@ -137,6 +137,23 @@ def wait_started(container, timeout_s=180, quiet_probes=5, poll_s=2.0):
     raise RuntimeError(f"fault store or log never settled within {timeout_s}s: {last}")
 
 
+def check_flood(flood):
+    """Raise unless every reported fault was accepted, landed in the store and cleared.
+
+    Growth is divided by the accepted count, so a smaller count must not pass silently.
+    """
+    n = flood.get("reported", 0)
+    problems = []
+    if flood.get("accepted", 0) < n:
+        problems.append(f"{n - flood.get('accepted', 0)} of {n} reports were not accepted")
+    if flood.get("waited_for") != "none" and flood.get("landed", 0) < n:
+        problems.append(f"{n - flood.get('landed', 0)} of {n} captures did not reach the store")
+    if flood.get("clear_failed", 0):
+        problems.append(f"{flood['clear_failed']} clear requests failed")
+    if problems:
+        raise RuntimeError("fault flood incomplete: " + "; ".join(problems))
+
+
 def run_scenario(compose_file, project, service, env, flood_args=None,
                  idle_s=0.0, expect_rosbags=0, ready_timeout=180, window_s=0.0):
     """One fresh container: baseline probe, optional fault flood or idle window, final probe.
@@ -163,6 +180,7 @@ def run_scenario(compose_file, project, service, env, flood_args=None,
                 [ln for ln in raw.splitlines() if ln.startswith("{")][-1])
             if "error" in flood:
                 raise RuntimeError(f"fault flood failed: {flood['error']}")
+            check_flood(flood)
         # The measurement window itself: growth is taken over this much time.
         rest = max(idle_s, window_s) - (time.monotonic() - t0)
         if rest > 0:

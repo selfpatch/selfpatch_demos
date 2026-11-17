@@ -170,7 +170,8 @@ def sample_burst_procs(
 
     The trigger runs on its own thread, so sampling continues while it works
     (injecting N faults takes seconds, and that is when the capture cost
-    happens). Returns ({name: samples}, t_trigger); each name's CSV receives its
+    happens; a trigger that outlasts window_s is sampled to its end, plus one window).
+    Returns ({name: samples}, t_trigger); each name's CSV receives its
     rows with per-sample cpu_cores computed incrementally. A trigger exception
     is re-raised after the window.
     """
@@ -212,10 +213,21 @@ def sample_burst_procs(
         worker = threading.Thread(target=_trigger, daemon=True)
         worker.start()
 
-        end_win = t_trigger + window_s
-        while time.monotonic() < end_win:
+        # The window is measured from the trigger's start; when the trigger outlasts it,
+        # sampling goes on until the trigger ends and then runs for one more window.
+        t_done = None
+        while True:
             _tick()
             time.sleep(interval)
+            now = time.monotonic()
+            if worker.is_alive():
+                continue
+            if t_done is None:
+                t_done = now
+            end_win = t_done + window_s if t_done > t_trigger + window_s \
+                else t_trigger + window_s
+            if now >= end_win:
+                break
         worker.join()
     finally:
         for fh in files.values():
