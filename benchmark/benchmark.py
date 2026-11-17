@@ -886,7 +886,8 @@ def cmd_jitter(args, root=None):
                         container, args.duration, args.cpu, args.burst,
                         lambda: runner._start_load_in_container(
                             container, "heavy", args.duration + 30, GATEWAY_PORT, "/api/v1"),
-                        lambda: runner._stop_load_in_container(container))
+                        lambda: runner._stop_load_in_container(container),
+                        lambda path: runner._read_load_stats(container, path))
                 else:
                     res, raw = jitter.run_cyclictest(container, args.duration, args.cpu)
                 (out / f"run{run}_{int(medkit)}.txt").write_text(raw)
