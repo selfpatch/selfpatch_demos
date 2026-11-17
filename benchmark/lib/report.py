@@ -528,7 +528,7 @@ def render_fault_markdown(rows: list, meta: dict = None) -> str:
             lines += ["", f"_The two processes are read in parallel; their sample times differ by "
                           f"a median of {max(offs) * 1000:.0f} ms at most (worst cell)._"]
         lines += ["", "_rosbag got/N = recordings found in the rosbag directory over faults "
-                  "injected; a burst shares one recording, so fewer than N is expected._"]
+                  "injected (the injector reports them one after another)._"]
         lines += ["", "_settle = seconds from the trigger until the fault manager's USS stays "
                   "within the recovery band of its final value (never = it did not settle); "
                   "retained = it ends above its baseline by more than that band (the store keeps the faults), so it "
