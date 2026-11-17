@@ -213,8 +213,9 @@ def render_disk_markdown(report, meta=None):
                 f"{t.get('snapshots', '-')} | {t.get('max_capture_id', '-')} | "
                 f"{t.get('faults', '-')} |")
         lines += ["", "_`snapshots.max_per_fault` (default 10) caps the snapshot sets kept per "
-                      "code; `snapshots.recapture_cooldown_sec` (default 60) limits how often "
-                      "a code is captured again._", ""]
+                      "code. A clear drops the code's cooldown entry, so "
+                      "`snapshots.recapture_cooldown_sec` (default 60) does not limit these "
+                      "clear-and-reraise cycles; it gates re-confirmation without a clear._", ""]
     rb = report.get("rosbag")
     if rb:
         lines += ["## Rosbag capture (rosbag enabled, other settings default)", "",

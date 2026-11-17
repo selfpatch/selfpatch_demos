@@ -812,7 +812,7 @@ def cmd_disk(args, root=None):
 
     occ = []
     for variant, env_extra, wait_for in (
-            ("default cooldown", {}, "occurrence"),
+            ("default cooldown", {}, "capture"),
             ("cooldown 0", {"BENCH_COOLDOWN": "0"}, "capture")):
         for m in occurrences:
             # Each occurrence is a report, then a clear, so the next report is a new
