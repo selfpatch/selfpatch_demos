@@ -184,7 +184,8 @@ def process_split_lines(cells, label_of=lambda c: c.get("label", "?")):
     for c in cells:
         if c.get("fm_status") != "ok":
             lines.append(f"| {label_of(c)} | {_mib(_pv(c, 'uss_kib'))} | "
-                         f"fault manager: {c.get('fm_status', 'n/a')} | - | - | - | "
+                         f"fault manager: {c.get('fm_status', 'n/a')}"
+                         f"{' (' + c['fm_status_reason'] + ')' if c.get('fm_status_reason') else ''} | - | - | - | "
                          f"{_pv(c, 'cpu_cores'):.2f} | - | - | - |")
             continue
         lines.append(

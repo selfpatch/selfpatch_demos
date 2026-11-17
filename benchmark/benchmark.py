@@ -69,16 +69,54 @@ def _strip(cell):
 
 
 def _aggregate_steady(reps):
-    # Aggregate steady-state stats over the repeats that actually reached steady
-    # state; a still-ramping repeat is not a valid steady-state sample. Disclose
-    # how many of the repeats were steady so the median is not silently inflated
-    # by an unsettled run.
+    """Aggregate steady-state stats over the repeats that reached steady state.
+
+    The gateway and the fault manager are judged independently: a repeat where
+    only the fault manager is unsteady keeps its gateway numbers. The counts are
+    disclosed so a median is not silently inflated by an unsettled run.
+    """
+    def is_fm(k):
+        return k.startswith("fm_") or k.startswith("sum_")
+
     steady = [r for r in reps if r.get("steady", True)]
     used = steady if steady else reps
-    cell = report.aggregate_cell([_strip(r) for r in used])
+    cell = report.aggregate_cell(
+        [{k: v for k, v in _strip(r).items() if not is_fm(k)} for r in used])
     cell["steady"] = bool(reps) and len(steady) == len(reps)
     cell["steady_count"] = f"{len(steady)}/{len(reps)}"
+    fm_present = [r for r in reps if r.get("fm_status") not in (None, "absent")]
+    if fm_present:
+        ok = [r for r in fm_present if r.get("fm_status") == "ok"]
+        fm_steady = [r for r in ok if r.get("fm_steady", True)]
+        fm_used = fm_steady if fm_steady else ok
+        if fm_used:
+            fm_cell = report.aggregate_cell(
+                [{k: v for k, v in _strip(r).items()
+                  if k.startswith("fm_") and k not in ("fm_status", "fm_status_reason",
+                                                      "fm_steady", "fm_steady_reason")}
+                 for r in fm_used])
+            for k, v in fm_cell.items():
+                if k != "repeats":
+                    cell[k] = v
+            for k in runner._SUM_KEYS:
+                gw, fm = cell.get(f"{k}_median"), cell.get(f"fm_{k}_median")
+                if gw is not None and fm is not None:
+                    cell[f"sum_{k}_median"] = gw + fm
+            cell["fm_status"] = "ok"
+        else:
+            cell["fm_status"] = fm_present[0].get("fm_status", "failed")
+        reason = next((r["fm_status_reason"] for r in fm_present
+                       if r.get("fm_status_reason")), None)
+        if reason:
+            cell["fm_status_reason"] = reason
+        cell["fm_steady"] = bool(ok) and len(fm_steady) == len(fm_present)
+        cell["fm_steady_count"] = f"{len(fm_steady)}/{len(fm_present)}"
     return cell
+
+
+def _incomplete(reps):
+    """True when a sampled process died or was lost in any repeat."""
+    return any(r.get("fm_status") in ("incomplete", "failed") for r in reps)
 
 
 def _args_dict(args):
@@ -200,6 +238,8 @@ def cmd_footprint(args, root=None):
         except Exception as exc:
             status = "partial"
             (out / f"rep{rep}.error").write_text(str(exc))
+    if _incomplete(reps):
+        status = "partial"
     cell = _aggregate_steady(reps) if reps else {}
     cell["label"] = _load_label(load_level)
     first_meta = reps[0].get("_meta", {}) if reps else {}
@@ -265,6 +305,7 @@ def cmd_scaling(args, root=None):
                     status = "partial"
                     (out / f"r{refresh}_e{ec}_{rep}.error").write_text(str(exc))
             if reps:
+                status = "partial" if _incomplete(reps) else status
                 cell = _aggregate_steady(reps)
                 cell["refresh_ms"] = refresh
                 cells.append(cell)
@@ -357,6 +398,7 @@ def cmd_sweep(args, root=None):
                 status = "partial"
                 (out / f"{label}_{rep}.error").write_text(str(exc))
         if reps:
+            status = "partial" if _incomplete(reps) else status
             cell = _aggregate_steady(reps)
             cell["label"] = label
             cells.append(cell)
@@ -566,6 +608,7 @@ def cmd_load(args, root=None):
                 (out / f"{tag}.error").write_text(str(exc))
 
         if reps:
+            status = "partial" if _incomplete(reps) else status
             agg = _aggregate_steady(reps)
             agg["label"] = level
             agg["level"] = level

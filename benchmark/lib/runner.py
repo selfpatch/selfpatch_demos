@@ -83,6 +83,15 @@ def merge_fault_manager(out, fm):
         out[f"sum_{k}"] = out[k] + fm[k]
 
 
+# A process must be sampled over this share of the window, else it died or was lost.
+_MIN_COVERAGE = 0.8
+
+
+def covered(samples, duration):
+    """True when ``samples`` span at least _MIN_COVERAGE of the ``duration`` window."""
+    return len(samples) >= 2 and samples[-1].t - samples[0].t >= _MIN_COVERAGE * duration
+
+
 def _host_load1():
     return os.getloadavg()[0]
 
@@ -304,8 +313,16 @@ def run_cell(compose_file, project, service, gateway_proc, api_base, port,
         samples, fm_samples = _sample_both(read, pid, fm_pid, clk, duration,
                                            interval, csv_path)
         out = summarize_window(samples, clk)
+        gw_covered = covered(samples, duration)
+        fm_covered = True
         if fm_pid is not None:
             merge_fault_manager(out, summarize_window(fm_samples, clk))
+            fm_covered = covered(fm_samples, duration)
+            if out.get("fm_status") == "ok" and not fm_covered:
+                span = fm_samples[-1].t - fm_samples[0].t if fm_samples else 0.0
+                out["fm_status"] = "incomplete"
+                out["fm_status_reason"] = (
+                    f"fault manager sampled for {span:.0f} s of a {duration:.0f} s window")
         else:
             out["fm_status"] = "absent"
         # Stop the generator (flushes stats), then read them while the container
@@ -318,25 +335,32 @@ def run_cell(compose_file, project, service, gateway_proc, api_base, port,
         # reads failed) is a FAILED measurement - summarize_window already flagged
         # it. Keep that: do not relabel it ok/steady, or an empty cell would
         # render downstream as a valid zero-slope steady measurement.
+        # ``steady`` is the gateway's own verdict; the fault manager has
+        # ``fm_steady``, so an unsteady fault manager never drops gateway data.
         no_samples = out.get("samples", 0) == 0
-        out["steady"] = converged and not no_samples
+        out["steady"] = converged and not no_samples and gw_covered
         if no_samples:
             out["steady_reason"] = out.get("error", "no samples collected")
+        elif not gw_covered:
+            out["steady_reason"] = "gateway was not sampled over the whole window"
         elif converged:
             is_flat, reason = _is_steady(out)
             if not is_flat:
                 out["steady"] = False
                 out["steady_reason"] = reason
-            elif out.get("fm_status") == "ok":
-                fm_flat, fm_reason = _is_steady(out, "fm_")
-                if not fm_flat:
-                    out["steady"] = False
-                    out["steady_reason"] = f"fault manager: {fm_reason}"
-            elif out.get("fm_status") == "failed":
-                out["steady"] = False
-                out["steady_reason"] = "fault manager window gathered no samples"
         else:
             out["steady_reason"] = "warmup did not converge"
+        if out.get("fm_status") == "ok":
+            out["fm_steady"] = converged
+            if converged:
+                fm_flat, fm_reason = _is_steady(out, "fm_")
+                if not fm_flat:
+                    out["fm_steady"] = False
+                    out["fm_steady_reason"] = fm_reason
+            else:
+                out["fm_steady_reason"] = "warmup did not converge"
+        elif fm_pid is not None:
+            out["fm_steady"] = False
         out["entity_count"] = count_in(container, port, api_base)
         if probe_fn is not None:
             out["probe"] = probe_fn(container)
