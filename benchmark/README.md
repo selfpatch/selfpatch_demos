@@ -101,7 +101,7 @@ The goal is numbers you can trust and compare, not a single reading.
 | `heap` | heaptrack over a long run: heap growth over time and top allocation call-sites. |
 | `memcheck` | valgrind memcheck on a short controlled run: definitely/indirectly lost bytes. |
 | `load` | Footprint, CPU, threads and request latency (p50/p95) under M concurrent HTTP clients (off/light/heavy). |
-| `fault` | Snapshot-capture impact as a burst (peak memory/CPU, capture duration, recovery) vs fault count N, with and without rosbag. |
+| `fault` | Snapshot-capture impact as a burst (peak memory/CPU, capture duration, recovery; for the fault manager the settle time and whether it retains the memory) vs fault count N, with and without rosbag. |
 | `disk` | Installed size of the Medkit packages, fault store growth, bytes per captured fault, ROS log growth. |
 | `jitter` | `cyclictest` scheduling latency alone and next to a loaded Medkit. |
 | `churn` | Leak-under-graph-churn gate: gateway USS slope on a static graph vs a churning graph (nodes recycled, bounded count). PASS/FAIL, exits 1 if memory grows under churn. |

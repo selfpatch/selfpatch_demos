@@ -510,16 +510,20 @@ def render_fault_markdown(rows: list, meta: dict = None) -> str:
     if ok_rows:
         lines += [
             "", "**Fault manager and sum during the burst (gateway columns above):**", "",
-            "| N faults | mode | peak USS delta fm | peak CPU fm | capture duration fm s | "
-            "residual fm | recovered fm | peak USS delta sum | peak CPU sum |",
+            "| N faults | mode | peak USS delta fm | peak CPU fm | settle fm s | "
+            "residual fm | retained fm | peak USS delta sum | peak CPU sum |",
             "|---|---|---|---|---|---|---|---|---|"]
         for r in ok_rows:
             lines.append(
                 f"| {r['n']} | {r['mode']} | {r['fm_peak_uss_delta_mib']:.2f} MiB | "
-                f"{r['fm_peak_cpu_cores']:.2f} | {r['fm_capture_duration_s']:.2f} | "
+                f"{r['fm_peak_cpu_cores']:.2f} | {r['fm_settle_s']:.2f} | "
                 f"{r['fm_residual_mib']:.2f} MiB | "
-                f"{'yes' if r['fm_recovered'] else 'no'} | "
+                f"{'yes' if r['fm_retained'] else 'no'} | "
                 f"{r['sum_peak_uss_delta_mib']:.2f} MiB | {r['sum_peak_cpu_cores']:.2f} |")
+        lines += ["", "_settle = seconds from the trigger until the fault manager's USS stays "
+                  "within the recovery band of its final value; retained = it ends above "
+                  "its baseline by more than that band (the store keeps the faults), so it "
+                  "does not recover._"]
     lines.append("")
 
     # Optimization signal: derive only from the cells that actually measured.

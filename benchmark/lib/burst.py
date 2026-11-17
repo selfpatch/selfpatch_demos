@@ -63,7 +63,7 @@ def summarize_burst(
     -------
     dict with keys:
         baseline_uss_kib, peak_uss_delta_kib, peak_cpu_cores,
-        capture_duration_s, residual_uss_delta_kib, recovered
+        capture_duration_s, residual_uss_delta_kib, recovered, settle_s, retained
     """
     post = [s for s in samples if s.t >= t_trigger]
     if not post:
@@ -127,6 +127,17 @@ def summarize_burst(
     # Residual: USS at end of window minus baseline.
     residual_uss_delta_kib = post[-1].uss_kib - baseline_uss_kib
 
+    # Settle: time from the trigger until USS stays within the band of its final
+    # value. A process that keeps what the burst created (an in-memory store)
+    # never recovers to baseline but does settle.
+    settle_at = post[-1].t
+    for s in reversed(post):
+        if abs(s.uss_kib - post[-1].uss_kib) > band:
+            break
+        settle_at = s.t
+    settle_s = settle_at - t_trigger
+    retained = abs(residual_uss_delta_kib) > band
+
     return {
         "baseline_uss_kib": baseline_uss_kib,
         "peak_uss_delta_kib": peak_uss_delta_kib,
@@ -134,6 +145,8 @@ def summarize_burst(
         "capture_duration_s": capture_duration_s,
         "residual_uss_delta_kib": residual_uss_delta_kib,
         "recovered": recovered,
+        "settle_s": settle_s,
+        "retained": retained,
     }
 
 

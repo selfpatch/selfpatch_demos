@@ -164,9 +164,9 @@ def build_fault_rows(
                 "rosbag_total": n if mode == "rosbag" else 0,
                 "fm_peak_uss_delta_mib": fm.get("peak_uss_delta_kib", 0.0) / 1024.0,
                 "fm_peak_cpu_cores": fm.get("peak_cpu_cores", 0.0),
-                "fm_capture_duration_s": fm.get("capture_duration_s", 0.0),
+                "fm_settle_s": fm.get("settle_s", 0.0),
                 "fm_residual_mib": fm.get("residual_uss_delta_kib", 0.0) / 1024.0,
-                "fm_recovered": fm.get("recovered", False),
+                "fm_retained": fm.get("retained", False),
                 "sum_peak_uss_delta_mib": total.get("peak_uss_delta_kib", 0.0) / 1024.0,
                 "sum_peak_cpu_cores": total.get("peak_cpu_cores", 0.0),
             })
