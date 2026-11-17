@@ -90,12 +90,13 @@ _EXTRA_PID_FILE = "/tmp/extra_cmd.pid"
 
 
 def check_extras(container, plugin_paths, has_extra_cmd, expected_entities, entity_check,
-                 run=None):
+                 run=None, end_cmd=None):
     """Did the extras survive the window: plugins loaded, the extra process still alive.
 
     ``entity_check`` returns the entity probe dict (or None). A plugin the gateway
     logged as failed to load, a dead extra process or a missing entity are
-    ``problems``; the lane is partial when there is one.
+    ``problems``; the lane is partial when there is one. ``end_cmd`` runs once in the
+    container after the window; its output goes to ``end_cmd_output``.
     """
     from benchmark.lib import docker_helpers as dh
     run = run or dh.run
@@ -121,4 +122,10 @@ def check_extras(container, plugin_paths, has_extra_cmd, expected_entities, enti
         except RuntimeError:
             out["extra_process_alive"] = False
             problems.append("the extra process exited during the run")
+    if end_cmd:
+        try:
+            out["end_cmd_output"] = dh.exec_via_file(container, end_cmd, timeout=60).strip()
+        except RuntimeError as exc:
+            out["end_cmd_output"] = None
+            problems.append(f"the end command failed: {exc}")
     return out

@@ -236,7 +236,8 @@ python -m benchmark.benchmark footprint --demo synthetic --entities 10 --repeats
 `--plugin NAME=PATH` and `--plugin-param NAME.KEY=VALUE` are repeatable (VALUE is read as
 YAML), `--gateway-param KEY=VALUE` sets a gateway parameter, `--extra-cmd` is one command
 line started in the container. `--expect-entity ID` checks after the window that the
-gateway lists the entity; a missing one marks the run `partial`. The sampled USS, CPU and
+gateway lists the entity; a missing one marks the run `partial`. `--end-cmd CMD` runs one
+command in the container after the window and stores its output in `summary.json` and the report. The sampled USS, CPU and
 threads of the gateway then include the plugin.
 
 ### A prebuilt image (synthetic lanes)

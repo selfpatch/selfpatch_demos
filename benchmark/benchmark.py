@@ -237,11 +237,13 @@ def cmd_footprint(args, root=None):
     probe_fn = None
     plugins = [spec.split("=", 1)[1] for spec in (getattr(args, "plugin", None) or [])]
     extra_cmd = getattr(args, "extra_cmd", None)
-    if expect or plugins or extra_cmd:
+    end_cmd = getattr(args, "end_cmd", None)
+    if expect or plugins or extra_cmd or end_cmd:
         probe_fn = lambda c: extras.check_extras(  # noqa: E731
             c, plugins, bool(extra_cmd), expect,
             lambda: extras.check_entities(c, GATEWAY_PORT, api_base, dh.curl_status_body,
-                                          expect))
+                                          expect),
+            end_cmd=end_cmd)
     reps, status = [], "ok"
     for rep in range(args.repeats):
         try:
@@ -279,6 +281,8 @@ def cmd_footprint(args, root=None):
                        f"({p['listed_total']} entities listed in total)\n")
             if "extra_process_alive" in p:
                 md += f"\n**Extra process alive at the end of the window:** {p['extra_process_alive']}\n"
+            if p.get("end_cmd_output") is not None:
+                md += f"\n**End command output:** `{p['end_cmd_output']}`\n"
             if "plugin_load_failures" in p:
                 md += f"\n**Plugins that failed to load:** {p['plugin_load_failures'] or 'none'}\n"
             for prob in p.get("problems", []):
@@ -1277,6 +1281,9 @@ def main():
                     metavar="KEY=VALUE", help="Extra gateway parameter; VALUE is read as YAML.")
     fp.add_argument("--extra-cmd", dest="extra_cmd", default=None,
                     help="One extra command line started in the container (a publisher).")
+    fp.add_argument("--end-cmd", dest="end_cmd", default=None,
+                    help="Command run once in the container after the window; its output "
+                         "is stored in the lane summary.")
     fp.add_argument("--expect-entity", dest="expect_entity", action="append", metavar="ID",
                     help="Entity the gateway must list after the window (repeatable); "
                          "missing ones mark the run partial.")
