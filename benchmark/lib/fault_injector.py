@@ -29,6 +29,8 @@ from typing import List
 #   string description
 _SEVERITY_CRITICAL = 3
 _EVENT_FAILED = 0
+# The node scaler/topic_source.py runs as; its published topic is what a fault captures.
+SOURCE_ID = "/bench_source"
 _SERVICE = "/fault_manager/report_fault"
 _SERVICE_TYPE = "ros2_medkit_msgs/srv/ReportFault"
 
@@ -48,11 +50,12 @@ def build_inject_yaml(source_id: str, fault_code: str, description: str) -> str:
     )
 
 
-def inject_faults(container: str, n: int, run_fn) -> None:
+def inject_faults(container: str, n: int, run_fn, prefix: str = "BENCH_FAULT_") -> None:
     """Inject N faults with distinct codes into the fault_manager via docker exec.
 
     Each fault has a unique code ``BENCH_FAULT_<i>`` and is reported at
-    CRITICAL severity so it confirms immediately (no debounce).
+    CRITICAL severity so it confirms immediately (no debounce). ``prefix`` makes
+    the codes of separate bursts distinct.
 
     ``run_fn`` is a callable with the same signature as ``docker_helpers.run``:
     it accepts a list-of-str argv and raises RuntimeError on failure.
@@ -61,9 +64,9 @@ def inject_faults(container: str, n: int, run_fn) -> None:
     workspace install envs first.
     """
     for i in range(1, n + 1):
-        fault_code = f"BENCH_FAULT_{i}"
+        fault_code = f"{prefix}{i}"
         yaml_arg = build_inject_yaml(
-            source_id="benchmark",
+            source_id=SOURCE_ID,
             fault_code=fault_code,
             description=f"benchmark burst injection {i}",
         )
@@ -146,6 +149,8 @@ def build_fault_rows(
             peak_kib = burst.get("peak_uss_delta_kib", 0.0)
             residual_kib = burst.get("residual_uss_delta_kib", 0.0)
             got = rosbag_counts.get(key, 0)
+            fm = burst.get("fault_manager", {})
+            total = burst.get("sum", {})
             rows.append({
                 "n": n,
                 "mode": mode,
@@ -157,5 +162,12 @@ def build_fault_rows(
                 "recovered": burst.get("recovered", False),
                 "rosbag_got": got,
                 "rosbag_total": n if mode == "rosbag" else 0,
+                "fm_peak_uss_delta_mib": fm.get("peak_uss_delta_kib", 0.0) / 1024.0,
+                "fm_peak_cpu_cores": fm.get("peak_cpu_cores", 0.0),
+                "fm_capture_duration_s": fm.get("capture_duration_s", 0.0),
+                "fm_residual_mib": fm.get("residual_uss_delta_kib", 0.0) / 1024.0,
+                "fm_recovered": fm.get("recovered", False),
+                "sum_peak_uss_delta_mib": total.get("peak_uss_delta_kib", 0.0) / 1024.0,
+                "sum_peak_cpu_cores": total.get("peak_cpu_cores", 0.0),
             })
     return rows

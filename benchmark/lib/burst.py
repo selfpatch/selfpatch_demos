@@ -19,8 +19,9 @@ without docker.
 from __future__ import annotations
 
 import csv
+import threading
 import time
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from benchmark.lib.metrics import Sample, compute_cpu_cores
 from benchmark.lib.sampler import CSV_HEADER, sample_once, write_sample_row
@@ -136,51 +137,67 @@ def summarize_burst(
     }
 
 
-def sample_burst(
+def sample_burst_procs(
     read_fn: Callable[[int, str], str],
-    pid: int,
+    pids: Dict[str, int],
     clk_tck: int,
     host_load_fn: Callable[[], float],
     pre_s: float,
     window_s: float,
     interval: float,
-    csv_path: str,
+    csv_paths: Dict[str, str],
     trigger_fn: Callable[[], None],
-) -> Tuple[List[Sample], float]:
-    """Sample baseline, fire trigger, then sample for window_s.
+) -> Tuple[Dict[str, List[Sample]], float]:
+    """Sample several processes, fire the trigger, keep sampling for window_s.
 
-    Returns (samples, t_trigger) where samples includes both the pre-trigger
-    baseline and the post-trigger window.  The CSV at csv_path receives all
-    samples with per-sample cpu_cores computed incrementally.
+    The trigger runs on its own thread, so sampling continues while it works
+    (injecting N faults takes seconds, and that is when the capture cost
+    happens). Returns ({name: samples}, t_trigger); each name's CSV receives its
+    rows with per-sample cpu_cores computed incrementally. A trigger exception
+    is re-raised after the window.
     """
-    samples: List[Sample] = []
-    with open(csv_path, "w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(CSV_HEADER)
-        prev = None
+    samples: Dict[str, List[Sample]] = {name: [] for name in pids}
+    prev: Dict[str, Optional[Sample]] = {name: None for name in pids}
+    errors: List[BaseException] = []
 
-        # Pre-trigger baseline
+    def _trigger():
+        try:
+            trigger_fn()
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the caller thread
+            errors.append(exc)
+
+    files = {name: open(path, "w", newline="") for name, path in csv_paths.items()}
+    try:
+        writers = {name: csv.writer(fh) for name, fh in files.items()}
+        for w in writers.values():
+            w.writerow(CSV_HEADER)
+
+        def _tick():
+            load = host_load_fn()
+            for name, pid in pids.items():
+                s = sample_once(read_fn, pid, load)
+                write_sample_row(writers[name], prev[name], s, clk_tck)
+                files[name].flush()
+                samples[name].append(s)
+                prev[name] = s
+
         end_pre = time.monotonic() + pre_s
         while time.monotonic() < end_pre:
-            s = sample_once(read_fn, pid, host_load_fn())
-            write_sample_row(w, prev, s, clk_tck)
-            fh.flush()
-            samples.append(s)
-            prev = s
+            _tick()
             time.sleep(interval)
 
-        # Trigger
         t_trigger = time.monotonic()
-        trigger_fn()
+        worker = threading.Thread(target=_trigger, daemon=True)
+        worker.start()
 
-        # Post-trigger window
         end_win = t_trigger + window_s
         while time.monotonic() < end_win:
-            s = sample_once(read_fn, pid, host_load_fn())
-            write_sample_row(w, prev, s, clk_tck)
-            fh.flush()
-            samples.append(s)
-            prev = s
+            _tick()
             time.sleep(interval)
-
+        worker.join()
+    finally:
+        for fh in files.values():
+            fh.close()
+    if errors:
+        raise errors[0]
     return samples, t_trigger

@@ -22,8 +22,25 @@ source /ws/install/setup.bash
 python3 -m benchmark.scaler.synthetic_graph &
 GRAPH_PID=$!
 trap 'kill -INT "$GRAPH_PID" 2>/dev/null || true' TERM INT
+# The fault manager runs next to the gateway at its default settings (SQLite
+# store), so the sampled runtime is both processes. TOOL runs profile the gateway
+# alone and skip it.
+if [ "${BENCH_FAULT_MANAGER:-1}" = "1" ] && [ "${TOOL:-none}" = "none" ]; then
+  mkdir -p /var/lib/ros2_medkit
+  ros2 run ros2_medkit_fault_manager fault_manager_node \
+    --ros-args -r __node:=fault_manager &
+fi
 PARAMS_ARG=()
 if [ -n "${BENCH_PARAMS_FILE:-}" ]; then PARAMS_ARG=(--params-file "${BENCH_PARAMS_FILE}"); fi
+# Extra gateway plugins and gateway parameters (footprint --plugin / --gateway-param).
+if [ -n "${BENCH_PLUGINS_JSON:-}" ] || [ -n "${BENCH_GATEWAY_PARAMS_JSON:-}" ]; then
+  python3 -m benchmark.scaler.extra_params > /tmp/extra_params.yaml
+  PARAMS_ARG+=(--params-file /tmp/extra_params.yaml)
+fi
+# One extra process in the same container (footprint --extra-cmd), e.g. a publisher.
+if [ -n "${BENCH_EXTRA_CMD:-}" ]; then
+  bash -c "${BENCH_EXTRA_CMD}" &
+fi
 GW_ARGS=(--ros-args -r __ns:=/diagnostics -r __node:=ros2_medkit_gateway \
   -p server.host:=0.0.0.0 -p server.port:=8080 "${PARAMS_ARG[@]}")
 case "${TOOL:-none}" in

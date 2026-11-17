@@ -23,7 +23,7 @@ import yaml
 
 from benchmark import turtlebot3
 from benchmark.lib import docker_helpers as dh
-from benchmark.lib import report, runmeta, runner
+from benchmark.lib import disk, extras, jitter, report, runmeta, runner
 from benchmark.lib import sampler
 from benchmark.lib.config_sweep import apply_override_at
 from benchmark.lib.fault_injector import build_fault_rows, inject_faults
@@ -65,7 +65,7 @@ def _strip(cell):
     # Drop non-numeric / non-aggregatable keys before aggregate_cell (which medians
     # every remaining key). load_stats is a dict; status/container/_meta are not data.
     return {k: v for k, v in cell.items()
-            if k not in ("status", "container", "_meta", "load_stats")}
+            if k not in ("status", "container", "_meta", "load_stats", "probe")}
 
 
 def _aggregate_steady(reps):
@@ -154,20 +154,47 @@ def _load_label(level):
     return "default" if level == "off" else f"default+load={level}"
 
 
+def _footprint_substrate(args):
+    """(compose file, service, gateway proc, api base, env, refresh_ms) for the lane.
+
+    ``--demo turtlebot3`` is the real Nav2 stack; ``--demo synthetic`` is the
+    benchmark image with a generated graph, which also takes the extra plugin
+    and process options.
+    """
+    extra = extras.build_extra_env(
+        getattr(args, "plugin", None), getattr(args, "plugin_param", None),
+        getattr(args, "gateway_param", None), getattr(args, "extra_cmd", None))
+    if args.demo == "synthetic":
+        env = dict(os.environ, BENCH_ENTITIES=str(args.entities),
+                   BENCH_TOPICS_PER_NODE="2", BENCH_MSG_TYPES="3", **extra)
+        return SYN_COMPOSE, "bench", "gateway_node", "/api/v1", env, "unknown"
+    if extra:
+        raise SystemExit("--plugin, --gateway-param and --extra-cmd need --demo synthetic: "
+                         "the turtlebot3 demo starts its gateway from its own launch file")
+    demo = turtlebot3.TURTLEBOT3
+    env = dict(os.environ, COMPOSE_PROFILES=demo.compose_profile)
+    return (str(REPO / demo.compose_file), demo.gateway_service, demo.gateway_proc,
+            demo.api_base, env, _read_demo_refresh_ms(REPO / demo.base_params_rel))
+
+
 def cmd_footprint(args, root=None):
     check_host_load(strict=getattr(args, "strict", False))
     load_level = getattr(args, "load", "off")
-    demo = turtlebot3.TURTLEBOT3
     out = _run_dir(_resolve_root(args, root), "footprint")
-    file = str(REPO / demo.compose_file)
-    env = dict(os.environ, COMPOSE_PROFILES=demo.compose_profile)
+    file, service, proc, api_base, env, refresh_ms = _footprint_substrate(args)
+    expect = getattr(args, "expect_entity", None) or []
+    probe_fn = None
+    if expect:
+        probe_fn = lambda c: extras.check_entities(  # noqa: E731
+            c, GATEWAY_PORT, api_base, dh.curl_status_body, expect)
     reps, status = [], "ok"
     for rep in range(args.repeats):
         try:
-            cell = runner.run_cell(file, "bench_fp", demo.gateway_service,
-                                   demo.gateway_proc, demo.api_base, GATEWAY_PORT, env,
-                                   args.duration, args.interval, str(out / f"rep{rep}.csv"),
-                                   load_level=load_level if load_level != "off" else None)
+            cell = runner.run_cell(file, "bench_fp", service, proc, api_base,
+                                   GATEWAY_PORT, env, args.duration, args.interval,
+                                   str(out / f"rep{rep}.csv"),
+                                   load_level=load_level if load_level != "off" else None,
+                                   probe_fn=probe_fn)
             reps.append(cell)
             (out / f"rep{rep}.json").write_text(json.dumps(cell, indent=2, default=str))
         except Exception as exc:
@@ -175,18 +202,24 @@ def cmd_footprint(args, root=None):
             (out / f"rep{rep}.error").write_text(str(exc))
     cell = _aggregate_steady(reps) if reps else {}
     cell["label"] = _load_label(load_level)
-    # Use refresh_ms from the demo params file (the actual value, not hardcoded).
-    refresh_ms = _read_demo_refresh_ms(REPO / demo.base_params_rel)
     first_meta = reps[0].get("_meta", {}) if reps else {}
     _write_metadata(out, args, first_meta, refresh_ms)
-    (out / "summary.json").write_text(json.dumps({"status": status, "cell": cell},
-                                                 indent=2, default=str))
+    probes = [r["probe"] for r in reps if r.get("probe")]
+    if probes and any(p["missing"] for p in probes):
+        status = "partial"
+    (out / "summary.json").write_text(json.dumps(
+        {"status": status, "cell": cell, "probes": probes}, indent=2, default=str))
     if reps:
         meta = json.loads((out / "run_metadata.json").read_text())
         # Surface thread breakdown in metadata for the footprint report header.
         if first_meta.get("threads"):
             meta["threads"] = first_meta["threads"]
-        (out / "report.md").write_text(report.render_footprint_markdown([cell], meta))
+        md = report.render_footprint_markdown([cell], meta)
+        for p in probes[:1]:
+            md += ("\n**Extra entities the gateway lists:** "
+                   f"found {p['found']}, missing {p['missing']} "
+                   f"({p['listed_total']} entities listed in total)\n")
+        (out / "report.md").write_text(md)
         report.render_footprint_chart([cell], str(out / "footprint.png"))
     print(f"footprint: {status} -> {out}")
 
@@ -570,9 +603,11 @@ def _fault_burst(container, n, mode, out, tag, args):
     rosbag_got count.
     """
     from statistics import median as _med
-    from benchmark.lib.burst import sample_burst, summarize_burst
+    from benchmark.lib.burst import sample_burst_procs, summarize_burst
+    from benchmark.lib.metrics import Sample
 
     pid = dh.resolve_gateway_pid(container, _FAULT_PROC)
+    fm_pid = dh.resolve_pid_by_exe(container, dh.FAULT_MANAGER_EXE)
     clk = dh.getconf_clk_tck(container)
     read = lambda p, f: dh.read_proc(container, p, f)  # noqa: E731
     host_load = lambda: os.getloadavg()[0]  # noqa: E731
@@ -580,7 +615,8 @@ def _fault_burst(container, n, mode, out, tag, args):
     # Warmup: wait for gateway to be ready and USS to settle before sampling.
     if not runner.ready_in(container, GATEWAY_PORT, "/api/v1"):
         raise RuntimeError("gateway never became ready")
-    warmup_ok = runner._warmup_gate(read, pid, container, GATEWAY_PORT, "/api/v1")
+    warmup_ok = runner._warmup_gate(read, pid, container, GATEWAY_PORT, "/api/v1",
+                                    fm_pid=fm_pid)
     if not warmup_ok:
         # Gateway did not reach steady state; mark so the caller can flag the
         # cell as not-steady rather than silently measuring a ramping baseline.
@@ -589,31 +625,39 @@ def _fault_burst(container, n, mode, out, tag, args):
     csv_path = str(out / f"{tag}.csv")
     trigger_fn = lambda: inject_faults(container, n, dh.run)  # noqa: E731
 
-    samples, t_trigger = sample_burst(
+    by_proc, t_trigger = sample_burst_procs(
         read_fn=read,
-        pid=pid,
+        pids={"gateway": pid, "fault_manager": fm_pid},
         clk_tck=clk,
         host_load_fn=host_load,
         pre_s=args.pre_s,
         window_s=args.window_s,
         interval=args.interval,
-        csv_path=csv_path,
+        csv_paths={"gateway": csv_path, "fault_manager": str(out / f"{tag}.fm.csv")},
         trigger_fn=trigger_fn,
     )
+    # Sum series: one tick samples both processes back to back, so pair by index.
+    by_proc["sum"] = [
+        Sample(g.t, g.uss_kib + f.uss_kib, g.pss_kib + f.pss_kib,
+               g.rss_kib + f.rss_kib, g.total_ticks + f.total_ticks,
+               g.num_threads + f.num_threads, g.host_load1)
+        for g, f in zip(by_proc["gateway"], by_proc["fault_manager"])]
 
-    # Baseline: median USS over pre-trigger samples.
-    pre_samples = [s for s in samples if s.t < t_trigger]
-    if not pre_samples:
-        pre_samples = samples[:1]
-    baseline_uss_kib = float(_med([s.uss_kib for s in pre_samples]))
-
-    burst_result = summarize_burst(
-        samples=samples,
-        t_trigger=t_trigger,
-        baseline_uss_kib=baseline_uss_kib,
-        window_s=args.window_s,
-        clk_tck=clk,
-    )
+    results = {}
+    for name, samples in by_proc.items():
+        # Baseline: median USS over pre-trigger samples.
+        pre_samples = [s for s in samples if s.t < t_trigger] or samples[:1]
+        results[name] = summarize_burst(
+            samples=samples,
+            t_trigger=t_trigger,
+            baseline_uss_kib=float(_med([s.uss_kib for s in pre_samples])),
+            window_s=args.window_s,
+            clk_tck=clk,
+        )
+    burst_result = dict(results["gateway"])
+    burst_result["fault_manager"] = results["fault_manager"]
+    burst_result["sum"] = results["sum"]
+    burst_result["processes"] = runner._process_meta(container, pid, fm_pid)
 
     # Count rosbag WARNs from container logs.
     rosbag_got = 0
@@ -687,6 +731,7 @@ def cmd_fault(args, root=None):
                 try:
                     burst, rosbag_got = _fault_burst(container, n, mode, out, tag, args)
                     burst_results[(n, mode)] = burst
+                    first_meta.setdefault("processes", burst.get("processes", {}))
                     rosbag_counts[(n, mode)] = rosbag_got
                     (out / f"{tag}.json").write_text(
                         json.dumps({"n": n, "mode": mode,
@@ -706,6 +751,154 @@ def cmd_fault(args, root=None):
         (out / "report.md").write_text(report.render_fault_markdown(rows, meta))
         report.render_fault_chart(rows, str(out / "fault.png"))
     print(f"fault: {status} -> {out}")
+
+
+_DISK_SERVICE = "bench-disk"
+_BUILD_NOTE = ("Built RelWithDebInfo (-g): 'installed' includes debug info, "
+               "'stripped' is the same tree after strip --strip-unneeded")
+
+
+def cmd_disk(args, root=None):
+    """Disk lane: install size, store growth, capture bytes per fault, log growth.
+
+    Every scenario is a fresh container so one store never carries over into the
+    next. Fault codes are reported at CRITICAL severity from a source node that
+    publishes one topic, so each report confirms and captures a snapshot.
+    """
+    check_host_load(strict=getattr(args, "strict", False))
+    out = _run_dir(_resolve_root(args, root), "disk")
+    faults = [int(x) for x in args.faults.split(",")]
+    occurrences = [int(x) for x in args.occurrences.split(",")]
+    base_env = dict(os.environ, BENCH_PAYLOAD_BYTES=str(args.payload_bytes))
+    report_data = {"build_note": _BUILD_NOTE, "payload_bytes": args.payload_bytes}
+    status = "ok"
+    first_meta = {}
+
+    def scenario(tag, env_extra, flood_args=None, idle_s=0.0, expect_rosbags=0):
+        nonlocal status
+        try:
+            res = disk.run_scenario(SYN_COMPOSE, f"bench_disk_{tag}", _DISK_SERVICE,
+                                    dict(base_env, **env_extra), flood_args,
+                                    idle_s, expect_rosbags)
+            (out / f"{tag}.json").write_text(json.dumps(res, indent=2, default=str))
+            return {"growth": disk.growth(res)}
+        except Exception as exc:
+            status = "partial"
+            (out / f"{tag}.error").write_text(str(exc))
+            return None
+
+    # Install size: any container of the image shows the same tree.
+    project = "bench_disk_install"
+    dh.compose_down(SYN_COMPOSE, project)
+    dh.compose_up(SYN_COMPOSE, project, env=base_env, service=_DISK_SERVICE)
+    try:
+        container = dh.service_container(SYN_COMPOSE, project, _DISK_SERVICE)
+        report_data["install"] = disk.measure_install(container)
+        first_meta["image_digest"] = dh.image_digest_of_container(container)
+        first_meta["gateway_sha"] = dh.read_gateway_sha(container)
+    finally:
+        dh.compose_down(SYN_COMPOSE, project)
+
+    distinct = []
+    for n in faults:
+        flood = f"--mode distinct --count {n}" if n else None
+        r = scenario(f"distinct_{n}", {}, flood)
+        if r:
+            r["n"] = n
+            distinct.append(r)
+    report_data["distinct"] = distinct
+    report_data["distinct_marginal_bytes"] = disk.marginal_bytes_per_fault(
+        [(r["n"], r["growth"]["db_used_bytes"]) for r in distinct])
+
+    occ = []
+    for variant, env_extra, wait_for in (
+            ("default cooldown", {}, "none"),
+            ("cooldown 0", {"BENCH_COOLDOWN": "0"}, "capture")):
+        for m in occurrences:
+            r = scenario(f"occ_{variant.replace(' ', '_')}_{m}", env_extra,
+                         f"--mode repeat --count {m} --wait-for {wait_for}")
+            if r:
+                r["n"], r["variant"] = m, variant
+                occ.append(r)
+    report_data["occurrences"] = occ
+
+    rosbag = []
+    k = args.rosbag_faults
+    for variant, wait_for, expect in (
+            ("sequential (one recording each)", "rosbag", k),
+            ("burst (shared recording)", "none", 1)):
+        r = scenario("rosbag_" + variant.split()[0], {"BENCH_ROSBAG": "1"},
+                     f"--mode distinct --count {k} --wait-for {wait_for}",
+                     expect_rosbags=expect)
+        if r:
+            r["variant"] = variant
+            rosbag.append(r)
+    report_data["rosbag"] = rosbag
+
+    if args.idle_s:
+        report_data["idle"] = scenario("idle", {}, idle_s=args.idle_s)
+
+    meta = _write_metadata(out, args, first_meta, refresh_ms="n/a")
+    (out / "summary.json").write_text(
+        json.dumps({"status": status, **report_data}, indent=2, default=str))
+    (out / "report.md").write_text(disk.render_disk_markdown(report_data, meta))
+    print(f"disk: {status} -> {out}")
+
+
+_JITTER_SERVICE = "bench-jitter"
+
+
+def cmd_jitter(args, root=None):
+    """Jitter lane: cyclictest alone (baseline) and next to Medkit under load.
+
+    The loaded scenario runs the gateway and fault manager, repeated bursts of
+    --burst faults and the heavy HTTP client load for the whole cyclictest run.
+    """
+    from benchmark.lib import cyclictest
+    check_host_load(strict=getattr(args, "strict", False))
+    out = _run_dir(_resolve_root(args, root), "jitter")
+    params = {"args": cyclictest.build_args(args.duration, args.cpu),
+              "cpu": args.cpu, "duration_s": int(args.duration)}
+    rows, status, first_meta = [], "ok", {}
+    for run in range(1, args.repeats + 1):
+        for scenario, medkit in (("baseline (no Medkit)", False), ("Medkit under load", True)):
+            project = f"bench_jitter_{int(medkit)}"
+            env = dict(os.environ, BENCH_JITTER_MEDKIT="1" if medkit else "0")
+            dh.compose_down(SYN_COMPOSE, project)
+            dh.compose_up(SYN_COMPOSE, project, env=env, service=_JITTER_SERVICE)
+            try:
+                container = dh.service_container(SYN_COMPOSE, project, _JITTER_SERVICE)
+                if medkit:
+                    if not runner.ready_in(container, GATEWAY_PORT, "/api/v1"):
+                        raise RuntimeError("gateway never became ready")
+                    pid = dh.resolve_gateway_pid(container, _FAULT_PROC)
+                    fm_pid = dh.resolve_pid_by_exe(container, dh.FAULT_MANAGER_EXE)
+                    read = lambda p, f: dh.read_proc(container, p, f)  # noqa: E731
+                    if not runner._warmup_gate(read, pid, container, GATEWAY_PORT,
+                                               "/api/v1", fm_pid=fm_pid):
+                        raise RuntimeError("warmup gate did not converge")
+                    if not first_meta:
+                        first_meta["processes"] = runner._process_meta(container, pid, fm_pid)
+                    res, raw = jitter.run_load_window(
+                        container, args.duration, args.cpu, args.burst,
+                        lambda: runner._start_load_in_container(
+                            container, "heavy", args.duration + 30, GATEWAY_PORT, "/api/v1"),
+                        lambda: runner._stop_load_in_container(container))
+                else:
+                    res, raw = jitter.run_cyclictest(container, args.duration, args.cpu)
+                (out / f"run{run}_{int(medkit)}.txt").write_text(raw)
+                rows.append({"scenario": scenario, "run": run, **res})
+            except Exception as exc:
+                status = "partial"
+                (out / f"run{run}_{int(medkit)}.error").write_text(str(exc))
+            finally:
+                dh.compose_down(SYN_COMPOSE, project)
+    meta = _write_metadata(out, args, first_meta, refresh_ms="n/a")
+    (out / "summary.json").write_text(json.dumps(
+        {"status": status, "rows": rows, "preempt_rt": meta["preempt_rt"],
+         "kernel": meta["kernel"], "params": params}, indent=2, default=str))
+    (out / "report.md").write_text(jitter.render_jitter_markdown(rows, meta, params))
+    print(f"jitter: {status} -> {out}")
 
 
 def cmd_churn(args, root=None):
@@ -967,6 +1160,19 @@ def main():
     common(fp)
     fp.add_argument("--load", choices=["off", "light", "heavy"], default="off",
                     help="Run an in-container HTTP load generator during the sample window.")
+    fp.add_argument("--entities", type=int, default=10,
+                    help="Synthetic graph size (--demo synthetic).")
+    fp.add_argument("--plugin", action="append", metavar="NAME=PATH",
+                    help="Load an extra gateway plugin .so (repeatable; --demo synthetic).")
+    fp.add_argument("--plugin-param", dest="plugin_param", action="append",
+                    metavar="NAME.KEY=VALUE", help="Plugin setting; VALUE is read as YAML.")
+    fp.add_argument("--gateway-param", dest="gateway_param", action="append",
+                    metavar="KEY=VALUE", help="Extra gateway parameter; VALUE is read as YAML.")
+    fp.add_argument("--extra-cmd", dest="extra_cmd", default=None,
+                    help="One extra command line started in the container (a publisher).")
+    fp.add_argument("--expect-entity", dest="expect_entity", action="append", metavar="ID",
+                    help="Entity the gateway must list after the window (repeatable); "
+                         "missing ones mark the run partial.")
     fp.set_defaults(func=cmd_footprint)
 
     sc = sub.add_parser("scaling")
@@ -1019,6 +1225,30 @@ def main():
     fl.add_argument("--demo", default="synthetic",
                     help="Substrate: 'synthetic' (default) or 'turtlebot3'.")
     fl.set_defaults(func=cmd_fault)
+
+    dk = sub.add_parser(
+        "disk",
+        help="Disk lane: install size, fault store growth, capture bytes, log growth.")
+    dk.add_argument("--faults", default="0,10,100,1000",
+                    help="Distinct fault counts to report, one fresh container each.")
+    dk.add_argument("--occurrences", default="1,10,50",
+                    help="Reports of ONE fault code (past snapshots.max_per_fault=10).")
+    dk.add_argument("--rosbag-faults", dest="rosbag_faults", type=int, default=5,
+                    help="Faults reported in each rosbag scenario.")
+    dk.add_argument("--idle-s", dest="idle_s", type=float, default=60.0,
+                    help="Window for the no-fault log growth scenario (0 = skip).")
+    dk.add_argument("--payload-bytes", dest="payload_bytes", type=int, default=1024,
+                    help="Size of the String the source node publishes (captured per fault).")
+    dk.set_defaults(func=cmd_disk, demo="synthetic")
+
+    jt = sub.add_parser(
+        "jitter",
+        help="cyclictest latency alone and next to a loaded Medkit; flags a non-RT kernel.")
+    jt.add_argument("--duration", type=float, default=120, help="Seconds per cyclictest run.")
+    jt.add_argument("--repeats", type=int, default=3, help="Runs per scenario.")
+    jt.add_argument("--cpu", type=int, default=2, help="CPU the measurement thread is pinned to.")
+    jt.add_argument("--burst", type=int, default=4, help="Faults per injected burst.")
+    jt.set_defaults(func=cmd_jitter, demo="synthetic")
 
     ch = sub.add_parser(
         "churn",

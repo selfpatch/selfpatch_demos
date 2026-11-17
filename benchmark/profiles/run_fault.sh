@@ -30,6 +30,11 @@ else
     ROSBAG_FLAG="false"
 fi
 
+# A node that publishes one topic: faults reported with source /bench_source
+# capture it (entity-default snapshots, entity rosbag topics).
+python3 -m benchmark.scaler.topic_source &
+SRC_PID=$!
+
 # Start fault_manager_node in background on the same namespace.
 ros2 run ros2_medkit_fault_manager fault_manager_node \
     --ros-args \
@@ -53,8 +58,9 @@ ros2 run ros2_medkit_gateway gateway_node \
     -p server.port:=8080 &
 GW_PID=$!
 
-trap 'kill -INT "${FM_PID}" "${GW_PID}" 2>/dev/null || true' TERM INT
+trap 'kill -INT "${SRC_PID}" "${FM_PID}" "${GW_PID}" 2>/dev/null || true' TERM INT
 
 wait "${GW_PID}"
 kill -INT "${FM_PID}" 2>/dev/null || true
 wait "${FM_PID}" 2>/dev/null || true
+kill -INT "${SRC_PID}" 2>/dev/null || true

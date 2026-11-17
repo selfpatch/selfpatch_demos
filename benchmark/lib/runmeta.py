@@ -26,6 +26,11 @@ def _local(path):
         return ""
 
 
+def is_preempt_rt(kernel_version, sys_realtime=""):
+    """True for a PREEMPT_RT kernel: its version string says so, or /sys/kernel/realtime is 1."""
+    return "PREEMPT_RT" in kernel_version or sys_realtime.strip() == "1"
+
+
 def collect(args, demo_name, cell_meta=None, refresh_ms=None):
     """Build a run metadata dict from host-local sources and per-cell metadata.
 
@@ -71,9 +76,12 @@ def collect(args, demo_name, cell_meta=None, refresh_ms=None):
         "cpu_model": cpu_model,
         "mem_total_kb": mem_total_kb,
         "kernel": platform.release(),
+        "kernel_version": platform.version(),
+        "preempt_rt": is_preempt_rt(platform.version(), _local("/sys/kernel/realtime")),
         "ros_distro": os.environ.get("ROS_DISTRO", "jazzy"),
         "dds_impl": os.environ.get("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp"),
         "allocator": cell_meta.get("allocator", "unknown"),
+        "processes": cell_meta.get("processes", {}),
         "refresh_interval_ms": refresh_ms,
         "host_load1": os.getloadavg()[0],
         "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),

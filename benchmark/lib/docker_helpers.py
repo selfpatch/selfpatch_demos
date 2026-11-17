@@ -84,6 +84,49 @@ def resolve_gateway_pid(container, proc="gateway_node"):
                            timeout=_EXEC_TIMEOUT))
 
 
+# A process started through `ros2 run` has a python launcher in front of it, and
+# `pgrep -x` cannot match names over 15 characters (fault_manager_node has 18).
+# Match the full command line: argv[0] must end in the executable name, which the
+# launcher's own command line (python3 .../ros2 run <pkg> <exe>) never does.
+_EXE_CMDLINE_RE = r"^[^ ]*/{exe}( |$)"
+
+FAULT_MANAGER_EXE = "fault_manager_node"
+
+
+def resolve_pid_by_exe(container, exe):
+    """PID of the single process whose argv[0] ends in ``/<exe>``."""
+    out = run(["docker", "exec", container, "pgrep", "-f",
+               _EXE_CMDLINE_RE.format(exe=exe)], timeout=_EXEC_TIMEOUT)
+    pids = [p for p in out.split() if p.strip()]
+    if not pids:
+        raise RuntimeError(f"no {exe} process found")
+    if len(pids) > 1:
+        raise RuntimeError(f"multiple {exe} pids: {pids}")
+    return int(pids[0])
+
+
+def read_cmdline(container, pid):
+    """Full command line of a PID, arguments joined by spaces."""
+    raw = run(["docker", "exec", container, "cat", f"/proc/{pid}/cmdline"],
+              timeout=_EXEC_TIMEOUT)
+    return raw.replace("\0", " ").strip()
+
+
+def ros_bash(container, script, timeout=_EXEC_TIMEOUT):
+    """Run a bash script in the container with the ROS environment sourced.
+
+    `docker exec` does not inherit the compose `environment:`, so the container's
+    ROS_DOMAIN_ID is read from PID 1 and exported; without it the command would
+    join domain 0 and see no node of the container.
+    """
+    prelude = (
+        "export ROS_DOMAIN_ID=$(tr '\\0' '\\n' < /proc/1/environ | "
+        "sed -n 's/^ROS_DOMAIN_ID=//p'); "
+        "source /opt/ros/jazzy/setup.bash; source /ws/install/setup.bash; ")
+    return run(["docker", "exec", container, "bash", "-c", prelude + script],
+               timeout=timeout)
+
+
 def read_proc(container, pid, fname):
     return run(["docker", "exec", container, "cat", f"/proc/{pid}/{fname}"],
                timeout=_EXEC_TIMEOUT)
