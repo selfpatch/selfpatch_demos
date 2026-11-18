@@ -15,5 +15,14 @@
     "scaling.exponent": 0.2930011978650536,
     "scaling.ci_lo": 0.03479966730245926,
     "scaling.ci_hi": 0.551202728427648
+  },
+  "setup": {
+    "scaling": {
+      "demo": "synthetic",
+      "fault_manager": false
+    },
+    "footprint": {
+      "demo": "turtlebot3"
+    }
   }
 }

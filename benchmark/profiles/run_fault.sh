@@ -30,15 +30,22 @@ else
     ROSBAG_FLAG="false"
 fi
 
-# Start fault_manager_node in background on the same namespace.
+# A node that publishes one topic: faults reported with source /bench_source
+# capture it (entity-default snapshots, entity rosbag topics).
+python3 -m benchmark.scaler.topic_source &
+SRC_PID=$!
+
+mkdir -p /var/lib/ros2_medkit/rosbags
+# fault_manager_node runs in the root namespace: the injector and the gateway
+# call /fault_manager/report_fault.
 ros2 run ros2_medkit_fault_manager fault_manager_node \
     --ros-args \
-    -r __ns:=/diagnostics \
     -r __node:=fault_manager \
     -p storage_type:=memory \
     -p confirmation_threshold:=-1 \
     -p snapshots.enabled:=true \
     -p "snapshots.rosbag.enabled:=${ROSBAG_FLAG}" \
+    -p snapshots.rosbag.storage_path:=/var/lib/ros2_medkit/rosbags \
     -p snapshots.rosbag.duration_sec:=5.0 \
     -p snapshots.rosbag.format:=mcap &
 FM_PID=$!
@@ -53,8 +60,9 @@ ros2 run ros2_medkit_gateway gateway_node \
     -p server.port:=8080 &
 GW_PID=$!
 
-trap 'kill -INT "${FM_PID}" "${GW_PID}" 2>/dev/null || true' TERM INT
+trap 'kill -INT "${SRC_PID}" "${FM_PID}" "${GW_PID}" 2>/dev/null || true' TERM INT
 
 wait "${GW_PID}"
 kill -INT "${FM_PID}" 2>/dev/null || true
 wait "${FM_PID}" 2>/dev/null || true
+kill -INT "${SRC_PID}" 2>/dev/null || true

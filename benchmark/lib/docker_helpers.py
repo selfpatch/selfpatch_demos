@@ -13,7 +13,10 @@
 # limitations under the License.
 """docker/compose wrappers + gateway PID resolution inside a container."""
 from __future__ import annotations
+import os
 import subprocess
+import time
+import uuid
 
 # Per-call subprocess timeouts (seconds). A wedged `docker exec` or a gateway
 # that accepts a connection but never responds must not hang the whole harness
@@ -48,7 +51,10 @@ def compose(args, file, project):
 def compose_up(file, project, env=None, service=None):
     # Bring up ONLY the target service (+ its depends_on) so sibling services in
     # the compose file (e.g. a fixed-container-name web UI) don't start/conflict.
-    args = ["up", "-d", "--build"]
+    # BENCH_IMAGE names a prebuilt image: a build would overwrite its tag, and a
+    # missing tag must fail the lane, not trigger a build or a pull.
+    prebuilt = bool((env if env is not None else os.environ).get("BENCH_IMAGE"))
+    args = ["up", "-d", "--no-build", "--pull", "never"] if prebuilt else ["up", "-d", "--build"]
     if service:
         args.append(service)
     run(compose(args, file, project), env=env, timeout=_BUILD_TIMEOUT)
@@ -82,6 +88,80 @@ def parse_pgrep(out):
 def resolve_gateway_pid(container, proc="gateway_node"):
     return parse_pgrep(run(["docker", "exec", container, "pgrep", "-x", proc],
                            timeout=_EXEC_TIMEOUT))
+
+
+# A process started through `ros2 run` has a python launcher in front of it, and
+# `pgrep -x` cannot match names over 15 characters (fault_manager_node has 18).
+# Match the full command line: argv[0] must end in the executable name, which the
+# launcher's own command line (python3 .../ros2 run <pkg> <exe>) never does.
+_EXE_CMDLINE_RE = r"^[^ ]*/{exe}( |$)"
+
+FAULT_MANAGER_EXE = "fault_manager_node"
+
+
+def resolve_pid_by_exe(container, exe):
+    """PID of the single process whose argv[0] ends in ``/<exe>``."""
+    out = run(["docker", "exec", container, "pgrep", "-f",
+               _EXE_CMDLINE_RE.format(exe=exe)], timeout=_EXEC_TIMEOUT)
+    pids = [p for p in out.split() if p.strip()]
+    if not pids:
+        raise RuntimeError(f"no {exe} process found")
+    if len(pids) > 1:
+        raise RuntimeError(f"multiple {exe} pids: {pids}")
+    return int(pids[0])
+
+
+def read_cmdline(container, pid):
+    """Full command line of a PID, arguments joined by spaces."""
+    raw = run(["docker", "exec", container, "cat", f"/proc/{pid}/cmdline"],
+              timeout=_EXEC_TIMEOUT)
+    return raw.replace("\0", " ").strip()
+
+
+ROS_PRELUDE = (
+    "export ROS_DOMAIN_ID=$(tr '\\0' '\\n' < /proc/1/environ | "
+    "sed -n 's/^ROS_DOMAIN_ID=//p'); "
+    "source /opt/ros/jazzy/setup.bash; source /ws/install/setup.bash; ")
+
+
+def ros_bash(container, script, timeout=_EXEC_TIMEOUT):
+    """Run a bash script in the container with the ROS environment sourced.
+
+    `docker exec` does not inherit the compose `environment:`, so the container's
+    ROS_DOMAIN_ID is read from PID 1 and exported; without it the command would
+    join domain 0 and see no node of the container.
+    """
+    return run(["docker", "exec", container, "bash", "-c", ROS_PRELUDE + script],
+               timeout=timeout)
+
+
+def exec_via_file(container, script, timeout=_EXEC_TIMEOUT, shell="bash", poll_s=1.0):
+    """Run ``script`` in the container and return its stdout and stderr.
+
+    An attached ``docker exec`` can return before a long command ends and lose
+    its late output. The script runs detached, writes its output and exit code
+    to files, and this call polls for the exit-code file until ``timeout``.
+    A non-zero exit code raises RuntimeError.
+    """
+    tag = uuid.uuid4().hex[:12]
+    out, rc = f"/tmp/.bench_exec_{tag}.out", f"/tmp/.bench_exec_{tag}.rc"
+    wrapped = f"rm -f {rc}; ( {script} ) > {out} 2>&1; echo $? > {rc}"
+    run(["docker", "exec", "-d", container, shell, "-c", wrapped], timeout=_EXEC_TIMEOUT)
+    end = time.monotonic() + timeout
+    while True:
+        res = subprocess.run(["docker", "exec", container, "cat", rc],
+                             capture_output=True, text=True, timeout=_EXEC_TIMEOUT)
+        if res.returncode == 0 and res.stdout.strip():
+            code = res.stdout.strip()
+            break
+        if time.monotonic() > end:
+            raise RuntimeError(f"command did not finish within {timeout}s")
+        time.sleep(poll_s)
+    text = run(["docker", "exec", container, "cat", out], timeout=_EXEC_TIMEOUT)
+    run(["docker", "exec", container, "rm", "-f", out, rc], timeout=_EXEC_TIMEOUT)
+    if code != "0":
+        raise RuntimeError(f"command exited {code}: {text.strip()[-300:]}")
+    return text
 
 
 def read_proc(container, pid, fname):

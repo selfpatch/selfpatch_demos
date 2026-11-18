@@ -1,6 +1,6 @@
 services:
   bench:
-    image: ros2-medkit-benchmark:local
+    image: "${BENCH_IMAGE:-ros2-medkit-benchmark:local}"
     build:
       context: ..
       dockerfile: profiles/Dockerfile.benchmark
@@ -13,6 +13,10 @@ services:
       BENCH_MSG_TYPES: "${BENCH_MSG_TYPES:-3}"
       BENCH_CHURN_SEC: "${BENCH_CHURN_SEC:-0}"
       BENCH_CHURN_COUNT: "${BENCH_CHURN_COUNT:-5}"
+      BENCH_FAULT_MANAGER: "${BENCH_FAULT_MANAGER:-1}"
+      BENCH_PLUGINS_JSON: "${BENCH_PLUGINS_JSON:-}"
+      BENCH_GATEWAY_PARAMS_JSON: "${BENCH_GATEWAY_PARAMS_JSON:-}"
+      BENCH_EXTRA_CMD: "${BENCH_EXTRA_CMD:-}"
       TOOL: "${TOOL:-none}"
       BENCH_PARAMS_FILE: "${BENCH_PARAMS_FILE:-}"
     command: ["bash", "/ws/benchmark/profiles/run_gateway_and_graph.sh"]
@@ -24,7 +28,7 @@ services:
   # fault lane: gateway_node + fault_manager_node, no synthetic graph.
   # BENCH_ROSBAG=1 enables rosbag capture on snapshot (off by default).
   bench-fault:
-    image: ros2-medkit-benchmark:local
+    image: "${BENCH_IMAGE:-ros2-medkit-benchmark:local}"
     build:
       context: ..
       dockerfile: profiles/Dockerfile.benchmark
@@ -38,3 +42,46 @@ services:
     shm_size: "512m"
     ulimits:
       nofile: {soft: 65536, hard: 65536}
+
+  # disk lane: fault manager at default settings, a topic source and the gateway.
+  # BENCH_ROSBAG=1 enables rosbag recording; BENCH_COOLDOWN sets the
+  # snapshot recapture cooldown in seconds (unset = the fault manager default).
+  bench-disk:
+    image: "${BENCH_IMAGE:-ros2-medkit-benchmark:local}"
+    build:
+      context: ..
+      dockerfile: profiles/Dockerfile.benchmark
+      args:
+        ROS2_MEDKIT_REF: "${ROS2_MEDKIT_REF:-main}"
+    environment:
+      ROS_DOMAIN_ID: "43"
+      BENCH_ROSBAG: "${BENCH_ROSBAG:-0}"
+      BENCH_RETAIN: "${BENCH_RETAIN:-0}"
+      BENCH_COOLDOWN: "${BENCH_COOLDOWN:-}"
+      BENCH_PAYLOAD_BYTES: "${BENCH_PAYLOAD_BYTES:-1024}"
+    command: ["bash", "/ws/benchmark/profiles/run_disk.sh"]
+    mem_limit: "4g"
+    shm_size: "512m"
+    ulimits:
+      nofile: {soft: 65536, hard: 65536}
+
+  # jitter lane: cyclictest runs next to Medkit (BENCH_JITTER_MEDKIT=1) or alone.
+  # SYS_NICE and rtprio allow cyclictest to run as SCHED_FIFO.
+  bench-jitter:
+    image: "${BENCH_IMAGE:-ros2-medkit-benchmark:local}"
+    build:
+      context: ..
+      dockerfile: profiles/Dockerfile.benchmark
+      args:
+        ROS2_MEDKIT_REF: "${ROS2_MEDKIT_REF:-main}"
+    environment:
+      ROS_DOMAIN_ID: "44"
+      BENCH_JITTER_MEDKIT: "${BENCH_JITTER_MEDKIT:-0}"
+      BENCH_ROSBAG: "${BENCH_ROSBAG:-0}"
+    command: ["bash", "/ws/benchmark/profiles/run_jitter.sh"]
+    cap_add: ["SYS_NICE"]
+    mem_limit: "4g"
+    shm_size: "512m"
+    ulimits:
+      nofile: {soft: 65536, hard: 65536}
+      rtprio: {soft: 99, hard: 99}

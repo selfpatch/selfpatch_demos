@@ -54,6 +54,25 @@ def host_matches(baseline: dict, run_meta: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def setup_mismatch(baseline: dict, lane: str, run_setup: dict | None) -> str | None:
+    """Reason a run's setup differs from the baseline's for ``lane``, else None.
+
+    The setup is the substrate (demo) and whether the fault manager was running
+    and sampled. A baseline without a recorded setup for the lane is not checked;
+    a run without one never matches a baseline that records it.
+    """
+    want = (baseline.get("setup") or {}).get(lane)
+    if want is None:
+        return None
+    if not run_setup:
+        return "the run records no setup (demo, fault manager); it predates the baseline check"
+    for key in ("demo", "fault_manager"):
+        if key in want and want[key] != run_setup.get(key):
+            return (f"{key} is {run_setup.get(key)!r}, the baseline was measured with "
+                    f"{want[key]!r}")
+    return None
+
+
 def extract_metrics(lane: str, summary: dict) -> dict[str, float | None]:
     """Extract comparable scalar metrics from a lane summary.json dict.
 

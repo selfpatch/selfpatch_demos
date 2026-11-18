@@ -145,11 +145,57 @@ def render_churn_markdown(static_cell, churn_cell, verdict, meta=None):
         lines.append(
             f"| {c.get('label', '?')} | {_mib(c.get('uss_kib', 0))} | "
             f"{slope:.0f} [{lo:.0f},{hi:.0f}] | {_steady_str(c)} |")
+    lines += process_split_lines([static_cell, churn_cell])
     return "\n".join(lines) + "\n"
 
 
 def _mib(kib):
     return f"{kib / 1024:.1f} MiB"
+
+
+def _pv(c, key):
+    """A cell value: the cross-repeat median when aggregated, else the raw value."""
+    return c.get(f"{key}_median", c.get(key))
+
+
+def process_meta_lines(meta):
+    """One line per sampled process: its PID and the command line it was resolved from."""
+    procs = (meta or {}).get("processes") or {}
+    if not procs:
+        return []
+    lines = ["_sampled processes (PID, command line):_", ""]
+    for name, p in procs.items():
+        lines.append(f"- `{name}` pid {p['pid']}: `{p['cmdline']}`")
+    return lines + [""]
+
+
+def process_split_lines(cells, label_of=lambda c: c.get("label", "?")):
+    """Per-process table: gateway, fault manager and their sum, one row per cell.
+
+    Returns [] when no cell carries fault manager numbers. A cell whose fault
+    manager was absent or failed renders an explicit marker, not zeros.
+    """
+    if not any(c.get("fm_status") for c in cells):
+        return []
+    lines = ["", "**Per process (gateway / fault manager / sum):**", "",
+             "| Config | USS gw | USS fm | USS sum | PSS sum | RSS sum (upper) | "
+             "CPU gw | CPU fm | CPU sum | threads gw / fm / sum |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+    for c in cells:
+        if c.get("fm_status") != "ok":
+            lines.append(f"| {label_of(c)} | {_mib(_pv(c, 'uss_kib'))} | "
+                         f"fault manager: {c.get('fm_status', 'n/a')}"
+                         f"{' (' + c['fm_status_reason'] + ')' if c.get('fm_status_reason') else ''} | - | - | - | "
+                         f"{_pv(c, 'cpu_cores'):.2f} | - | - | - |")
+            continue
+        lines.append(
+            f"| {label_of(c)} | {_mib(_pv(c, 'uss_kib'))} | {_mib(_pv(c, 'fm_uss_kib'))} | "
+            f"{_mib(_pv(c, 'sum_uss_kib'))} | {_mib(_pv(c, 'sum_pss_kib'))} | "
+            f"{_mib(_pv(c, 'sum_rss_kib'))} | {_pv(c, 'cpu_cores'):.2f} | "
+            f"{_pv(c, 'fm_cpu_cores'):.2f} | {_pv(c, 'sum_cpu_cores'):.2f} | "
+            f"{_pv(c, 'num_threads'):.0f} / {_pv(c, 'fm_num_threads'):.0f} / "
+            f"{_pv(c, 'sum_num_threads'):.0f} |")
+    return lines
 
 
 def _steady_str(c):
@@ -191,6 +237,7 @@ def render_footprint_markdown(cells, meta):
     thread_info = meta.get("threads")
     if thread_info:
         lines += [f"_thread breakdown: {_thread_breakdown_str(thread_info)}_", ""]
+    lines += process_meta_lines(meta)
     lines += [
         "| Config | steady | USS med | USS IQR (x-rep) | USS IQR (within) | PSS | "
         "RSS (upper) | CPU-cores | USS slope B/s [CI] | peak USS | threads | reps | samples |",
@@ -211,6 +258,7 @@ def render_footprint_markdown(cells, meta):
             f"[{lo95:.0f},{hi95:.0f}]{rising} | "
             f"{_mib(c['peak_uss_kib_median'])} | {c['num_threads_median']:.0f} | "
             f"{c['repeats']} | {c['samples']} |")
+    lines += process_split_lines(cells)
     lines.append("")
     lines.append("_\\* = fewer than 3 repeats, ! = steady check failed_")
     return "\n".join(lines) + "\n"
@@ -245,6 +293,7 @@ def render_scaling_markdown(rows, verdict, fit, meta=None):
         warn = _high_load_warning(meta)
         if warn:
             lines += [warn, ""]
+    lines += process_meta_lines(meta)
     lines += [f"**Verdict:** {verdict}", "",
               f"_fit: USS ~ entities^{fit['exponent']:.2f}, R2={fit['r2']:.2f}, "
               f"CI [{fit.get('ci_lo', 0):.2f},{fit.get('ci_hi', 0):.2f}]_", "",
@@ -256,6 +305,8 @@ def render_scaling_markdown(rows, verdict, fit, meta=None):
             f"| {r['entity_count']} | {r.get('node_count', '-')} | {r.get('refresh_ms', '-')} | "
             f"{_mib(r['uss_kib_median'])} | {r['uss_per_entity'] / 1024:.3f} MiB | "
             f"{r['cpu_cores_median']:.2f} | {r['repeats']} | {steady_str} |")
+    lines += process_split_lines(
+        rows, lambda r: f"{r['entity_count']} entities, refresh {r.get('refresh_ms', '-')} ms")
     return "\n".join(lines) + "\n"
 
 
@@ -266,6 +317,7 @@ def render_sweep_markdown(cells, meta=None):
         warn = _high_load_warning(meta)
         if warn:
             lines += [warn, ""]
+    lines += process_meta_lines(meta)
     lines += ["| Config | steady | USS med | USS IQR | CPU-cores | dUSS vs default |",
               "|---|---|---|---|---|---|"]
     for c in cells:
@@ -276,6 +328,7 @@ def render_sweep_markdown(cells, meta=None):
                      f"{_mib(c['uss_kib_median'])} | "
                      f"{_mib(c['uss_kib_q1'])}-{_mib(c['uss_kib_q3'])} | "
                      f"{c['cpu_cores_median']:.2f} | {d:+.1f} MiB |")
+    lines += process_split_lines(cells)
     return "\n".join(lines) + "\n"
 
 
@@ -370,6 +423,7 @@ def render_load_markdown(cells: list) -> str:
             f"{c.get('p50_ms', 0.0):.1f} | {c.get('p95_ms', 0.0):.1f} | "
             f"{c.get('repeats', 1)} |"
         )
+    lines += process_split_lines(cells, lambda c: c.get("level", "?"))
     lines.append("")
 
     # Optimization signal
@@ -426,6 +480,7 @@ def render_fault_markdown(rows: list, meta: dict = None) -> str:
         lines += [
             f"_host: {meta.get('cpu_model')} x{meta.get('nproc')}, "
             f"{meta.get('mem_total_kb', 0) // 1024} MiB_", ""]
+        lines += process_meta_lines(meta)
     lines += [
         "_Each (N, mode) cell is a single-sample measurement (n=1): one fresh "
         "container per N, one burst. Values are not IQR-qualified; treat them as "
@@ -454,6 +509,30 @@ def render_fault_markdown(rows: list, meta: dict = None) -> str:
             f"{'yes' if r['recovered'] else 'no'} | "
             f"{rosbag_str} |"
         )
+    ok_rows = [r for r in rows if r.get("status") != "error" and "fm_peak_cpu_cores" in r]
+    if ok_rows:
+        lines += [
+            "", "**Fault manager and sum during the burst (gateway columns above):**", "",
+            "| N faults | mode | peak USS delta fm | peak CPU fm | settle fm s | "
+            "residual fm | retained fm | peak USS delta sum | peak CPU sum |",
+            "|---|---|---|---|---|---|---|---|---|"]
+        for r in ok_rows:
+            lines.append(
+                f"| {r['n']} | {r['mode']} | {r['fm_peak_uss_delta_mib']:.2f} MiB | "
+                f"{r['fm_peak_cpu_cores']:.2f} | {'never' if r['fm_settle_s'] is None else format(r['fm_settle_s'], '.2f')} | "
+                f"{r['fm_residual_mib']:.2f} MiB | "
+                f"{'yes' if r['fm_retained'] else 'no'} | "
+                f"{r['sum_peak_uss_delta_mib']:.2f} MiB | {r['sum_peak_cpu_cores']:.2f} |")
+        offs = [r["sampler_offset_s"] for r in ok_rows if r.get("sampler_offset_s") is not None]
+        if offs:
+            lines += ["", f"_The two processes are read in parallel; their sample times differ by "
+                          f"a median of {max(offs) * 1000:.0f} ms at most (worst cell)._"]
+        lines += ["", "_rosbag got/N = recordings found in the rosbag directory over faults "
+                  "injected (the injector reports them one after another)._"]
+        lines += ["", "_settle = seconds from the trigger until the fault manager's USS stays "
+                  "within the recovery band of its final value (never = it did not settle); "
+                  "retained = it ends above its baseline by more than that band (the store keeps the faults), so it "
+                  "does not recover._"]
     lines.append("")
 
     # Optimization signal: derive only from the cells that actually measured.

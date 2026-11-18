@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import threading
 import time
@@ -167,8 +168,27 @@ def _sse_worker(url: str, stop_event: threading.Event) -> None:
         pass
 
 
-def run_load(base_url: str, level: str, duration_s: float) -> dict:
-    """Run load for duration_s seconds and return stats dict."""
+def _progress_writer(path: str, latencies: list, error_latencies: list,
+                     lock: threading.Lock, stop_event: threading.Event) -> None:
+    """Write the running request counts and the wall time to ``path`` twice a second."""
+    while True:
+        with lock:
+            doc = {"t": time.time(), "request_count": len(latencies) + len(error_latencies),
+                   "error_count": len(error_latencies)}
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(doc, f)
+        os.replace(tmp, path)
+        if stop_event.wait(0.5):
+            return
+
+
+def run_load(base_url: str, level: str, duration_s: float, progress: str | None = None) -> dict:
+    """Run load for duration_s seconds and return stats dict.
+
+    ``progress`` is a file the running counts are written to, so a caller can read
+    the work done inside a window of its own.
+    """
     workers, rate_per_s, sse_count = _LEVELS.get(level, _LEVELS["light"])
     host, port, prefix = _parse_base_url(base_url)
 
@@ -207,6 +227,12 @@ def run_load(base_url: str, level: str, duration_s: float) -> dict:
             installed.append((sig, signal.signal(sig, _handle_stop)))
 
     threads = []
+    if progress:
+        pt = threading.Thread(target=_progress_writer,
+                              args=(progress, latencies, error_latencies, lock, stop_event),
+                              daemon=True)
+        pt.start()
+        threads.append(pt)
     for _ in range(workers):
         t = threading.Thread(
             target=_worker,
@@ -259,9 +285,11 @@ def main() -> None:
                     help="Gateway API base URL (reachable from inside the container)")
     ap.add_argument("--out", default="/tmp/load_stats.json",
                     help="Path to write the JSON stats output")
+    ap.add_argument("--progress", default=None,
+                    help="File the running request counts are written to")
     args = ap.parse_args()
 
-    stats = run_load(args.base_url, args.level, args.duration)
+    stats = run_load(args.base_url, args.level, args.duration, args.progress)
     with open(args.out, "w") as fh:
         json.dump(stats, fh, indent=2)
     print(json.dumps(stats, indent=2))
