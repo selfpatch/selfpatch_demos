@@ -179,10 +179,10 @@ curl http://localhost:8080/api/v1/health
 curl http://localhost:8080/api/v1/areas | jq '.items[] | {id, name}'
 
 # List all components (hardware/logical units)
-curl http://localhost:8080/api/v1/components | jq '.items[] | {id, name, area}'
+curl http://localhost:8080/api/v1/components | jq '.items[] | {id, name, description}'
 
 # List all apps (ROS 2 nodes)
-curl http://localhost:8080/api/v1/apps | jq '.items[] | {id, name, namespace}'
+curl http://localhost:8080/api/v1/apps | jq '.items[] | {id, name, component: .["x-medkit"].component_id, online: .["x-medkit"].is_online}'
 
 # Get specific app details
 curl http://localhost:8080/api/v1/apps/amcl | jq
@@ -193,19 +193,19 @@ curl http://localhost:8080/api/v1/apps/amcl | jq
 ```bash
 # Get LiDAR scan data
 curl http://localhost:8080/api/v1/apps/turtlebot3-node/data/scan | jq '{
-  angle_min: .angle_min,
-  angle_max: .angle_max,
-  sample_ranges: .ranges[:5]
+  angle_min: .data.angle_min,
+  angle_max: .data.angle_max,
+  sample_ranges: .data.ranges[:5]
 }'
 
 # Get odometry data
 curl http://localhost:8080/api/v1/apps/turtlebot3-node/data/odom | jq '{
-  position: .pose.pose.position,
-  orientation: .pose.pose.orientation
+  position: .data.pose.pose.position,
+  orientation: .data.pose.pose.orientation
 }'
 
 # List all data topics for an app
-curl http://localhost:8080/api/v1/apps/turtlebot3-node/data | jq
+curl http://localhost:8080/api/v1/apps/anomaly-detector/data | jq
 ```
 
 ### Fault Management
@@ -218,10 +218,10 @@ curl http://localhost:8080/api/v1/faults | jq
 curl http://localhost:8080/api/v1/areas/robot/faults | jq
 
 # Get fault details with environment data (includes snapshots)
-curl http://localhost:8080/api/v1/faults/NAVIGATION_GOAL_ABORTED | jq
+curl http://localhost:8080/api/v1/apps/anomaly-detector/faults/NAVIGATION_GOAL_ABORTED | jq
 
 # Clear a specific fault
-curl -X DELETE http://localhost:8080/api/v1/apps/diagnostic-bridge/faults/TURTLEBOT3_NODE
+curl -X DELETE http://localhost:8080/api/v1/apps/anomaly-detector/faults/NAVIGATION_GOAL_ABORTED
 ```
 
 ### Rosbag Snapshots (Bulk Data)
@@ -400,11 +400,13 @@ GATEWAY_URL=http://192.168.1.10:8080 ./inject-nav-failure.sh
 | `reset-navigation` | Cancel goals and reset AMCL |
 | `inject-localization-failure` | Inject AMCL localization failure |
 | `inject-nav-failure` | Inject navigation failure (unreachable goal) |
-| `restore-normal` | Reset parameters and clear faults |
+| `restore-normal` | Cancel goals, reset parameters, re-localize AMCL and clear faults |
 
 ## Triggers (Condition-Based Alerts)
 
-The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger that alerts on any new or updated faults reported by the anomaly detector (including navigation failures).
+The gateway supports condition-based triggers that fire when specific events occur, delivering notifications via Server-Sent Events (SSE). This demo creates a fault-monitoring trigger on the anomaly detector. It fires for the localization fault that `./inject-localization-failure.sh` causes (`LOCALIZATION_UNCERTAINTY`).
+
+Navigation goal faults (`NAVIGATION_GOAL_ABORTED`, `NAVIGATION_GOAL_CANCELED`), such as the one `./inject-nav-failure.sh` causes, do not fire this trigger. They still appear in `GET /api/v1/faults` and in `./check-faults.sh`.
 
 ### Setup
 
@@ -419,40 +421,40 @@ The gateway supports condition-based triggers that fire when specific events occ
 ./watch-triggers.sh
 
 # Terminal 2: Inject a fault - the trigger fires in Terminal 3!
-./inject-nav-failure.sh
+./inject-localization-failure.sh
 ```
 
 ### How It Works
 
-1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/anomaly_detector/triggers`:
-   - **Resource:** `/api/v1/apps/anomaly_detector/faults` (watches fault collection)
-   - **Condition:** `OnChange` (fires on any new or updated fault)
+1. `setup-triggers.sh` creates a trigger via `POST /api/v1/apps/anomaly-detector/triggers`:
+   - **Resource:** `/api/v1/apps/anomaly-detector/faults` (watches fault collection)
+   - **Condition:** `OnChange` (fires when the localization fault is reported or updated; navigation goal faults do not fire it)
    - **Multishot:** `true` (fires repeatedly, not just once)
    - **Lifetime:** 3600 seconds (auto-expires after 1 hour)
 2. `watch-triggers.sh` connects to the SSE event stream at the trigger's `event_source` URL
-3. When a fault is injected and detected by the gateway, the trigger fires and an SSE event is delivered
+3. When `./inject-localization-failure.sh` makes the anomaly detector report the localization fault, the trigger fires and an SSE event is delivered
 
 ### Manual API Usage
 
 ```bash
 # Create a trigger
-curl -X POST http://localhost:8080/api/v1/apps/anomaly_detector/triggers \
+curl -X POST http://localhost:8080/api/v1/apps/anomaly-detector/triggers \
   -H "Content-Type: application/json" \
   -d '{
-    "resource": "/api/v1/apps/anomaly_detector/faults",
+    "resource": "/api/v1/apps/anomaly-detector/faults",
     "trigger_condition": {"condition_type": "OnChange"},
     "multishot": true,
     "lifetime": 3600
   }' | jq
 
 # List triggers
-curl http://localhost:8080/api/v1/apps/anomaly_detector/triggers | jq
+curl http://localhost:8080/api/v1/apps/anomaly-detector/triggers | jq
 
 # Watch events (replace TRIGGER_ID)
-curl -N http://localhost:8080/api/v1/apps/anomaly_detector/triggers/TRIGGER_ID/events
+curl -N http://localhost:8080/api/v1/apps/anomaly-detector/triggers/TRIGGER_ID/events
 
 # Delete a trigger
-curl -X DELETE http://localhost:8080/api/v1/apps/anomaly_detector/triggers/TRIGGER_ID
+curl -X DELETE http://localhost:8080/api/v1/apps/anomaly-detector/triggers/TRIGGER_ID
 ```
 
 ## Fault Injection Scenarios
@@ -466,7 +468,7 @@ Faults are detected by `anomaly_detector` and reported directly to FaultManager.
 |--------|-----------|-------------|-----------------|
 | `inject-nav-failure.sh` | Navigation | Send goal to unreachable location | `NAVIGATION_GOAL_ABORTED` |
 | `inject-localization-failure.sh` | Localization | Reset AMCL with high uncertainty | `LOCALIZATION_UNCERTAINTY` |
-| `restore-normal.sh` | Recovery | Restore defaults and clear faults | - |
+| `restore-normal.sh` | Recovery | Restore defaults, re-localize AMCL and clear faults | - |
 
 ### Fault Injection Examples
 
@@ -493,9 +495,16 @@ curl http://localhost:8080/api/v1/faults | jq
 #### Restore Normal Operation
 
 ```bash
-# Clear all faults and restore default parameters
+# Cancel goals, restore default parameters, re-localize AMCL and clear all faults
 ./restore-normal.sh
 ```
+
+`restore-normal.sh` also recovers from `inject-localization-failure.sh`: it reads the
+robot's pose from the running Gazebo simulation and sets it on AMCL through
+`POST /api/v1/apps/amcl/operations/set_initial_pose/executions`, so the robot need not be
+at its spawn point. When the gateway refuses one of its writes, for example with 409 while
+another client holds a lock on the app, the script still runs its other steps, then fails
+and names the refused write.
 
 ### Fault Monitoring via API
 
@@ -591,13 +600,13 @@ demos/turtlebot3_integration/
 | `run-demo.sh` | Start the full demo (Docker) |
 | `stop-demo.sh` | Stop containers and cleanup |
 | `send-nav-goal.sh [x] [y] [yaw]` | Send navigation goal via SOVD API |
-| `check-entities.sh` | Explore SOVD entity hierarchy |
-| `check-faults.sh` | View active faults from gateway |
+| `check-entities.sh` | Explore SOVD entity hierarchy; prints a hint instead of scan values when the LiDAR has no data |
+| `check-faults.sh` | View active faults from gateway; exits 1 when the fault list cannot be read |
 | `nav-health-check.sh` | Check Nav2 stack health |
 | `reset-navigation.sh` | Cancel goals and reset AMCL |
 | `inject-nav-failure.sh` | Inject navigation failure (unreachable goal) |
 | `inject-localization-failure.sh` | Inject localization failure (AMCL reset) |
-| `restore-normal.sh` | Restore normal operation and clear faults |
+| `restore-normal.sh` | Restore normal operation, re-localize AMCL and clear faults |
 | `setup-triggers.sh` | Create OnChange fault trigger |
 | `watch-triggers.sh` | Watch trigger events via SSE stream |
 

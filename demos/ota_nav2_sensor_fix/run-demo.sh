@@ -1,11 +1,11 @@
 #!/bin/bash
 # OTA over SOVD - nav2 sensor-fix demo runner.
 # Brings up the gateway (with the dev-grade ota_update_plugin baked in) and
-# the FastAPI artifact server. The gateway image bundles a full TurtleBot3 +
-# Nav2 + headless Gazebo stack and runs foxglove_bridge on :8765, so the
-# demo is self-contained: broken_lidar publishes /scan with a phantom
-# obstacle that nav2 + a Foxglove 3D panel both react to. The OTA flow
-# swaps broken_lidar -> fixed_lidar and the phantom disappears.
+# the FastAPI artifact server. The gateway image bundles a full Robotnik
+# RB-Theron AMR + Nav2 + headless Gazebo stack and runs foxglove_bridge on
+# :8765, so the demo is self-contained: broken_lidar publishes /scan with a
+# phantom obstacle that nav2 + a Foxglove 3D panel both react to. The OTA
+# flow swaps broken_lidar -> fixed_lidar and the phantom disappears.
 
 set -eu
 
@@ -203,6 +203,6 @@ echo "    open http://localhost:5173 -> Connect -> ${GATEWAY_URL}"
 echo ""
 echo "  Foxglove (recommended for the 3D narrative):"
 echo "    Open connection -> Foxglove WebSocket -> ws://localhost:${OTA_FOXGLOVE_BRIDGE_PORT:-8765}"
-echo "    Add a 3D panel: TurtleBot3 in the world, /scan cone shows the phantom"
+echo "    Add a 3D panel: RB-Theron in the world, /scan cone shows the phantom"
 echo "    Install ros2_medkit_foxglove_extension (npm run local-install) for the"
 echo "    'ros2_medkit Updates' panel; set baseUrl to ${GATEWAY_URL}/api/v1"

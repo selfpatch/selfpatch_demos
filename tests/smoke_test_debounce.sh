@@ -24,11 +24,12 @@
 #      burst and why healing_threshold is 0.
 #
 # Faults are injected through the gateway's own SOVD operation endpoint for
-# /fault_manager/report_fault rather than by driving Gazebo. Navigation-driven
-# injection is too timing-dependent for CI (see the header of
-# smoke_test_turtlebot3.sh), and the contract under test is how the fault
-# manager resolves thresholds per source, which a report exercises exactly as
-# the detector does.
+# /fault_manager/report_fault rather than by driving Gazebo. The thresholds are
+# counts of FAILED and PASSED events per source, and only a direct report sends
+# an exact number of them; a navigation goal makes the detector report as often
+# as its state changes. The contract under test is how the fault manager
+# resolves thresholds per source, which a report exercises exactly as the
+# detector does.
 
 GATEWAY_URL="${1:-http://localhost:8080}"
 API_BASE="${GATEWAY_URL}/api/v1"

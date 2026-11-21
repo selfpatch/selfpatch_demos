@@ -25,12 +25,19 @@ fi
 echo "✓ Gateway is healthy"
 echo ""
 
-# Get all faults
+# Get all faults. A failed read is not "no faults": the gateway answers 503
+# while the fault manager is unavailable (for example during startup).
 echo "📋 Active Faults:"
-FAULTS=$(curl -s "${API_BASE}/faults")
+RESPONSE=$(curl -s -m 30 -w '\n%{http_code}' "${API_BASE}/faults") || true
+HTTP_CODE="${RESPONSE##*$'\n'}"
+FAULTS="${RESPONSE%$'\n'*}"
 
-# Check if there are any faults
-FAULT_COUNT=$(echo "$FAULTS" | jq '.items | length')
+if [ "$HTTP_CODE" != "200" ] || ! FAULT_COUNT=$(echo "$FAULTS" | jq -e '.items | arrays | length' 2>/dev/null); then
+    DETAIL=$(echo "$FAULTS" | jq -r '[.message, .parameters.details] | map(select(. != null)) | join(": ")' 2>/dev/null)
+    echo "❌ Could not read faults (HTTP ${HTTP_CODE:-000})${DETAIL:+: ${DETAIL}}"
+    echo "   The fault list is unknown, not empty. Retry in a few seconds."
+    exit 1
+fi
 
 if [ "$FAULT_COUNT" = "0" ]; then
     echo "   No active faults — system is healthy! ✅"
